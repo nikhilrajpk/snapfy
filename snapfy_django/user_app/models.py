@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 import uuid
+from django.core.cache import cache
 
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
@@ -9,6 +10,13 @@ class User(AbstractUser):
     followers = models.ManyToManyField("self", symmetrical=False, related_name="following", blank=True)
     is_blocked = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+    
+    def set_otp(self, otp):
+        cache.set(f'otp_{self.email}', otp, timeout=300)  # Store OTP for 5 minutes
+
+    def verify_otp(self, otp):
+        stored_otp = cache.get(f'otp_{self.email}')
+        return stored_otp == otp
 
     def __str__(self):
         return self.username

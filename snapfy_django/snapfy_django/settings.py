@@ -51,6 +51,9 @@ INSTALLED_APPS = [
     'chat_app',
     # Rest framework
     'rest_framework',
+    'rest_framework_simplejwt',
+    'django_redis',
+    'celery',
 ]
 
 MIDDLEWARE = [
@@ -163,3 +166,30 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME' : datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME' : datetime.timedelta(days=1),
 }
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
+
+
+
+# Tell celery about Redis - same URL as CACHES setting
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/1"
+
+CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/1"
+
+
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'snapfy2025@gmail.com'
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
