@@ -11,6 +11,7 @@ class User(AbstractUser):
     followers = models.ManyToManyField("self", symmetrical=False, related_name="following", blank=True)
     is_blocked = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+    email = models.EmailField(max_length=255, unique=True)
     
     def set_otp(self, otp):
         cache.set(f'otp_{self.email}', otp, timeout=300)  # Store OTP for 5 minutes
