@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, ChevronRight } from 'lucide-react';
 
@@ -129,10 +130,10 @@ const Login = () => {
             {/* Sign Up Link */}
             <p className="text-center text-white/70 mt-6">
               Don&apos;t have an account?{' '}
-              <a href="/signup" className="text-[#1E3932] hover:text-white hover:underline transition-colors relative group">
+              <Link to="/register" className="text-[#1E3932] hover:text-white hover:underline transition-colors relative group">
                 Sign up
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-white transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></span>
-              </a>
+              </Link>
             </p>
           </form>
         </div>

@@ -1,7 +1,8 @@
-
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Check, X, Camera, ChevronRight, Eye, EyeOff} from 'lucide-react';
+import {} from ''
 
 const SignUp = () => {
   const [passwordFocus, setPasswordFocus] = useState(false);
@@ -284,10 +285,10 @@ const SignUp = () => {
             {/* Login Link with enhanced hover effect */}
             <p className="text-center text-white/70 mt-6">
               Already have an account?{' '}
-              <a href="/login" className="text-[#1E3932] hover:text-white hover:underline transition-colors relative group">
+              <Link to="/" className="text-[#1E3932] hover:text-white hover:underline transition-colors relative group">
                 Log in
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-white transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></span>
-              </a>
+              </Link>
             </p>
           </form>
         </div>
