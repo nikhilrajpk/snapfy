@@ -2,11 +2,12 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 import uuid
 from django.core.cache import cache
+from cloudinary.models import CloudinaryField
 
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     bio = models.TextField(blank=True)
-    profile_picture = models.ImageField(upload_to="profile_pics/", blank=True, null=True)
+    profile_picture = CloudinaryField("profile_pics", blank=True, null=True)
     followers = models.ManyToManyField("self", symmetrical=False, related_name="following", blank=True)
     is_blocked = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)

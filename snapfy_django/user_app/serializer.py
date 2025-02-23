@@ -6,6 +6,7 @@ from django.contrib.auth import authenticate
 
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only = True)
+    profile_picture = serializers.ImageField(required=False)
     class Meta:
         model = User
         fields = ('password', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture')
@@ -31,12 +32,12 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        user = authenticate(email=data['username'], password=data['password'])
+        user = authenticate(username=data['username'], password=data['password'])
         if not user:
             raise serializers.ValidationError("Invalid credentials")
         if not user.is_verified:
             raise serializers.ValidationError("Email is not verified")
-        if not user.is_blocked:
+        if user.is_blocked:
             raise serializers.ValidationError("Your account is blocked by the admin")
         return {'user': user}
 

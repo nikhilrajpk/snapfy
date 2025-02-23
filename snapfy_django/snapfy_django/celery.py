@@ -4,10 +4,10 @@ from celery import Celery
 from django.conf import settings
 
 # Set the default Django settings module for the 'celery' program.
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'orderProduct.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'snapfy_django.settings')
 
-# app = Celery('orderProduct')
-app = Celery('orderProduct', broker=settings.CELERY_BROKER_URL)
+# app = Celery('snapfy_django')
+app = Celery('snapfy_django', broker=settings.CELERY_BROKER_URL)
 
 # Use solo mode on Windows
 if os.name == 'nt':  # Windows

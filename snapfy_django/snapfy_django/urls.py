@@ -8,11 +8,11 @@ from rest_framework_simplejwt.views import (
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('',include('user_app.urls')),
-    path('',include('story_app.urls')),
-    path('',include('post_app.urls')),
-    path('',include('notification_app.urls')),
-    path('',include('chat_app.urls')),
+    path('api/',include('user_app.urls')),
+    path('api/',include('story_app.urls')),
+    path('api/',include('post_app.urls')),
+    path('api/',include('notification_app.urls')),
+    path('api/',include('chat_app.urls')),
     
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

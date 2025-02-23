@@ -1,6 +1,6 @@
 from django.db import models
 from user_app.models import User
-
+from cloudinary.models import CloudinaryField
 
 
 class Hashtag(models.Model):
@@ -13,8 +13,7 @@ class Hashtag(models.Model):
 class Post(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="posts")
     caption = models.TextField()
-    image = models.ImageField(upload_to="posts/", blank=True, null=True)
-    video = models.FileField(upload_to="videos/", blank=True, null=True)
+    file = CloudinaryField('file', resource_type='auto')
     hashtags = models.ManyToManyField(Hashtag, blank=True)
     mentions = models.ManyToManyField(User, blank=True, related_name="mentioned_posts")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -37,7 +36,7 @@ class Like(models.Model):
 
 class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    post = models.ForeignKey("Post", on_delete=models.CASCADE)  # Assuming "Post" model exists
+    post = models.ForeignKey("Post", on_delete=models.CASCADE)  
     text = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
