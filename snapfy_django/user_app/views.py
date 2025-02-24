@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer
+from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer
 from .models import User, Report
 from .tasks import send_otp_email
 
@@ -38,6 +38,7 @@ class RegisterUserView(APIView):
         serializer = UserCreateSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
+            # Always send a new OTP when user tries to register again
             send_otp_email.delay(user.email)
             return Response({"message": "OTP sent to email."}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -60,6 +61,18 @@ class VerifyOTPView(APIView):
             except User.DoesNotExist:
                 return Response({"message": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class ResendOTPView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = ResendOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            send_otp_email(email)
+            return Response({"message": "OTP has been send to your email."}, status= status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
