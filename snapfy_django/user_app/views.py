@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer
 from .models import User, Report
@@ -30,6 +31,7 @@ class UserAPIViewSet(viewsets.ModelViewSet):
     
     
 class RegisterUserView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
     
     def post(self, request):
