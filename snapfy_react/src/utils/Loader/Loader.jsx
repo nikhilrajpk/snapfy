@@ -46,7 +46,7 @@ const LoadingSpinners = () => {
         <p className="mt-4 text-sm text-gray-600 text-center">Progress Bar</p>
       </div> */}
 
-      <style jsx>{`
+      <style >{`
         @keyframes loading {
           0% { transform: translateX(-100%) }
           50% { transform: translateX(100%) }

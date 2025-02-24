@@ -2,14 +2,31 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Check, X, Camera, ChevronRight, Eye, EyeOff} from 'lucide-react';
-import {} from ''
+import {userRegister} from '../API/authAPI'
+import { useNavigate } from 'react-router-dom';
+
+import Toast from '../utils/Toast/Toast';
+import Loader from '../utils/Loader/Loader'
 
 const SignUp = () => {
   const [passwordFocus, setPasswordFocus] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
+  const [toastmesg, setToast] = useState({ show: false, message: "", type: "" });
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+
+  const showToast = (message, type = "success") => {
+    setToast({ show: true, message, type });
+    
+    // Hide toast after 5 seconds
+    setTimeout(() => {
+      setToast(prev => ({ ...prev, show: false }));
+    }, 5000);
+  };
+
   const {
     register,
     handleSubmit,
@@ -19,9 +36,54 @@ const SignUp = () => {
 
   const password = watch('password', '');
 
-  const onSubmit = (data) => {
-    console.log(data);
+  const onSubmit = async (data) => {
+    const formData = new FormData();
+  
+    // Appending all fields
+    for (const key in data) {
+      if (key === "profile_picture") {
+        if (data.profile_picture[0]) {
+          formData.append(key, data.profile_picture[0]);
+        }
+      } else {
+        formData.append(key, data[key]);
+      }
+    }
+  
+    // Debugging: Check FormData content
+    // for (let [key, value] of formData.entries()) {
+    //   console.log(`key: ${key} => value:`, value);
+    // }
+  
+    try {
+      setLoading(true);
+      const response = await userRegister(formData);
+  
+      // Show success toast
+      showToast(response.message, 'success')
+      
+      // Delaying the navigation to show the toast 
+      setTimeout(() => {
+        navigate('/otp-verify')
+      }, 2000);
+
+    } catch (error) {
+      const errorResponse = error.response?.data; // DRF returns validation errors in `data`
+  
+      if (errorResponse) {
+        const errorMessages = Object.entries(errorResponse)
+          .map(([field, messages]) => `${field}: ${messages.join(", ")}`)
+          .join("\n");
+
+        showToast(errorMessages, "error");
+      } else {
+        showToast("An unexpected error occurred", "error");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
+  
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -37,9 +99,12 @@ const SignUp = () => {
   // Error message style class
   const errorMessageClass = "mt-1 text-red-300 bg-red-900/40 text-sm flex items-center px-2 py-1 rounded-md border border-red-500/20";
 
-  return (
+  return loading ? (<Loader/>) : (
     <div className="h-fit bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
-      {/* Previous code remains the same until the form inputs */}
+
+      {/* Show toast when state is active */}
+      {toastmesg.show && <Toast message={toastmesg.message} type={toastmesg.type} duration={5000} />}
+
       <div className="w-full max-w-md relative">
         {/* Decorative Elements */}
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
@@ -48,7 +113,7 @@ const SignUp = () => {
         {/* Logo/Brand */}
         <div className="text-center mb-8 relative">
           <div className="relative inline-block">
-            <h1 className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-[#FF6C37] font-['Orbitron'] transform hover:scale-105 transition-transform duration-200 cursor-default animate-pulse">
+            <h1 className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-[#FF6C37] font-['Orbitron'] transform hover:scale-105 transition-transform duration-600 cursor-default animate-pulse">
               SNAPFY
             </h1>
             <div className="absolute -top-4 -right-4 w-8 h-8 bg-[#FF6C37] rounded-full blur-xl opacity-50 animate-pulse"></div>
@@ -74,7 +139,7 @@ const SignUp = () => {
                 <input
                   type="file"
                   className="absolute inset-0 opacity-0 cursor-pointer"
-                  {...register('profile_image', {
+                  {...register('profile_picture', {
                     required: 'Profile image is required',
                     validate: {
                       format: (files) => {
@@ -93,9 +158,9 @@ const SignUp = () => {
                 />
               </div>
             </div>
-            {errors.profile_image && (
+            {errors.profile_picture && (
               <p className={errorMessageClass}>
-                <X size={16} className="mr-1" /> {errors.profile_image.message}
+                <X size={16} className="mr-1" /> {errors.profile_picture.message}
               </p>
             )}
 
@@ -120,7 +185,7 @@ const SignUp = () => {
                   </p>
                 )}
               </div>
-              {/* Email field with similar error styling */}
+              {/* Email field */}
               <div>
                 <input
                   type="email"
@@ -270,7 +335,16 @@ const SignUp = () => {
               </div>
             </div>
 
-            {/* Submit Button with enhanced hover effect */}
+            {/* Backend errors */}
+            {/* {backendErrors && (
+              backendErrors.map((err, i)=>(
+                  <p key={i} className={errorMessageClass}>
+                    <X size={16} className="mr-1" /> {errors.username.message}
+                  </p>
+              ))
+            )} */}
+
+            {/* Submit Button */}
             <button
               type="submit"
               className="w-full py-3 px-6 bg-[#1E3932] text-white rounded-xl hover:bg-[#198754] focus:outline-none focus:ring-2 focus:ring-[#FF6C37] focus:ring-offset-2 focus:ring-offset-[#1E3932] transform hover:scale-105 transition-all duration-200 flex items-center justify-center group relative overflow-hidden"
@@ -282,7 +356,7 @@ const SignUp = () => {
               <div className="absolute inset-0 bg-gradient-to-r from-[#198754] to-[#1E3932] opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
             </button>
 
-            {/* Login Link with enhanced hover effect */}
+            {/* Login Link */}
             <p className="text-center text-white/70 mt-6">
               Already have an account?{' '}
               <Link to="/" className="text-[#1E3932] hover:text-white hover:underline transition-colors relative group">
@@ -296,5 +370,4 @@ const SignUp = () => {
     </div>
   );
 };
-
 export default SignUp

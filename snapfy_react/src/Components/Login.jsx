@@ -2,8 +2,12 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, ChevronRight } from 'lucide-react';
+import {useDispatch} from 'react-redux';
+import {login} from '../redux/slices/userSlice'
 
 const Login = () => {
+  const dispatch = useDispatch()
+
   const [showPassword, setShowPassword] = useState(false);
   
   const {

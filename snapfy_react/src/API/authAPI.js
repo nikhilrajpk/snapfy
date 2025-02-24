@@ -1,12 +1,11 @@
 import axiosInstance from '../axiosInstance'
 
-export const register = async (formData) =>{
+export const userRegister = async (formData) =>{
     const response = await axiosInstance.post('register/', formData, {
         headers : {
             'Content-Type': 'multipart/form-data'
         }
     })
-
     return response.data
 }
 
