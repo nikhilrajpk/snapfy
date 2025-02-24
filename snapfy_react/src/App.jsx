@@ -15,7 +15,7 @@ function App() {
         <Routes>
           <Route path='/' element={<Login/>} ></Route>
           <Route path='/register' element={<SignUp/>} />
-          <Route path='/otp-verify' element={<OTPVerification/>} />
+          <Route path='/verify-otp' element={<OTPVerification/>} />
           <Route path='*' element={<Error404/>} />
         </Routes>
       </Router>

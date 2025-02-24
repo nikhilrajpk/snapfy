@@ -62,9 +62,10 @@ const SignUp = () => {
       // Show success toast
       showToast(response.message, 'success')
       
-      // Delaying the navigation to show the toast 
+      // Delaying the navigation to show the toast
       setTimeout(() => {
-        navigate('/otp-verify')
+        const email = formData.get('email') 
+        navigate(`/verify-otp/?email=${encodeURIComponent(email)}`)
       }, 2000);
 
     } catch (error) {

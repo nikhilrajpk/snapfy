@@ -9,6 +9,23 @@ export const userRegister = async (formData) =>{
     return response.data
 }
 
+export const verifyOTP = async (data) =>{
+    const response = await axiosInstance.post('verify-otp/', data, {
+        headers : {
+            "Content-Type" : 'application/json',
+        },
+    })
+    return response.data
+}
+
+export const resendOTP = async (data)=>{
+    const response = await axiosInstance.post('resend-otp/', data, {
+        headers : {
+            "Content-Type" : "application/json",
+        }
+    })
+    return response.data
+}
 
 export const userLogin = async (credential) =>{
     const response = await axiosInstance.post('login/', credential, {
