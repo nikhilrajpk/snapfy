@@ -1,17 +1,21 @@
 import React, { useEffect } from 'react';
 import { CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { hideToast } from '../../redux/slices/toastSlice';
+import { useDispatch } from 'react-redux';
 
 const Toast = ({ message, type = "success", duration = 3000 }) => {
+  const dispatch = useDispatch()
     
   const [show, setShow] = React.useState(true);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setShow(false);
+      dispatch(hideToast())
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration]);
+  }, [duration, dispatch]);
 
   if (!show) return null;
 

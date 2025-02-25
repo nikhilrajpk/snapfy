@@ -7,6 +7,7 @@ const SignUp = React.lazy(()=> import('../Components/SignUp'))
 const Login = React.lazy(()=> import('../Components/Login'))
 const OTPVerification = React.lazy(()=> import('../Components/OTPVerification'))
 const RouterPage = React.lazy(()=> import('./RouterPage'))
+const HomePage = React.lazy(()=> import('../Pages/HomePage'))
 
 const router = createBrowserRouter([
     {
@@ -34,6 +35,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={false}>
                         <OTPVerification/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/home',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <HomePage/>
                     </ProtectedRoute>
                 )
             },

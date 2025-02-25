@@ -1,0 +1,1 @@
+export const CLOUDINARY_ENDPOINT = `https://res.cloudinary.com/${String(import.meta.env.VITE_CLOUD_NAME)}/`

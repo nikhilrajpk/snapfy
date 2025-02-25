@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, ArrowLeft, RefreshCw } from 'lucide-react';
+import { useDispatch } from 'react-redux';
 
+import { showToast } from '../redux/slices/toastSlice';
 import { verifyOTP, resendOTP } from '../API/authAPI';
-import Toast from '../utils/Toast/Toast';
 
 const OTPVerification = () => {
   const [otp, setOtp] = useState(['', '', '', '']);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const [counter, setCounter] = useState(30);
   const [submitCount, setSubmitCount] = useState(0);
   const [resendCount, setResendCount] = useState(0);
@@ -16,15 +16,7 @@ const OTPVerification = () => {
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
   const navigate = useNavigate();
   const [searchParams] = useSearchParams()
-
-  const showToast = (message, type = "success") => {
-    setToast({ show: true, message, type });
-    
-    // Hide toast after 5 seconds
-    setTimeout(() => {
-      setToast(prev => ({ ...prev, show: false }));
-    }, 5000);
-  };
+  const dispatch = useDispatch()
 
   // memoizing the retrieval of email
   const email = useMemo(() => searchParams.get("email"), [searchParams]);
@@ -44,12 +36,11 @@ const OTPVerification = () => {
 
   const handleResendOTP = async () => {
     if (resendCount >= 3) {
-      showToast("Maximum resend attempts reached. Please try registering again.", "error");
+      // dispatching toast action
+      dispatch(showToast({message: "Maximum resend attempts reached. Please try registering again.", type: "error"}))
       
-      // Redirect to register page after 2 seconds
-      setTimeout(() => {
-        navigate('/register');
-      }, 2000);
+      // Redirect to register page 
+      navigate('/register');
       return;
     }
 
@@ -60,10 +51,12 @@ const OTPVerification = () => {
       setResendCount(prev => prev + 1);
       setCounter(30);
       setIsResendDisabled(true);
-      showToast("OTP resent successfully!", "success");
+      // dispatching toast action
+      dispatch(showToast({message: "OTP resent successfully!", type: "success"}))
 
     } catch (error) {
-      showToast(error.response?.data || "Failed to resend OTP", "error");
+      // dispatching toast action
+      dispatch(showToast({message: error.response?.data || "Failed to resend OTP", type: "error"}))
     } finally {
       setLoading(false);
     }
@@ -106,30 +99,28 @@ const OTPVerification = () => {
     const otpString = otp.join('');
     
     if (otpString.length !== 4) {
-      showToast("Please enter all 4 digits", "error");
+      // dispatching toast action
+      dispatch(showToast({message: "Please enter all 4 digits", type: "error"}))
       return;
     }
 
     // submit counter checking - 3 chances.
     setSubmitCount((prev)=> prev + 1)
     if (submitCount === 3){
-        showToast("You have reached your submit limit!", "error")
-
-        setTimeout(() => {
-            navigate('/register')
-        }, 4000);
-
+        // dispatching toast action
+        dispatch(showToast({message: "You have reached your submit limit!", type: "error"}))
+        
+        navigate('/register')
         return
     }
 
     setLoading(true);
     try {
       const response = await verifyOTP({"email":email, "otp":otpString})
-      showToast("OTP verified successfully!", "success");
-      
-      setTimeout(() => {
-        navigate('/');
-      }, 2000);
+      // dispatching toast action
+      dispatch(showToast({message: response?.message || "OTP verified successfully!", type: "success"}))
+
+      navigate('/');
       
     } catch (error) {
         const errorResponse = error.response?.data;
@@ -157,9 +148,9 @@ const OTPVerification = () => {
             }).join("\n");
             }
             
-            showToast(errorMessage || "Verification failed", "error");
+            dispatch(showToast({message: errorMessage || "Verification failed", type: "error"}))
         } else {
-            showToast("An unexpected error occurred", "error");
+            dispatch(showToast({message: "An unexpected error occured", type: "error"}))
         }
     } finally {
       setLoading(false);
@@ -168,8 +159,6 @@ const OTPVerification = () => {
 
   return (
     <div className="h-screen bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
-
-        {toast.show && <Toast message={toast.message} type={toast.type} />}
 
       <div className="w-full max-w-md relative">
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>

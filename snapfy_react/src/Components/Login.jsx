@@ -1,14 +1,30 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, ChevronRight } from 'lucide-react';
 import {useDispatch} from 'react-redux';
 import {login} from '../redux/slices/userSlice'
+import { userLogin } from '../API/authAPI';
+import Loader from '../utils/Loader/Loader'
+
+import { showToast } from '../redux/slices/toastSlice';
 
 const Login = () => {
   const dispatch = useDispatch()
-
+  const navigate = useNavigate()
+  
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false)
+  
+  // const [toast, setToast] = useState({ show: false, message:"", type:""})
+  // const showToast = (message, type = "success") => {
+  //   setToast({ show: true, message, type });
+    
+  //   // Hide toast after 3 seconds
+  //   setTimeout(() => {
+  //     setToast(prev => ({ ...prev, show: false }));
+  //   }, 6000);
+  // };
   
   const {
     register,
@@ -16,14 +32,63 @@ const Login = () => {
     formState: { errors }
   } = useForm();
 
-  const onSubmit = (data) => {
+  const onSubmit = async(data) => {
     console.log(data);
+    
+    try {
+      setLoading(true)
+      const response = await userLogin(data)
+
+      // Dispatching toast actions.
+      dispatch(showToast({message:response?.message||"user logged in", type:"success"}))
+
+      // state management for logged in user.
+      dispatch(login({user:response.user, token:response.access}))
+
+      setTimeout(() => {
+        navigate('/home')
+      }, 3200);
+
+    } catch (error) {
+      const errorResponse = error.response?.data;
+
+      if (errorResponse) {
+          let errorMessage = "";
+          
+          // Handle different formats of error responses
+          if (typeof errorResponse === 'string') {
+          // If response is just a string
+          errorMessage = errorResponse;
+          } else if (errorResponse.detail) {
+          // DRF often puts a single error in a 'detail' field
+          errorMessage = errorResponse.detail;
+          } else if (typeof errorResponse === 'object') {
+          // Handle object with field-level errors
+          errorMessage = Object.entries(errorResponse).map(([field, messages]) => {
+              if (Array.isArray(messages)) {
+              return `${field}: ${messages.join(", ")}`;
+              } else if (typeof messages === 'string') {
+              return `${field}: ${messages}`;
+              } else {
+              return `${field}: Invalid format`;
+              }
+          }).join("\n");
+          }
+          
+          dispatch(showToast({message:errorMessage || "Verification failed", type:"error"}))
+      } else {
+          dispatch(showToast({message: "An unexpected error occurred", type:"error"}))
+      }
+    }finally{
+      setLoading(false)
+    }
   };
 
   const errorMessageClass = "mt-1 text-red-300 bg-red-900/40 text-sm flex items-center px-2 py-1 rounded-md border border-red-500/20";
 
-  return (
+  return loading ? <Loader/> : (
     <div className="min-h-screen bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
+
       <div className="w-full max-w-md relative">
         {/* Decorative Elements */}
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>

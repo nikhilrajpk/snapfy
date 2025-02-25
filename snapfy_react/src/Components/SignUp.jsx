@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Check, X, Camera, ChevronRight, Eye, EyeOff} from 'lucide-react';
 import {userRegister} from '../API/authAPI'
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { showToast } from '../redux/slices/toastSlice';
+import { useDispatch } from 'react-redux';
 
-import Toast from '../utils/Toast/Toast';
 import Loader from '../utils/Loader/Loader'
 
 const SignUp = () => {
@@ -14,18 +14,9 @@ const SignUp = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [toastmesg, setToast] = useState({ show: false, message: "", type: "" });
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-
-  const showToast = (message, type = "success") => {
-    setToast({ show: true, message, type });
-    
-    // Hide toast after 5 seconds
-    setTimeout(() => {
-      setToast(prev => ({ ...prev, show: false }));
-    }, 5000);
-  };
+  const dispatch = useDispatch()
 
   const {
     register,
@@ -60,13 +51,11 @@ const SignUp = () => {
       const response = await userRegister(formData);
   
       // Show success toast
-      showToast(response.message, 'success')
+      dispatch(showToast({message:response?.message, type:'success'}))
       
-      // Delaying the navigation to show the toast
-      setTimeout(() => {
-        const email = formData.get('email') 
-        navigate(`/verify-otp/?email=${encodeURIComponent(email)}`)
-      }, 2000);
+      // navigation to verify email
+      const email = formData.get('email') 
+      navigate(`/verify-otp/?email=${encodeURIComponent(email)}`)
 
     } catch (error) {
       const errorResponse = error.response?.data; // DRF returns validation errors in `data`
@@ -76,9 +65,9 @@ const SignUp = () => {
           .map(([field, messages]) => `${field}: ${messages.join(", ")}`)
           .join("\n");
 
-        showToast(errorMessages, "error");
+        dispatch(showToast({message:errorMessages, type:'error'}))
       } else {
-        showToast("An unexpected error occurred", "error");
+        dispatch(showToast({message:"An unexpected error occurred", type:'error'}))
       }
     } finally {
       setLoading(false);
@@ -102,9 +91,6 @@ const SignUp = () => {
 
   return loading ? (<Loader/>) : (
     <div className="h-fit bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
-
-      {/* Show toast when state is active */}
-      {toastmesg.show && <Toast message={toastmesg.message} type={toastmesg.type} duration={5000} />}
 
       <div className="w-full max-w-md relative">
         {/* Decorative Elements */}

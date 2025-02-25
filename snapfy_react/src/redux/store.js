@@ -1,5 +1,6 @@
 import {configureStore} from '@reduxjs/toolkit'
 import userReducer from  './slices/userSlice'
+import toastReducer from './slices/toastSlice'
 
 // Load state from localStorage
 const loadState = () => {
@@ -32,6 +33,7 @@ const loadState = () => {
 export const store = configureStore({
     reducer : {
         user : userReducer,
+        toast : toastReducer
     },
     preloadedState: loadState(),
 })
