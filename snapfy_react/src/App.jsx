@@ -1,25 +1,12 @@
-import React, { Suspense } from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import React from 'react'
 
-const Error404 = React.lazy(()=> import('./ErrorPage/Error404'))
-const Loader = React.lazy(()=> import('./utils/Loader/Loader'))
-const SignUp = React.lazy(()=> import('./Components/SignUp'))
-const Login = React.lazy(()=> import('./Components/Login'))
-const OTPVerification = React.lazy(()=> import('./Components/OTPVerification'))
 
 function App() {
 
   return (
-    <Suspense fallback={<Loader/>}>
-      <Router>
-        <Routes>
-          <Route path='/' element={<Login/>} ></Route>
-          <Route path='/register' element={<SignUp/>} />
-          <Route path='/verify-otp' element={<OTPVerification/>} />
-          <Route path='*' element={<Error404/>} />
-        </Routes>
-      </Router>
-    </Suspense>
+    <>
+
+    </>
   )
 }
 
