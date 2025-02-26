@@ -4,8 +4,9 @@ import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, ChevronRight } from 'lucide-react';
 import {useDispatch} from 'react-redux';
 import {login} from '../../redux/slices/userSlice'
-import { userLogin } from '../../API/authAPI';
+import { userLogin, googleSignIn } from '../../API/authAPI';
 import Loader from '../../utils/Loader/Loader'
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 
 import { showToast } from '../../redux/slices/toastSlice';
 
@@ -73,9 +74,28 @@ const Login = () => {
     }
   };
 
+  const handleGoogleSuccess = async (response) => {
+    try {
+      
+      const res = await googleSignIn(response.credential); // Send ID token to backend
+     
+      dispatch(login({ user: res.user, token: res.access }));
+      dispatch(showToast({ message: res?.message || "User Logged In", type: "success" }));
+      navigate('/home');
+    } catch (error) {
+      dispatch(showToast({ message: "This Email already registered!", type: "error" }));
+    }
+  };
+
+  const handleGoogleError = () => {
+    dispatch(showToast({ message: "Google Login failed", type: "error" }));
+  };
+
   const errorMessageClass = "mt-1 text-red-300 bg-red-900/40 text-sm flex items-center px-2 py-1 rounded-md border border-red-500/20";
 
   return loading ? <Loader/> : (
+    <GoogleOAuthProvider clientId={String(import.meta.env.VITE_GOOGLE_CLIENT_ID)}>
+
     <div className="min-h-screen bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
 
       <div className="w-full max-w-md relative">
@@ -101,13 +121,17 @@ const Login = () => {
           <h2 className="text-2xl font-semibold text-white mb-8 text-center">Login to Your Account</h2>
           
           {/* Google Sign In Button */}
-          <button 
-            type="button"
-            className="w-full mb-6 py-3 px-6 bg-white rounded-xl hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-[#FF6C37] transform hover:scale-105 transition-all duration-200 flex items-center justify-center group"
-          >
-            <img src="/api/placeholder/20/20" alt="Google" className="w-5 h-5 mr-3" />
-            <span className="text-gray-800 font-medium">Continue with Google</span>
-          </button>
+          <div className="mb-6 hover:scale-105 duration-300">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={handleGoogleError}
+              useOneTap={false}
+              text="signin_with"
+              theme="filled_white"
+              shape="pill" 
+            />
+          </div>
+          
 
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
@@ -197,6 +221,7 @@ const Login = () => {
         </div>
       </div>
     </div>
+    </GoogleOAuthProvider>
   );
 };
 
