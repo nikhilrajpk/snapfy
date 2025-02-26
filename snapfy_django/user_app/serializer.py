@@ -69,6 +69,11 @@ class LoginSerializer(serializers.Serializer):
         return {'user': user}
 
 
+class ResetPasswordSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True)
+    email = serializers.EmailField()
+
+
 class UserSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only = True)
     is_staff = serializers.BooleanField(read_only = True)

@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer
+from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer
 from .models import User, Report
 from .tasks import send_otp_email
 
@@ -88,3 +89,22 @@ class LoginView(APIView):
                 "user": UserSerializer(user).data
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+    
+    def put(self, request):
+        serializers = ResetPasswordSerializer(data = request.data)
+        if serializers.is_valid():
+            email = serializers.validated_data['email']
+            password = serializers.validated_data['password']
+            
+            try:
+                user = User.objects.get(email=email)
+                user.set_password(password)
+                user.save()
+                return Response({"message": "Password changed successfully."}, status=status.HTTP_205_RESET_CONTENT)
+            except User.DoesNotExist:
+                return Response({"message": "User not found!"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(serializers.errors, status=status.HTTP_400_BAD_REQUEST)
