@@ -47,6 +47,15 @@ export const resetPassword = async (data)=> {
     return response.data
 }
 
+export const googleSignIn = async (token) =>{
+    const response = await axiosInstance.post('auth/google/signin/',{"token":token},{
+        headers : {
+            "Content-Type" : "application/json"
+        }
+    })
+    return response.data
+}
+
 export const updateProfile = async (userId, formData) =>{
     try{
         const response = await axiosInstance.put(`update-profile/${userId}/`, formData, {

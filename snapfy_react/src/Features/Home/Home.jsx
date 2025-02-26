@@ -6,15 +6,23 @@ import Logout from '../../Components/Auth/Logout'
 
 function Home() {
     const {user} = useSelector(state => state.user)
+    const googleImg = String(user?.profile_picture).startsWith('https') ? true : false;
   return (
     <div>Home : {user?.username}
         <HomeIcon color='gray' />
         <h1>
             {user?.id}
         </h1>
-        <img src={`${CLOUDINARY_ENDPOINT}${user?.profile_picture}`} alt='profile'
-            className='w-25 h-25 rounded-full' loading='lazy'
-        />
+        {
+          googleImg ? (
+            <img src={user?.profile_picture} alt='profile'
+              className='w-24 h-24 rounded-full' loading='lazy' />
+          ) : (
+            <img src={`${CLOUDINARY_ENDPOINT}${user?.profile_picture}`} alt='profile'
+                  className='w-24 h-24 rounded-full' loading='lazy'
+            />
+          )
+        }
         <Logout/>
     </div>
   )
