@@ -16,6 +16,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
         # Check if a verified user exists with this email
         if User.objects.filter(email=value, is_verified=True).exists():
             raise serializers.ValidationError("This email is already in use.")
+        
+        # Check if email is used by a Google Sign-In user
+        if User.objects.filter(email=value, is_google_signIn=True).exists():
+            raise serializers.ValidationError("This email is already registered via Google Sign-In. Please use Google to log in.")
+        
         return value
     
     def validate_username(self, value):

@@ -12,6 +12,7 @@ class User(AbstractUser):
     is_blocked = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
     email = models.EmailField(max_length=255)
+    is_google_signIn = models.BooleanField(default=False)
     
     class Meta:
         unique_together = [['username', 'is_verified'], ['email', 'is_verified']]

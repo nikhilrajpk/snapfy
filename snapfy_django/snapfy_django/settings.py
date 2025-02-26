@@ -244,3 +244,8 @@ cloudinary.config(
 )
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
+
+
+# Google Client ID
+GOOGLE_CLIENT_ID = env('GOOGLE_CLIENT_ID')
