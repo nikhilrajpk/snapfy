@@ -3,11 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, ChevronRight } from 'lucide-react';
 import {useDispatch} from 'react-redux';
-import {login} from '../redux/slices/userSlice'
-import { userLogin } from '../API/authAPI';
-import Loader from '../utils/Loader/Loader'
+import {login} from '../../redux/slices/userSlice'
+import { userLogin } from '../../API/authAPI';
+import Loader from '../../utils/Loader/Loader'
 
-import { showToast } from '../redux/slices/toastSlice';
+import { showToast } from '../../redux/slices/toastSlice';
 
 const Login = () => {
   const dispatch = useDispatch()
@@ -16,15 +16,6 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false)
   
-  // const [toast, setToast] = useState({ show: false, message:"", type:""})
-  // const showToast = (message, type = "success") => {
-  //   setToast({ show: true, message, type });
-    
-  //   // Hide toast after 3 seconds
-  //   setTimeout(() => {
-  //     setToast(prev => ({ ...prev, show: false }));
-  //   }, 6000);
-  // };
   
   const {
     register,
@@ -33,21 +24,19 @@ const Login = () => {
   } = useForm();
 
   const onSubmit = async(data) => {
-    console.log(data);
+    
     
     try {
       setLoading(true)
       const response = await userLogin(data)
-
+      
       // Dispatching toast actions.
-      dispatch(showToast({message:response?.message||"user logged in", type:"success"}))
+      dispatch(showToast({message:response?.message||"User logged in", type:"success"}))
 
       // state management for logged in user.
       dispatch(login({user:response.user, token:response.access}))
 
-      setTimeout(() => {
-        navigate('/home')
-      }, 3200);
+      navigate('/home')
 
     } catch (error) {
       const errorResponse = error.response?.data;
@@ -175,13 +164,13 @@ const Login = () => {
 
             {/* Forgot Password Link */}
             <div className="flex justify-end">
-              <a 
-                href="/forgot-password"
+              <Link 
+                to="/enter-email"
                 className="text-[#1E3932] hover:text-white transition-colors text-sm relative group"
               >
                 Forgot Password?
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-white transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></span>
-              </a>
+              </Link>
             </div>
 
             {/* Login Button */}

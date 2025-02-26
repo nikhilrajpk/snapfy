@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Check, X, Camera, ChevronRight, Eye, EyeOff} from 'lucide-react';
-import {userRegister} from '../API/authAPI'
+import {userRegister} from '../../API/authAPI'
 import { useNavigate, Link } from 'react-router-dom';
-import { showToast } from '../redux/slices/toastSlice';
+import { showToast } from '../../redux/slices/toastSlice';
 import { useDispatch } from 'react-redux';
 
-import Loader from '../utils/Loader/Loader'
+import Loader from '../../utils/Loader/Loader'
 
 const SignUp = () => {
   const [passwordFocus, setPasswordFocus] = useState(false);

@@ -3,11 +3,13 @@ import { createBrowserRouter} from 'react-router-dom'
 
 import ProtectedRoute from '../utils/ProtectedRoute/ProtectedRoute'
 const Error404 = React.lazy(()=> import('../ErrorPage/Error404'))
-const SignUp = React.lazy(()=> import('../Components/SignUp'))
-const Login = React.lazy(()=> import('../Components/Login'))
-const OTPVerification = React.lazy(()=> import('../Components/OTPVerification'))
+const SignUp = React.lazy(()=> import('../Components/Auth/SignUp'))
+const Login = React.lazy(()=> import('../Components/Auth/Login'))
+const OTPVerification = React.lazy(()=> import('../Components/Auth/OTPVerification'))
 const RouterPage = React.lazy(()=> import('./RouterPage'))
 const HomePage = React.lazy(()=> import('../Pages/HomePage'))
+const EmailInputComponent = React.lazy(()=> import('../Components/Auth/EmailInputComponent'))
+const ResetPassword = React.lazy(()=> import('../Components/Auth/ResetPassword'))
 
 const router = createBrowserRouter([
     {
@@ -46,6 +48,24 @@ const router = createBrowserRouter([
                     </ProtectedRoute>
                 )
             },
+            {
+                path: '/enter-email',
+                element: (
+                    <ProtectedRoute authentication={false}>
+                        <EmailInputComponent/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/reset-password',
+                element: (
+                    <ProtectedRoute authentication={false}>
+                        <ResetPassword/>
+                    </ProtectedRoute>
+                )
+            },
+
+
             {
                 path: '*',
                 element: (

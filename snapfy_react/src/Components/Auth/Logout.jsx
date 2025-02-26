@@ -1,9 +1,9 @@
 import { LogOut } from 'lucide-react'
-import { logout } from '../redux/slices/userSlice'
+import { logout } from '../../redux/slices/userSlice'
 import { useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 
-import { showToast } from '../redux/slices/toastSlice'
+import { showToast } from '../../redux/slices/toastSlice'
 
 function Logout() {
     const dispatch = useDispatch()

@@ -37,6 +37,16 @@ export const userLogin = async (credential) =>{
     return response.data
 }
 
+export const resetPassword = async (data)=> {
+    const response = await axiosInstance.put('reset-password/', data, {
+        headers : {
+            "Content-Type" : "application/json",
+        }
+    })
+
+    return response.data
+}
+
 export const updateProfile = async (userId, formData) =>{
     try{
         const response = await axiosInstance.put(`update-profile/${userId}/`, formData, {

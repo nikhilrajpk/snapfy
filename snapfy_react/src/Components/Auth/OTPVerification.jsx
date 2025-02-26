@@ -3,8 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, ArrowLeft, RefreshCw } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 
-import { showToast } from '../redux/slices/toastSlice';
-import { verifyOTP, resendOTP } from '../API/authAPI';
+import { showToast } from '../../redux/slices/toastSlice';
+import { verifyOTP, resendOTP } from '../../API/authAPI';
 
 const OTPVerification = () => {
   const [otp, setOtp] = useState(['', '', '', '']);
@@ -20,6 +20,7 @@ const OTPVerification = () => {
 
   // memoizing the retrieval of email
   const email = useMemo(() => searchParams.get("email"), [searchParams]);
+  const forgot_password = useMemo(() => searchParams.get("forgot_password", false), [searchParams]);
 
   // Counter effect
   useEffect(() => {
@@ -109,8 +110,11 @@ const OTPVerification = () => {
     if (submitCount === 3){
         // dispatching toast action
         dispatch(showToast({message: "You have reached your submit limit!", type: "error"}))
-        
-        navigate('/register')
+        if (forgot_password){
+          navigate('/')
+        }else{
+          navigate('/register')
+        }
         return
     }
 
@@ -120,7 +124,11 @@ const OTPVerification = () => {
       // dispatching toast action
       dispatch(showToast({message: response?.message || "OTP verified successfully!", type: "success"}))
 
-      navigate('/');
+      if(forgot_password){
+        navigate(`/reset-password?email=${encodeURIComponent(email)}`) 
+      }else{
+        navigate('/');
+      }
       
     } catch (error) {
         const errorResponse = error.response?.data;
@@ -237,7 +245,7 @@ const OTPVerification = () => {
               className="w-full flex items-center justify-center text-white/70 hover:text-white transition-colors group"
             >
               <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" />
-              Back to Registration
+              {forgot_password ? "Back to Login" : "Back to Registration"}
             </button>
           </form>
         </div>
