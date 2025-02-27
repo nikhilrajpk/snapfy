@@ -118,15 +118,13 @@ class GoogleLoginView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request):
-        
         token = request.data.get('token') # ID token from React
         if not token:
             return Response({"message": "Token is not provided!"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             # Verify the ID token
-            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_CLIENT_ID)
-
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_CLIENT_ID, clock_skew_in_seconds=5)
             email = idinfo.get("email")
             google_id = idinfo.get("sub")  # Unique Google ID
             first_name = idinfo.get("given_name", "")
