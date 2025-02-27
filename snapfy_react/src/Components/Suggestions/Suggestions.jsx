@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const SuggestionItem = ({ username, profileImage, mutualFollowers }) => {
   return (
@@ -10,7 +11,7 @@ const SuggestionItem = ({ username, profileImage, mutualFollowers }) => {
           className="w-10 h-10 rounded-full mr-3"
         />
         <div>
-          <div className="font-medium text-gray-800">{username}</div>
+          <Link to={'/user/:username'} className="font-medium text-gray-800">{username}</Link>
           <div className="text-xs text-gray-500">Followed by user2 + {mutualFollowers} others</div>
         </div>
       </div>
@@ -30,9 +31,6 @@ const Suggestions = () => {
     { id: 4, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 6 },
     { id: 5, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 2 },
     { id: 6, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 8 },
-    { id: 7, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 4 },
-    { id: 8, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 6 },
-    { id: 9, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 4 },
   ];
 
   return (

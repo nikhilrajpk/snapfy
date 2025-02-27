@@ -7,9 +7,12 @@ const SignUp = React.lazy(()=> import('../Components/Auth/SignUp'))
 const Login = React.lazy(()=> import('../Components/Auth/Login'))
 const OTPVerification = React.lazy(()=> import('../Components/Auth/OTPVerification'))
 const RouterPage = React.lazy(()=> import('./RouterPage'))
-const HomePage = React.lazy(()=> import('../Pages/HomePage'))
 const EmailInputComponent = React.lazy(()=> import('../Components/Auth/EmailInputComponent'))
 const ResetPassword = React.lazy(()=> import('../Components/Auth/ResetPassword'))
+const HomePage = React.lazy(()=> import('../Pages/HomePage'))
+const UserProfile = React.lazy(()=> import('../Pages/UserProfilePage'))
+const OtherUsersProfile = React.lazy(()=> import('../Pages/ViewOtherUserPage'))
+const EditUserProfile = React.lazy(()=> import('../Components/UserProfile/EditProfile'))
 
 const router = createBrowserRouter([
     {
@@ -41,14 +44,6 @@ const router = createBrowserRouter([
                 )
             },
             {
-                path: '/home',
-                element: (
-                    <ProtectedRoute authentication={true}>
-                        <HomePage/>
-                    </ProtectedRoute>
-                )
-            },
-            {
                 path: '/enter-email',
                 element: (
                     <ProtectedRoute authentication={false}>
@@ -64,7 +59,39 @@ const router = createBrowserRouter([
                     </ProtectedRoute>
                 )
             },
-
+            
+            {
+                path: '/home',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <HomePage/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/:username',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <UserProfile/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/user/:username',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <OtherUsersProfile/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/:username/edit-profile',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <EditUserProfile/>
+                    </ProtectedRoute>
+                )
+            },
 
             {
                 path: '*',

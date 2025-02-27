@@ -76,14 +76,41 @@ const Login = () => {
 
   const handleGoogleSuccess = async (response) => {
     try {
-      
       const res = await googleSignIn(response.credential); // Send ID token to backend
-     
+    
       dispatch(login({ user: res.user, token: res.access }));
       dispatch(showToast({ message: res?.message || "User Logged In", type: "success" }));
       navigate('/home');
     } catch (error) {
-      dispatch(showToast({ message: "This Email already registered!", type: "error" }));
+      const errorResponse = error.response?.data;
+
+      if (errorResponse) {
+          let errorMessage = "";
+          
+          // Handle different formats of error responses
+          if (typeof errorResponse === 'string') {
+          // If response is just a string
+          errorMessage = errorResponse;
+          } else if (errorResponse.detail) {
+          // DRF often puts a single error in a 'detail' field
+          errorMessage = errorResponse.detail;
+          } else if (typeof errorResponse === 'object') {
+          // Handle object with field-level errors
+          errorMessage = Object.entries(errorResponse).map(([field, messages]) => {
+              if (Array.isArray(messages)) {
+              return `${field}: ${messages.join(", ")}`;
+              } else if (typeof messages === 'string') {
+              return `${field}: ${messages}`;
+              } else {
+              return `${field}: Invalid format`;
+              }
+          }).join("\n");
+          }
+          
+          dispatch(showToast({message:errorMessage || "This email already exist", type:"error"}))
+      } else {
+          dispatch(showToast({message: "An unexpected error occurred", type:"error"}))
+      }
     }
   };
 
