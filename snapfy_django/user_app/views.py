@@ -20,15 +20,9 @@ from .tasks import send_otp_email
 class UserAPIViewSet(viewsets.ModelViewSet):
     queryset = User.objects.prefetch_related('following').order_by('-date_joined')
     serializer_class = UserSerializer
-    
-    def get_permissions(self):
-        self.permission_classes = [IsAuthenticated]
-        if self.action == 'create':
-            self.permission_classes = [AllowAny]
-        return super().get_permissions()
-    
-    
-    # we want users can view and update their own orders and admin can do in all orders.
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'username'
+    # we want users can view and update their own profile and admin can do in all users.
     def get_queryset(self):
         qs = super().get_queryset()
         if not self.request.user.is_staff:
