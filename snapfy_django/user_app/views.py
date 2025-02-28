@@ -22,12 +22,12 @@ class UserAPIViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'username'
-    # we want users can view and update their own profile and admin can do in all users.
+    
     def get_queryset(self):
-        qs = super().get_queryset()
-        if not self.request.user.is_staff:
-            qs = qs.filter(username=self.request.user.username)
-        return qs
+        # Allow all users to be fetched for GET, restrict updates for non-staff
+        if self.action in ['update', 'partial_update', 'destroy'] and not self.request.user.is_staff:
+            return self.queryset.filter(username=self.request.user.username)
+        return self.queryset
     
     
 class RegisterUserView(APIView):
