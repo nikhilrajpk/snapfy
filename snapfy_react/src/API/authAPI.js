@@ -56,16 +56,16 @@ export const googleSignIn = async (token) =>{
     return response.data
 }
 
-export const updateProfile = async (userId, formData) =>{
-    try{
-        const response = await axiosInstance.put(`update-profile/${userId}/`, formData, {
-            headers : {
-                'Content-Type': 'multipart/form-data'
-            }
-        })
-
-        return response.data
-    }catch(err){
+export const updateProfile = async (formData) =>{
+    try {
+        const response = await axiosInstance.put('profile/update/', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data', // Ensure this is set
+          },
+        });
+        // console.log("Update profile response:", response.data); // Debug response
+        return response.data;
+    } catch (err) {
         console.error('Error updating user profile:', err.response?.data || err);
         throw err;
     }

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Navbar from '../Navbar/Navbar';
 import Logo from '../Logo/Logo';
 import { Link } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 
 // Main Profile Page component that handles both logged-in and other user profiles
 const ProfilePage = ({ isLoggedInUser, userData }) => {
@@ -30,7 +31,7 @@ const ProfilePage = ({ isLoggedInUser, userData }) => {
 // Component for logged-in user's profile
 const LoggedInUserProfile = ({ userData }) => {
   const [activeTab, setActiveTab] = useState('POSTS');
-  
+  const {user} = useSelector(state=> state.user)
   return (
     <div className="w-full">
       <div className="flex items-center mb-6">
@@ -41,7 +42,7 @@ const LoggedInUserProfile = ({ userData }) => {
         <div className="flex-grow">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold">{userData.username}</h2>
-            <Link to={'/:username/edit-profile'} className="bg-gray-800 text-white px-4 py-1 rounded-full text-sm">
+            <Link to={`/${user.username}/profile/update`} className="bg-gray-800 text-white px-4 py-1 rounded-full text-sm">
               Edit Profile
             </Link>
           </div>

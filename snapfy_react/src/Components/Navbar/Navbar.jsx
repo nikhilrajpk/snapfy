@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/userSlice';
 import { showToast } from '../../redux/slices/toastSlice';
 import { Home, Compass, Film, MessageCircle, Bell, PlusCircle, User, Moon, LogOut } from 'lucide-react';
@@ -19,7 +19,7 @@ const NavItem = ({ icon: Icon, label, active, onclick }) => {
 const Navbar = () => {
   const navigate = useNavigate()
   const dispatch = useDispatch()
-
+  const {user} = useSelector(state=> state.user)
   const handleLogout = ()=>{
       dispatch(logout())
 
@@ -42,7 +42,7 @@ const Navbar = () => {
       <NavItem icon={MessageCircle} label="MESSAGES" />
       <NavItem icon={Bell} label="NOTIFICATIONS" />
       <NavItem icon={PlusCircle} label="CREATE" />
-      <NavItem icon={User} label="PROFILE" onclick={()=> handleNavigate('/:username')} />
+      <NavItem icon={User} label="PROFILE" onclick={()=> handleNavigate(`/${user.username}`)} />
       <NavItem icon={Moon} label="THEME MODE" />
       <NavItem icon={LogOut} label="LOGOUT" onclick={handleLogout} />
     </nav>

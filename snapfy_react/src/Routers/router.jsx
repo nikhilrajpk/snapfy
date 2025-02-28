@@ -85,7 +85,7 @@ const router = createBrowserRouter([
                 )
             },
             {
-                path: '/:username/edit-profile',
+                path: '/:username/profile/update',
                 element: (
                     <ProtectedRoute authentication={true}>
                         <EditUserProfile/>
