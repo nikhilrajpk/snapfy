@@ -82,15 +82,16 @@ export const getAllUser = async () =>{
     }
 }
 
-export const getUser = async (username) =>{
-    try{
-        const response = axiosInstance.get(`users/${username}/`)
-        return response.data
-    }catch(error){
-        console.error('Error on retrieving user data : ', error.response?.data || error)
-        throw error
+export const getUser = async (username) => {
+    try {
+      const response = await axiosInstance.get(`users/${username}/`);
+      console.log("getUser response:", response.data); // Debug log
+      return response.data; // Ensure data is returned
+    } catch (error) {
+      console.error('Error on retrieving user data: ', error.response?.data || error);
+      throw error; // Propagate error for handling
     }
-}
+  };
 
 // export const removeUser = async (userId) =>{
 //     try {
