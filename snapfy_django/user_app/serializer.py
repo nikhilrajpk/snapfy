@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 from .models import User, Report
 from django.contrib.auth import authenticate
@@ -52,6 +53,34 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user.save()
         return user  
 
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.ImageField(required=False, allow_null=True)
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'first_name', 'last_name', 'bio', 'profile_picture')
+        
+    def validate_username(self, value):
+        current_user = self.instance
+        if current_user and User.objects.filter(~Q(id=current_user.id) & Q(username=value)).exists():
+            raise serializers.ValidationError("This username is already in use.")
+        return value
+    
+    def validate_profile_picture(self, value):
+        # If value is a string (existing URL), skip file validation
+        if isinstance(value, str):
+            return value
+        # If value is a file, validate it
+        if value:
+            if value.content_type not in ['image/jpeg', 'image/png', 'image/jpg']:
+                raise serializers.ValidationError("Please upload a JPG or PNG file")
+        return value
+    
+    def update(self, instance, validated_data):
+        # If profile_picture is a string (existing URL), remove it from validated_data to preserve the current image
+        if 'profile_picture' in validated_data and isinstance(validated_data['profile_picture'], str):
+            validated_data.pop('profile_picture')
+        return super().update(instance, validated_data)
+
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.CharField()
@@ -86,5 +115,5 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ( 'id', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-            'followers', 'following', 'is_blocked', 'is_verified'
+            'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn'
         )

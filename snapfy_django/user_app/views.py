@@ -8,10 +8,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
-import requests
+import requests, socket
+from django.http import HttpResponse
 from django.conf import settings
 
-from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer
+from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer, UserProfileUpdateSerializer
 from .models import User, Report
 from .tasks import send_otp_email
 
@@ -161,3 +162,56 @@ class GoogleLoginView(APIView):
             "access": str(refresh.access_token),
             "user": UserSerializer(user).data
         }, status=status.HTTP_200_OK)
+        
+        
+        
+class UpdateUserProfileView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request):
+        user = request.user
+        print("Received request data:", dict(request.data))  # Debug incoming data
+        serializer = UserProfileUpdateSerializer(instance=user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            print("Updated user data:", serializer.data)  # Debug updated data
+            return Response({
+                "message" : "Profile updated successfully",
+                "user" : UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+        print("Serializer errors:", serializer.errors)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class ProxyProfilePictureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        image_url = str(request.user.profile_picture)  # Ensure string
+        if not image_url:
+            print("No profile picture URL found")
+            return HttpResponse(status=404)
+
+        # Ensure full URL if truncated
+        if image_url.startswith('https://lh3.googleusercontent') and 's96-c' not in image_url:
+            image_url = "https://lh3.googleusercontent.com/a/ACg8ocJhgQ0gmNBdkbwGNGb-wGr9Y2owXwvJimBxo8h2XA_KTRhUMw=s96-c"
+            print("Corrected truncated URL to:", image_url)
+
+        try:
+            print("Full image URL:", image_url)
+            hostname = 'lh3.googleusercontent.com'
+            resolved = socket.getaddrinfo(hostname, 443)
+            print("DNS resolution succeeded:", resolved)
+
+            print("Fetching image from:", image_url)
+            response = requests.get(image_url, stream=True, timeout=10)
+            response.raise_for_status()
+            print("Image fetched successfully, status:", response.status_code, "Content length:", len(response.content))
+            return HttpResponse(response.content, content_type=response.headers['Content-Type'])
+        except socket.gaierror as e:
+            print(f"DNS resolution failed: {e}")
+            return HttpResponse(status=502)
+        except requests.RequestException as e:
+            print(f"Failed to fetch image: {e}")
+            return HttpResponse(status=502)
