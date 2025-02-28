@@ -1,65 +1,100 @@
-import React, { useState } from 'react';
-import Navbar from '../Navbar/Navbar';
-import Logo from '../Logo/Logo';
-import { Link } from 'react-router-dom';
+import React, { useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
+import { Link } from 'react-router-dom';
+import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive } from 'lucide-react';
 
-// Main Profile Page component that handles both logged-in and other user profiles
+import Logo from '../Logo/Logo'
+import Navbar from '../Navbar/Navbar'
+
 const ProfilePage = ({ isLoggedInUser, userData }) => {
   return (
-    <div className="flex">
-      {/* Placeholder for Navbar component */}
-      {/* Left sidebar - 2 columns */}
-      <div className="lg:col-span-2">
-            <div className="sticky top-6">
-              <Logo />
-              <Navbar />
-            </div>
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Sidebar with Logo and Navbar */}
+      <div className="w-64 border-r border-gray-200 hidden lg:block">
+        <div className="sticky top-0 p-4 h-screen">
+          <div className="mb-8 pl-2">
+            <Logo />
+          </div>
+          <Navbar />
+        </div>
       </div>
       
-      <div className="w-full max-w-3xl mx-auto bg-white rounded-lg p-6">
-        {isLoggedInUser ? (
-          <LoggedInUserProfile userData={userData} />
-        ) : (
-          <OtherUserProfile userData={userData} />
-        )}
+      {/* Main content */}
+      <div className="flex-1 max-w-4xl mx-auto p-6">
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          {/* Profile header with background image */}
+          <div className="h-40 bg-gradient-to-r from-orange-100 to-amber-100 relative"></div>
+          
+          <div className="px-6 pb-6 relative">
+            {isLoggedInUser ? (
+              <LoggedInUserProfile userData={userData} />
+            ) : (
+              <OtherUserProfile userData={userData} />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-// Component for logged-in user's profile
 const LoggedInUserProfile = ({ userData }) => {
   const [activeTab, setActiveTab] = useState('POSTS');
-  const {user} = useSelector(state=> state.user)
+  const { user } = useSelector(state => state.user);
+  const [imageError, setImageError] = useState(false);
+
+  const handleImageError = useCallback(() => {
+    setImageError(true);
+  }, []);
+
+  const fullName = `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim();
+
   return (
     <div className="w-full">
-      <div className="flex items-center mb-6">
-        <div className="w-20 h-20 rounded-full overflow-hidden mr-4">
-          <img src={userData.profileImage} alt="Profile" className="w-full h-full object-cover" />
+      {/* Profile image and actions row */}
+      <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
+        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md">
+          <img 
+            src={imageError ? '/default-profile.png' : userData?.profileImage}
+            alt="Profile" 
+            loading="lazy" 
+            className="w-full h-full object-cover" 
+            onError={handleImageError}
+          />
         </div>
         
-        <div className="flex-grow">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">{userData.username}</h2>
-            <Link to={`/${user.username}/profile/update`} className="bg-gray-800 text-white px-4 py-1 rounded-full text-sm">
+        <div className="flex-grow mt-4 md:mt-0 md:ml-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold">{userData?.username}</h1>
+              {fullName && <h2 className="text-lg text-gray-700 font-medium">{fullName}</h2>}
+            </div>
+            
+            <Link 
+              to={`/${user?.username}/profile/update`} 
+              className="mt-3 md:mt-0 bg-gradient-to-r from-[#1E3932] to-[#198754] hover:from-[#198754] hover:to-[#1E3932] duration-500 hover:scale-110 text-white px-6 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center"
+            >
               Edit Profile
             </Link>
           </div>
         </div>
       </div>
+
+      {/* Bio section */}
+      <div className="mb-8">
+        <p className="text-gray-800 whitespace-pre-line">
+          {userData?.bio || "No bio available"}
+        </p>
+      </div>
       
-      <ProfileStats 
-        posts={userData.postCount} 
-        followers={userData.followerCount} 
-        following={userData.followingCount} 
+      {/* Stats cards */}
+      <ProfileStatsCards 
+        posts={userData?.postCount} 
+        followers={userData?.followerCount} 
+        following={userData?.followingCount} 
       />
       
-      <ProfileBio 
-        bioText={userData.bio}
-        websiteUrl={userData.website}
-      />
-      
+      {/* Content tabs */}
       <ProfileContentTabs 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -67,48 +102,73 @@ const LoggedInUserProfile = ({ userData }) => {
         showSaved={true}
       />
       
-      <ProfileContent posts={userData.posts} type={activeTab.toLowerCase()} />
+      <ProfileContent posts={userData?.posts} type={activeTab.toLowerCase()} />
     </div>
   );
 };
 
-// Component for other users' profiles
 const OtherUserProfile = ({ userData }) => {
   const [activeTab, setActiveTab] = useState('POSTS');
-  
+  const [imageError, setImageError] = useState(false);
+
+  const handleImageError = useCallback(() => {
+    setImageError(true);
+  }, []);
+
+  const fullName = `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim();
+
   return (
     <div className="w-full">
-      <div className="flex items-center mb-6">
-        <div className="w-20 h-20 rounded-full overflow-hidden mr-4">
-          <img src={userData.profileImage} alt="Profile" className="w-full h-full object-cover" />
+      {/* Profile image and actions row */}
+      <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
+        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md">
+          <img 
+            src={imageError ? '/default-profile.png' : userData?.profileImage}
+            alt="Profile" 
+            loading="lazy" 
+            className="w-full h-full object-cover" 
+            onError={handleImageError}
+          />
         </div>
         
-        <div className="flex-grow">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">{userData.username}</h2>
-            <div className="flex gap-2">
-              <button className="bg-gray-800 text-white px-4 py-1 rounded-full text-sm">
-                Block
+        <div className="flex-grow mt-4 md:mt-0 md:ml-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold">{userData?.username}</h1>
+              {fullName && <h2 className="text-lg text-gray-700 font-medium">{fullName}</h2>}
+            </div>
+            
+            <div className="flex gap-2 mt-3 md:mt-0">
+              <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center">
+                <UserPlus size={16} className="mr-1" />
+                Follow
               </button>
-              <button className="bg-gray-800 text-white px-4 py-1 rounded-full text-sm">
-                Report
+              <button className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
+                <Flag size={16} />
+              </button>
+              <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
+                <Shield size={16} />
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Bio section */}
+      <div className="mb-8">
+        <p className="text-gray-800 whitespace-pre-line">
+          {userData?.bio || "No bio available"}
+        </p>
+      </div>
       
-      <ProfileStats 
-        posts={userData.postCount} 
-        followers={userData.followerCount} 
-        following={userData.followingCount} 
+      {/* Stats cards */}
+      <ProfileStatsCards 
+        posts={userData?.postCount} 
+        followers={userData?.followerCount} 
+        following={userData?.followingCount} 
       />
       
-      <ProfileBio 
-        bioText={userData.bio}
-        websiteUrl={userData.website}
-      />
-      
+      {/* Content tabs */}
       <ProfileContentTabs 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -116,101 +176,84 @@ const OtherUserProfile = ({ userData }) => {
         showSaved={false}
       />
       
-      <ProfileContent posts={userData.posts} type={activeTab.toLowerCase()} />
+      <ProfileContent posts={userData?.posts} type={activeTab.toLowerCase()} />
     </div>
   );
 };
 
-// Reusable component for profile stats
-const ProfileStats = ({ posts, followers, following }) => {
-  return (
-    <div className="flex justify-around py-4">
-      <div className="text-center">
-        <p className="font-bold">POSTS</p>
-        <p className="text-lg">{posts}</p>
-      </div>
-      <div className="text-center">
-        <p className="font-bold">FOLLOWERS</p>
-        <p className="text-lg">{followers}</p>
-      </div>
-      <div className="text-center">
-        <p className="font-bold">FOLLOWING</p>
-        <p className="text-lg">{following}</p>
-      </div>
+const ProfileStatsCards = ({ posts, followers, following }) => (
+  <div className="grid grid-cols-3 gap-4 mb-8">
+    <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-4 text-center shadow-sm">
+      <p className="text-gray-600 text-sm font-medium mb-1">POSTS</p>
+      <p className="text-2xl font-bold text-gray-800">{posts || 0}</p>
     </div>
-  );
-};
-
-// Reusable component for profile bio
-const ProfileBio = ({ bioText, websiteUrl }) => {
-  return (
-    <div className="mb-6">
-      <p className="text-gray-800">Bio: {bioText}</p>
-      <a href={websiteUrl} className="text-blue-500 hover:underline">{websiteUrl}</a>
+    <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-4 text-center shadow-sm">
+      <p className="text-gray-600 text-sm font-medium mb-1">FOLLOWERS</p>
+      <p className="text-2xl font-bold text-gray-800">{followers || 0}</p>
     </div>
-  );
-};
+    <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-4 text-center shadow-sm">
+      <p className="text-gray-600 text-sm font-medium mb-1">FOLLOWING</p>
+      <p className="text-2xl font-bold text-gray-800">{following || 0}</p>
+    </div>
+  </div>
+);
 
-// Reusable component for profile content tabs
 const ProfileContentTabs = ({ activeTab, setActiveTab, showSaved, showArchived }) => {
+  const tabs = [
+    { label: 'POSTS', value: 'POSTS', icon: <Grid size={18} /> },
+    { label: 'SHORTS', value: 'SHORTS', icon: <PlaySquare size={18} /> },
+    ...(showSaved ? [{ label: 'SAVED', value: 'SAVED', icon: <Bookmark size={18} /> }] : []),
+    ...(showArchived ? [{ label: 'ARCHIVED', value: 'ARCHIVED', icon: <Archive size={18} /> }] : []),
+  ];
+
   return (
-    <div className="border-t border-b py-2 mb-4">
+    <div className="border-t border-b border-gray-200 mb-6">
       <div className="flex">
-        <TabButton 
-          label="POSTS" 
-          isActive={activeTab === 'POSTS'} 
-          onClick={() => setActiveTab('POSTS')} 
-        />
-        <TabButton 
-          label="SHORTS" 
-          isActive={activeTab === 'SHORTS'} 
-          onClick={() => setActiveTab('SHORTS')} 
-        />
-        {showSaved && (
-          <TabButton 
-            label="SAVED" 
-            isActive={activeTab === 'SAVED'} 
-            onClick={() => setActiveTab('SAVED')} 
+        {tabs.map(tab => (
+          <TabButton
+            key={tab.value}
+            label={tab.label}
+            icon={tab.icon}
+            isActive={activeTab === tab.value}
+            onClick={() => setActiveTab(tab.value)}
           />
-        )}
-        {showArchived && (
-          <TabButton 
-            label="ARCHIVED" 
-            isActive={activeTab === 'ARCHIVED'} 
-            onClick={() => setActiveTab('ARCHIVED')} 
-          />
-        )}
+        ))}
       </div>
     </div>
   );
 };
 
-// Tab button component for the content tabs
-const TabButton = ({ label, isActive, onClick }) => {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 text-center py-2 font-medium ${
-        isActive 
-          ? 'border-b-2 border-black' 
-          : 'text-gray-500 hover:text-gray-800'
-      }`}
-    >
-      {label}
-    </button>
-  );
-};
+const TabButton = ({ label, icon, isActive, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`flex-1 flex items-center justify-center py-3 font-medium transition duration-200 ${
+      isActive 
+        ? 'border-b-2 border-orange-500 text-orange-500' 
+        : 'text-gray-500 hover:text-gray-800'
+    }`}
+  >
+    {icon && <span className="mr-2">{icon}</span>}
+    {label}
+  </button>
+);
 
-// Component to display the profile content based on active tab
 const ProfileContent = ({ posts, type }) => {
+  const [postErrors, setPostErrors] = useState(new Set());
+
+  const handlePostError = useCallback((index) => {
+    setPostErrors(prev => new Set(prev).add(index));
+  }, []);
+
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {posts.map((post, index) => (
-        <div key={index} className="aspect-square overflow-hidden rounded">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      {(posts || []).map((post, index) => (
+        <div key={index} className="aspect-square overflow-hidden rounded-xl shadow-sm hover:shadow-md transition duration-200 group cursor-pointer">
           <img 
-            src={post.imageUrl} 
+            src={postErrors.has(index) ? '/default-post.png' : post.imageUrl}
             alt={`Post ${index + 1}`} 
-            className="w-full h-full object-cover" 
+            className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" 
+            loading="lazy"
+            onError={() => handlePostError(index)}
           />
         </div>
       ))}
@@ -218,5 +261,4 @@ const ProfileContent = ({ posts, type }) => {
   );
 };
 
-
-export default ProfilePage;
+export default React.memo(ProfilePage);

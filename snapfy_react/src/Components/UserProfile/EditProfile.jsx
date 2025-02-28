@@ -27,8 +27,8 @@ const EditProfile = () => {
   } = useForm();
 
   useEffect(() => {
-    console.log("User from Redux:", user);
-    console.log("Token from Redux:", token);
+    // console.log("User from Redux:", user);
+    // console.log("Token from Redux:", token);
     if (user && user.profile_picture && !selectedFile) {
       const fetchProfilePicture = async () => {
         try {
@@ -37,12 +37,12 @@ const EditProfile = () => {
               responseType: 'blob',
             });
             const imageUrl = URL.createObjectURL(response.data);
-            console.log("Setting previewImage from proxy:", imageUrl);
+            // console.log("Setting previewImage from proxy:", imageUrl);
             setPreviewImage(imageUrl);
             setImageError(false);
           } else {
             const imageUrl = `${CLOUDINARY_ENDPOINT}${user.profile_picture}`;
-            console.log("Setting previewImage from Cloudinary:", imageUrl);
+            // console.log("Setting previewImage from Cloudinary:", imageUrl);
             setPreviewImage(imageUrl);
           }
         } catch (error) {
@@ -60,8 +60,8 @@ const EditProfile = () => {
   }, [user, token, setValue, selectedFile]);
 
   const onSubmit = async (data) => {
-    console.log("Form data:", data);
-    console.log("data.profile_picture:", data.profile_picture);
+    // console.log("Form data:", data);
+    // console.log("data.profile_picture:", data.profile_picture);
     const formData = new FormData();
 
     formData.append('username', data.username);
@@ -71,19 +71,19 @@ const EditProfile = () => {
 
     // Use selectedFile instead of form state
     if (selectedFile) {
-      console.log("Appending new profile_picture:", selectedFile);
+      // console.log("Appending new profile_picture:", selectedFile);
       formData.append('profile_picture', selectedFile);
     } else {
-      console.log("No new profile_picture selected, preserving existing");
+      // console.log("No new profile_picture selected, preserving existing");
     }
 
     for (let [key, value] of formData.entries()) {
-      console.log(`FormData key: ${key} => value:`, value);
+      // console.log(`FormData key: ${key} => value:`, value);
     }
 
     try {
       setLoading(true);
-      console.log("Sending form data to backend");
+      // console.log("Sending form data to backend");
       const response = await updateProfile(formData);
       dispatch(login({ user: response?.user, token: token, refreshToken: refreshToken }));
       dispatch(showToast({ message: response?.message || "Profile updated successfully", type: 'success' }));
@@ -116,7 +116,7 @@ const EditProfile = () => {
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    console.log("Selected file:", file);
+    // console.log("Selected file:", file);
     if (file) {
       setPreviewImage(URL.createObjectURL(file));
       setSelectedFile(file); // Store file in state
@@ -125,7 +125,7 @@ const EditProfile = () => {
   };
 
   const handleImageError = () => {
-    console.log("Image load error for:", previewImage);
+    // console.log("Image load error for:", previewImage);
     setImageError(true);
   };
 
@@ -158,7 +158,7 @@ const EditProfile = () => {
                     alt="Profile Preview" 
                     className="w-full h-full object-cover" 
                     onError={handleImageError} 
-                    onLoad={() => console.log("Image loaded successfully:", previewImage)}
+                    // onLoad={() => console.log("Image loaded successfully:", previewImage)}
                     loading='lazy'
                   />
                 ) : (

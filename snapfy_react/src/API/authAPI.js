@@ -82,10 +82,10 @@ export const getAllUser = async () =>{
     }
 }
 
-export const getUser = async (userId) =>{
+export const getUser = async (username) =>{
     try{
-        const response = axiosInstance.get(`users/${userId}/`)
-        return response
+        const response = axiosInstance.get(`users/${username}/`)
+        return response.data
     }catch(error){
         console.error('Error on retrieving user data : ', error.response?.data || error)
         throw error
