@@ -25,6 +25,8 @@ const CreateContent = () => {
   const [currentMention, setCurrentMention] = useState('');
   const [currentHashtag, setCurrentHashtag] = useState('');
   const [videoDuration, setVideoDuration] = useState(0);
+  const [videoStartTime, setVideoStartTime] = useState(0);
+  const [videoEndTime, setVideoEndTime] = useState(60);
   
   const imageRef = useRef(null);
   const videoRef = useRef(null);
@@ -67,9 +69,10 @@ const CreateContent = () => {
       const video = e.target;
       video.addEventListener('loadedmetadata', () => {
         setVideoDuration(video.duration);
-        if (video.duration > 30) {
+        setVideoEndTime(Math.min(video.duration, 60));
+        if (video.duration > 60) {
           dispatch(showToast({ 
-            message: "Video exceeds 30 seconds limit. Only first 30 seconds will be used.", 
+            message: "Video exceeds 60 seconds limit. Only first 60 seconds will be used.", 
             type: 'warning' 
           }));
         }
@@ -122,6 +125,8 @@ const CreateContent = () => {
     
     if (isVideo) {
       setIsVideoCropped(false);
+      setVideoStartTime(0);
+      setVideoEndTime(60);
     }
   };
   
@@ -185,6 +190,20 @@ const CreateContent = () => {
     });
   };
 
+  // Function to update video playback when trimming
+  const updateVideoPlayback = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = videoStartTime;
+    }
+  };
+
+  // Effect to update video playback when start time changes
+  useEffect(() => {
+    if (videoRef.current && contentType === 'reel') {
+      updateVideoPlayback();
+    }
+  }, [videoStartTime]);
+
   const onSubmit = async (data) => {
     setLoading(true);
     
@@ -205,9 +224,10 @@ const CreateContent = () => {
           formData.append('media', selectedFile);
         }
       } else if (contentType === 'reel') {
-        // For reels, just use the original video file for now
-        // In a production app, you might want to process the video to limit to 30s
+        // For reels, add trim information to be processed on server
         formData.append('media', selectedFile);
+        formData.append('videoStartTime', videoStartTime.toString());
+        formData.append('videoEndTime', videoEndTime.toString());
       }
       
       // Here you would make your API call to upload the content
@@ -342,10 +362,69 @@ const CreateContent = () => {
                         onLoadedData={onMediaLoad}
                         className="max-w-full max-h-96 rounded-lg bg-black"
                       />
+                      
+                      {/* Video Trimming Controls */}
                       {videoDuration > 0 && (
-                        <p className="text-white/70 text-center mt-2">
-                          Duration: {Math.min(videoDuration, 60).toFixed(1)}s {videoDuration > 60 ? '(truncated from ' + videoDuration.toFixed(1) + 's)' : ''}
-                        </p>
+                        <div className="mt-4">
+                          <p className="text-white/70 text-center mb-2">
+                            Duration: {Math.min(videoEndTime - videoStartTime, 60).toFixed(1)}s 
+                            {videoDuration > 60 ? ' (from original ' + videoDuration.toFixed(1) + 's)' : ''}
+                          </p>
+                          
+                          {videoDuration > 60 && (
+                            <div className="bg-white/10 p-4 rounded-lg mb-4">
+                              <p className="text-white/80 text-sm mb-3">Trim your video (max 60 seconds):</p>
+                              
+                              <div className="flex items-center gap-4 mb-2">
+                                <div className="flex-1">
+                                  <label className="text-white/70 text-xs mb-1 block">Start Time: {videoStartTime.toFixed(1)}s</label>
+                                  <input 
+                                    type="range" 
+                                    min="0" 
+                                    max={Math.max(0, videoDuration - 1)}
+                                    step="0.1"
+                                    value={videoStartTime}
+                                    onChange={(e) => {
+                                      const newStart = parseFloat(e.target.value);
+                                      // Ensure end time is at least 1 second after start time and max 60 seconds
+                                      const newEnd = Math.min(
+                                        Math.max(newStart + 1, videoEndTime),
+                                        newStart + 60
+                                      );
+                                      setVideoStartTime(newStart);
+                                      setVideoEndTime(newEnd);
+                                    }}
+                                    className="w-full"
+                                  />
+                                </div>
+                                
+                                <div className="flex-1">
+                                  <label className="text-white/70 text-xs mb-1 block">End Time: {videoEndTime.toFixed(1)}s</label>
+                                  <input 
+                                    type="range" 
+                                    min={videoStartTime + 1}
+                                    max={Math.min(videoDuration, videoStartTime + 60)}
+                                    step="0.1"
+                                    value={videoEndTime}
+                                    onChange={(e) => setVideoEndTime(parseFloat(e.target.value))}
+                                    className="w-full"
+                                  />
+                                </div>
+                              </div>
+                              
+                              <div className="flex justify-center">
+                                <button
+                                  type="button"
+                                  onClick={updateVideoPlayback}
+                                  className="bg-[#FF6C37]/40 hover:bg-[#FF6C37]/60 text-white text-sm px-3 py-1 rounded-lg flex items-center gap-1"
+                                >
+                                  <Scissors size={14} />
+                                  Preview Trim
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
