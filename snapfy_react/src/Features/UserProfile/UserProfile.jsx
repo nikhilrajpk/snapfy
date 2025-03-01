@@ -1,7 +1,8 @@
 import React, { lazy, Suspense, useEffect, useState, useCallback } from "react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import axiosInstance from "../../axiosInstance";
 import { CLOUDINARY_ENDPOINT } from "../../APIEndPoints";
+import { showToast } from "../../redux/slices/toastSlice";
 
 const Loader = lazy(() => import('../../utils/Loader/Loader'));
 const ProfilePage = lazy(() => import('../../Components/UserProfile/ProfilePage'));
@@ -9,6 +10,7 @@ const ProfilePage = lazy(() => import('../../Components/UserProfile/ProfilePage'
 const UserProfile = () => {
   const [previewImage, setPreviewImage] = useState(null);
   const { user } = useSelector(state => state.user);
+  const dispatch = useDispatch()
 
   const fetchProfilePicture = useCallback(async () => {
     if (!user || !user.profile_picture) return;
@@ -25,9 +27,10 @@ const UserProfile = () => {
       setPreviewImage(imageUrl);
     } catch (error) {
       console.error("Error fetching profile picture:", error);
-      setPreviewImage(null); // Fallback to null or a default image
+      dispatch(showToast({message:"Error fetching profile picture", type:"error"}))
+      setPreviewImage(null); 
     }
-  }, [user]);
+  }, [user, dispatch]);
 
   useEffect(() => {
     fetchProfilePicture();
@@ -35,7 +38,7 @@ const UserProfile = () => {
 
   const loggedInUserData = {
     username: user?.username || '',
-    profileImage: previewImage || "https://via.placeholder.com/150", // Default image
+    profileImage: previewImage || "/path/to/post1.jpg",
     postCount: user?.posts?.length || 0,
     followerCount: user?.followers?.length || 0,
     followingCount: user?.following?.length || 0,

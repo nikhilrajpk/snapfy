@@ -14,6 +14,8 @@ const UserProfile = React.lazy(()=> import('../Pages/UserProfilePage'))
 const OtherUsersProfile = React.lazy(()=> import('../Pages/ViewOtherUserPage'))
 const EditUserProfile = React.lazy(()=> import('../Components/UserProfile/EditProfile'))
 
+const CreateContentPage = React.lazy(()=> import('../Pages/CreateContentPage'))
+
 const router = createBrowserRouter([
     {
         path:'/',
@@ -89,6 +91,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={true}>
                         <EditUserProfile/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/create-post',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <CreateContentPage/>
                     </ProtectedRoute>
                 )
             },

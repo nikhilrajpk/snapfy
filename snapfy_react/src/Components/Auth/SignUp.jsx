@@ -141,6 +141,7 @@ const SignUp = () => {
                       }
                     }
                   })}
+                  accept='.jpeg, .jpg, .png'
                   onChange={handleImageChange}
                 />
               </div>

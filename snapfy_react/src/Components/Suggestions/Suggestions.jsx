@@ -11,7 +11,7 @@ const SuggestionItem = ({ username, profileImage, mutualFollowers }) => {
           className="w-10 h-10 rounded-full mr-3"
         />
         <div>
-          <Link to={'/user/:username'} className="font-medium text-gray-800">{username}</Link>
+          <Link to={`/user/${username}`} className="font-medium text-gray-800">{username}</Link>
           <div className="text-xs text-gray-500">Followed by user2 + {mutualFollowers} others</div>
         </div>
       </div>
@@ -25,9 +25,9 @@ const SuggestionItem = ({ username, profileImage, mutualFollowers }) => {
 const Suggestions = () => {
   // Mock data for suggestions
   const suggestions = [
-    { id: 1, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 3 },
-    { id: 2, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 4 },
-    { id: 3, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 5 },
+    { id: 1, username: 'nestinterior123', profileImage: '/api/placeholder/40/40', mutualFollowers: 3 },
+    { id: 2, username: 'zoro', profileImage: '/api/placeholder/40/40', mutualFollowers: 4 },
+    { id: 3, username: 'naruto', profileImage: '/api/placeholder/40/40', mutualFollowers: 5 },
     { id: 4, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 6 },
     { id: 5, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 2 },
     { id: 6, username: 'user1', profileImage: '/api/placeholder/40/40', mutualFollowers: 8 },

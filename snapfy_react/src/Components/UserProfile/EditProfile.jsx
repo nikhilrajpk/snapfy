@@ -179,6 +179,7 @@ const EditProfile = () => {
                       },
                     },
                   })}
+                  accept='.jpeg, .png, .jpg'
                   onChange={handleImageChange}
                 />
               </div>

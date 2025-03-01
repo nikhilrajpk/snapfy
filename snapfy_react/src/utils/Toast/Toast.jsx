@@ -31,6 +31,10 @@ const Toast = ({ message, type = "success", duration = 3000 }) => {
     info: {
       borderColor: 'border-blue-500',
       icon: <AlertCircle className="w-5 h-5 text-blue-500" />,
+    },
+    warning: {
+      borderColor: 'border-orange-500',
+      icon: <AlertCircle className="w-5 h-5 text-orange-500" />,
     }
   };
 

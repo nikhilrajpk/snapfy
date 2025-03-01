@@ -10,9 +10,9 @@ const ProfilePage = ({ isLoggedInUser, userData }) => {
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar with Logo and Navbar */}
-      <div className="w-64 border-r border-gray-200 hidden lg:block">
+      <div className="w-56 border-r border-gray-200 hidden lg:block">
         <div className="sticky top-0 p-4 h-screen">
-          <div className="mb-8 pl-2">
+          <div className="mb-3 mt-2 ml-[-6px]">
             <Logo />
           </div>
           <Navbar />

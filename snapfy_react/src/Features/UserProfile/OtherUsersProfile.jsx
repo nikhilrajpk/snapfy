@@ -63,7 +63,7 @@ const OtherUsersProfile = () => {
       isMounted = false; // Cleanup to prevent state updates on unmount
       console.log("useEffect cleanup for username:", username);
     };
-  }, [fetchUserData]);
+  }, [fetchUserData, username]);
 
   const profileData = userData ? {
     username: userData.username || '',
@@ -90,8 +90,6 @@ const OtherUsersProfile = () => {
   if (isLoading) {
     return <Loader />;
   }
-
-  console.log("Rendering profileData:", profileData);
 
   return (
     <Suspense fallback={<Loader />}>
