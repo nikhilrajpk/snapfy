@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive } from 'lucide-react';
+import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle } from 'lucide-react';
 
-import Logo from '../Logo/Logo'
-import Navbar from '../Navbar/Navbar'
+import Logo from '../Logo/Logo';
+import Navbar from '../Navbar/Navbar';
+import PostPopup from '../Post/PostPopUp';
 
 const ProfilePage = ({ isLoggedInUser, userData }) => {
   return (
@@ -102,7 +103,7 @@ const LoggedInUserProfile = ({ userData }) => {
         showSaved={true}
       />
       
-      <ProfileContent posts={userData?.posts} type={activeTab.toLowerCase()} />
+      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} />
     </div>
   );
 };
@@ -176,7 +177,7 @@ const OtherUserProfile = ({ userData }) => {
         showSaved={false}
       />
       
-      <ProfileContent posts={userData?.posts} type={activeTab.toLowerCase()} />
+      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} />
     </div>
   );
 };
@@ -237,28 +238,102 @@ const TabButton = ({ label, icon, isActive, onClick }) => (
   </button>
 );
 
-const ProfileContent = ({ posts, type }) => {
-  const [postErrors, setPostErrors] = useState(new Set());
+const ProfileContent = ({ posts, type, userData }) => {
+  const [mediaErrors, setMediaErrors] = useState(new Set());
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
 
-  const handlePostError = useCallback((index) => {
-    setPostErrors(prev => new Set(prev).add(index));
+  const handleMediaError = useCallback((index) => {
+    setMediaErrors(prev => new Set(prev).add(index));
   }, []);
 
+  // Filter posts based on type
+  const filteredPosts = (posts || []).filter(post => {
+    const isVideo = post.file.includes('/video/upload/');
+    if (type === 'posts') return true; // Show all (images and videos)
+    if (type === 'shorts') return isVideo; // Show only videos
+    if (type === 'saved' || type === 'archived') return true;
+    return false;
+  });
+
+  // Open the post popup
+  const openPostPopup = (post) => {
+    setSelectedPost(post);
+    setIsPopupOpen(true);
+  };
+
+  // Close the post popup
+  const closePostPopup = () => {
+    setIsPopupOpen(false);
+  };
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-      {(posts || []).map((post, index) => (
-        <div key={index} className="aspect-square overflow-hidden rounded-xl shadow-sm hover:shadow-md transition duration-200 group cursor-pointer">
-          <img 
-            src={postErrors.has(index) ? '/default-post.png' : post.imageUrl}
-            alt={`Post ${index + 1}`} 
-            className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" 
-            loading="lazy"
-            onError={() => handlePostError(index)}
-          />
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {filteredPosts.map((post, index) => {
+          const isVideo = post.file.includes('/video/upload/');
+          const mediaUrl = post.file.replace('auto/upload/', ''); // Adjust Cloudinary URL if needed
+
+          return (
+            <div 
+              key={index} 
+              className="aspect-square overflow-hidden rounded-xl shadow-sm hover:shadow-md transition duration-200 group cursor-pointer relative"
+              onClick={() => openPostPopup(post)}
+            >
+              {isVideo ? (
+                <>
+                  <video
+                    src={mediaErrors.has(index) ? '/default-post.png' : mediaUrl}
+                    className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500"
+                    muted
+                    autoPlay={false} // Paused by default
+                    onError={() => handleMediaError(index)}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-100 group-hover:opacity-100 transition-opacity duration-200 bg-transparent bg-opacity-30">
+                    <Play size={40} fill='#1E3932' className="text-[#1E3932]" />
+                  </div>
+                </>
+              ) : (
+                <img 
+                  src={mediaErrors.has(index) ? '/default-post.png' : mediaUrl}
+                  alt={`Post ${index + 1}`} 
+                  className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" 
+                  loading="lazy"
+                  onError={() => handleMediaError(index)}
+                />
+              )}
+              
+              {/* Hover overlay with likes and comments info */}
+              <div className="absolute inset-0 bg-[#198754] bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <div className="flex space-x-4 text-white">
+                  <div className="flex items-center">
+                    <Heart size={20} fill="white" className="mr-2" />
+                    <span className="font-semibold">{post.likes || 0}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <MessageCircle size={20} fill="white" className="mr-2" />
+                    <span className="font-semibold">{post.comments?.length || 0}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Post popup component */}
+      {isPopupOpen && (
+        <PostPopup
+          post={selectedPost}
+          userData={userData}
+          isOpen={isPopupOpen}
+          onClose={closePostPopup}
+          currentUser={{ username: 'current_user' }} // Replace with your authenticated user
+        />
+      )}
+    </>
   );
 };
+
 
 export default React.memo(ProfilePage);
