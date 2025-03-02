@@ -93,6 +93,20 @@ export const getUser = async (username) => {
     }
   };
 
+
+export const checkUserExists = async (username) => {
+    try {
+        const response = await axiosInstance.get(`users/${username}/`);
+        return { exists: true, data: response.data };
+    } catch (error) {
+        if (error.response?.status === 404) {
+        return { exists: false };
+        }
+        console.error('Error checking user existence:', error.response?.data || error);
+        throw error; // Propagate other errors (e.g., network issues)
+    }
+};
+
 // export const removeUser = async (userId) =>{
 //     try {
 //         const response = axiosInstance.delete(`users/${userId}/`)
