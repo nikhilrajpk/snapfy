@@ -18,7 +18,7 @@ from .tasks import send_otp_email
 
 
 class UserAPIViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.prefetch_related('following').order_by('-date_joined')
+    queryset = User.objects.prefetch_related('following', 'posts').order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'username'
