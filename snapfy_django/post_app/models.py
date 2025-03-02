@@ -14,12 +14,12 @@ class Post(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="posts")
     caption = models.TextField()
     file = CloudinaryField('file', resource_type='auto')
-    hashtags = models.ManyToManyField(Hashtag, blank=True)
+    hashtags = models.ManyToManyField(Hashtag, blank=True, related_name="hashtags_posts")
     mentions = models.ManyToManyField(User, blank=True, related_name="mentioned_posts")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Post by {self.user.username} at {self.created_at}"
+        return f"Post by {self.user.username}, caption:: {self.caption} at {self.created_at}"
 
 
 class Like(models.Model):

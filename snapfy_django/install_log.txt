@@ -1,0 +1,19 @@
+Using pip 24.3.1 from C:\Users\nikhi\OneDrive\Desktop\Brotoype\Week 24\snapfy_social_media\env\Lib\site-packages\pip (python 3.13)
+Collecting moviepy
+  Obtaining dependency information for moviepy from https://files.pythonhosted.org/packages/61/ee/ef46fdfbdc7e1316da60142ffc1867e6e12a22341636dce62856bb325272/moviepy-2.1.2-py3-none-any.whl.metadata
+  Downloading moviepy-2.1.2-py3-none-any.whl.metadata (6.9 kB)
+Requirement already satisfied: decorator<6.0,>=4.0.2 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (5.2.1)
+Requirement already satisfied: imageio<3.0,>=2.5 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (2.37.0)
+Requirement already satisfied: imageio_ffmpeg>=0.2.0 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (0.6.0)
+Requirement already satisfied: numpy>=1.25.0 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (2.2.3)
+Requirement already satisfied: proglog<=1.0.0 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (0.1.10)
+Requirement already satisfied: python-dotenv>=0.10 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (1.0.1)
+Requirement already satisfied: pillow<11.0,>=9.2.0 in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from moviepy) (10.4.0)
+Requirement already satisfied: tqdm in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from proglog<=1.0.0->moviepy) (4.67.1)
+Requirement already satisfied: colorama in c:\users\nikhi\onedrive\desktop\brotoype\week 24\snapfy_social_media\env\lib\site-packages (from tqdm->proglog<=1.0.0->moviepy) (0.4.6)
+Downloading moviepy-2.1.2-py3-none-any.whl (126 kB)
+Installing collected packages: moviepy
+Successfully installed moviepy-2.1.2
+
+[notice] A new release of pip is available: 24.3.1 -> 25.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip
