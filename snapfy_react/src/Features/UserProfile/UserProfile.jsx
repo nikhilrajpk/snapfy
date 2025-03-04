@@ -114,6 +114,12 @@ const UserProfile = () => {
     }
   }, [username, fetchProfilePicture, navigate]);
 
+
+  // Expose refetch function to be passed down
+  const refetchUserData = useCallback(() => {
+    fetchUserData();
+  }, [fetchUserData]);
+
   useEffect(() => {
     // console.log("useEffect triggered for username:", username);
     let isMounted = true;
@@ -156,7 +162,7 @@ const UserProfile = () => {
 
   return (
     <Suspense fallback={<Loader />}>
-      <ProfilePage isLoggedInUser={true} userData={profileData} />
+      <ProfilePage isLoggedInUser={true} userData={profileData} onPostDeleted={refetchUserData} />
     </Suspense>
   );
 };

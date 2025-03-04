@@ -27,6 +27,16 @@ export const updatePost = async (formData) => {
     }
 };
 
+export const deletePost = async (postId) => {
+    console.log("DELETE URL:", axiosInstance.defaults.baseURL + `delete-post/${postId}/`);
+    try {
+    const response = await axiosInstance.delete(`delete-post/${postId}/`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { detail: 'An error occurred while deleting the post' };
+    }
+};
+
 export const getPost = async (postId)=> {
     const response = await axiosInstance.get(`posts/${postId}`)
     return response.data

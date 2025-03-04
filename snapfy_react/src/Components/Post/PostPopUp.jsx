@@ -4,8 +4,11 @@ import { formatDistanceToNow } from 'date-fns';
 import { useSelector } from 'react-redux';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useNavigate } from 'react-router-dom';
+import { deletePost } from '../../API/postAPI';
+import { useDispatch } from 'react-redux';
+import { showToast } from '../../redux/slices/toastSlice';
 
-const PostPopup = ({ post, userData, isOpen, onClose }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted }) => {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const [comment, setComment] = useState('');
@@ -22,19 +25,19 @@ const PostPopup = ({ post, userData, isOpen, onClose }) => {
   const videoRef = useRef(null);
   const {user} = useSelector(state=> state.user)
   const navigate = useNavigate() 
+  const dispatch = useDispatch()
   const currentUser = user
 
   // Detect clicks outside to close popup
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (popupRef.current && !popupRef.current.contains(event.target)) {
+      if (popupRef.current && !popupRef.current.contains(event.target) && !confirmationRef.current?.contains(event.target)) {
         onClose();
       }
     };
     
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      // Prevent scrolling on body when popup is open
       document.body.style.overflow = 'hidden';
     }
     
@@ -43,7 +46,7 @@ const PostPopup = ({ post, userData, isOpen, onClose }) => {
       document.body.style.overflow = 'auto';
     };
   }, [isOpen, onClose]);
-  
+
   // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutsideMenu = (event) => {
@@ -60,7 +63,7 @@ const PostPopup = ({ post, userData, isOpen, onClose }) => {
       document.removeEventListener('mousedown', handleClickOutsideMenu);
     };
   }, [showMenu]);
-  
+
   // Handle clicks outside delete confirmation dialog
   useEffect(() => {
     const handleClickOutsideConfirmation = (event) => {
@@ -151,15 +154,28 @@ const PostPopup = ({ post, userData, isOpen, onClose }) => {
     setShowDeleteConfirmation(true);
   };
 
-  const confirmDeletePost = () => {
-    console.log("Confirmed: Delete post:", post.id);
-    setShowDeleteConfirmation(false);
-    // Actual delete functionality would go here
-    // After successful deletion, you might want to close the popup
-    // onClose();
+  const confirmDeletePost = async (e) => {
+    e.stopPropagation(); // Prevent event from bubbling up to the overlay
+    console.log("Confirmed delete post");
+    try {
+      await deletePost(post?.id);
+      console.log("Confirmed: Delete post:", post.id);
+      setShowDeleteConfirmation(false);
+      onClose();
+      if (onPostDeleted) {
+        onPostDeleted(); // Trigger refetch in UserProfile
+      }
+      dispatch(showToast({ message: "Post deleted successfully", type: "success" }));
+      navigate(`/${currentUser.username}`);
+    } catch (error) {
+      console.error("Error deleting post:", error);
+      dispatch(showToast({ message: "Failed to delete post", type: "error" }));
+      setShowDeleteConfirmation(false);
+    }
   };
-  
-  const cancelDeletePost = () => {
+
+  const cancelDeletePost = (e) => {
+    e.stopPropagation(); // Prevent event from bubbling up
     setShowDeleteConfirmation(false);
   };
   
@@ -606,10 +622,10 @@ const PostPopup = ({ post, userData, isOpen, onClose }) => {
 
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirmation && (
-        <div className="fixed inset-0 bg-transparent bg-opacity-50 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-50 z-50 flex items-center justify-center">
           <div 
             ref={confirmationRef}
-            className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl border-2 border-[#198754]"
+            className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl border-2 border-[#198754] z-[60]"
           >
             <h3 className="text-lg font-bold mb-4">Delete Post</h3>
             <p className="mb-6">Are you sure you want to delete this post?</p>

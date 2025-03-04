@@ -7,7 +7,7 @@ import Logo from '../Logo/Logo';
 import Navbar from '../Navbar/Navbar';
 import PostPopup from '../Post/PostPopUp';
 
-const ProfilePage = ({ isLoggedInUser, userData }) => {
+const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted }) => {
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar with Logo and Navbar */}
@@ -28,7 +28,7 @@ const ProfilePage = ({ isLoggedInUser, userData }) => {
           
           <div className="px-6 pb-6 relative">
             {isLoggedInUser ? (
-              <LoggedInUserProfile userData={userData} />
+              <LoggedInUserProfile userData={userData} onPostDeleted={onPostDeleted} />
             ) : (
               <OtherUserProfile userData={userData} />
             )}
@@ -39,7 +39,7 @@ const ProfilePage = ({ isLoggedInUser, userData }) => {
   );
 };
 
-const LoggedInUserProfile = ({ userData }) => {
+const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
   const [activeTab, setActiveTab] = useState('POSTS');
   const { user } = useSelector(state => state.user);
   const [imageError, setImageError] = useState(false);
@@ -103,7 +103,7 @@ const LoggedInUserProfile = ({ userData }) => {
         showSaved={true}
       />
       
-      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} />
+      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} onPostDeleted={onPostDeleted} />
     </div>
   );
 };
@@ -238,7 +238,7 @@ const TabButton = ({ label, icon, isActive, onClick }) => (
   </button>
 );
 
-const ProfileContent = ({ posts, type, userData }) => {
+const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
   const [mediaErrors, setMediaErrors] = useState(new Set());
   const [selectedPost, setSelectedPost] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -338,6 +338,7 @@ const ProfileContent = ({ posts, type, userData }) => {
           userData={userData}
           isOpen={isPopupOpen}
           onClose={closePostPopup}
+          onPostDeleted={onPostDeleted}
         />
       )}
     </>
