@@ -10,7 +10,7 @@ from .serializer import *
 import logging
 
 class PostAPIView(ModelViewSet):
-    queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('id')
+    queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('-id')
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
 
