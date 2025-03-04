@@ -3,22 +3,24 @@ import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle } from 'lucide-react';
 
-import Logo from '../Logo/Logo';
-import Navbar from '../Navbar/Navbar';
+// import Logo from '../Logo/Logo';
+// import Navbar from '../Navbar/Navbar';
+import SideBar from '../Navbar/SideBar'
 import PostPopup from '../Post/PostPopUp';
 
 const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted }) => {
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar with Logo and Navbar */}
-      <div className="w-56 border-r border-gray-200 hidden lg:block">
+      {/* <div className="w-56 border-r border-gray-200 hidden lg:block">
         <div className="sticky top-0 p-4 h-screen">
           <div className="mb-3 mt-2 ml-[-6px]">
             <Logo />
           </div>
           <Navbar />
         </div>
-      </div>
+      </div> */}
+      <SideBar/>
       
       {/* Main content */}
       <div className="flex-1 max-w-4xl mx-auto p-6">

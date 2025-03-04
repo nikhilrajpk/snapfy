@@ -1,8 +1,16 @@
 import React from 'react';
+import gear2 from '../../assets/gear2.gif'
 
 const LoadingSpinners = () => {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-16 p-4">
+    <div className="min-h-screen bg-blue-200 flex flex-col items-center justify-center gap-16 p-4"
+    // style={{
+    //   backgroundImage: `url(${gear2})`,
+    //   backgroundSize: 'cover',
+    //   backgroundRepeat: 'no-repeat',
+    //   backgroundPosition: 'center'
+    // }}
+    >
       {/* Pulse Ring */}
       {/* <div className="relative">
         <div className="w-16 h-16 rounded-full border-4 border-indigo-100">
@@ -39,11 +47,11 @@ const LoadingSpinners = () => {
       </div>
 
       {/* Progress Bar */}
-      {/* <div className="w-64">
-        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div className="h-full bg-indigo-600 rounded-full w-1/2 animate-[loading_1s_ease-in-out_infinite]"></div>
+      {/* <div className="w-64 absolute bottom-16">
+        <div className="h-4 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-full bg-[#198754] rounded-full w-1/2 animate-[loading_1s_ease-in-out_infinite]"></div>
         </div>
-        <p className="mt-4 text-sm text-gray-600 text-center">Progress Bar</p>
+        <p className="mt-4 text-md text-gray-900 text-center">On The Way</p>
       </div> */}
 
       <style >{`

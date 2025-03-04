@@ -71,16 +71,15 @@ export const updateProfile = async (formData) =>{
     }
 }
 
-export const getAllUser = async () =>{
-    try{
-        const response = await axiosInstance.get(`users/`)
-
-        return response.data
-    }catch(error){
-        console.error('Error on retrieving users data : ', error.response?.data || error);
-        throw error
+export const getAllUser = async (searchTerm = '') => {
+    try {
+      const response = await axiosInstance.get(`users/${searchTerm ? `?username=${searchTerm}` : ''}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error on retrieving users data: ', error.response?.data || error);
+      throw error;
     }
-}
+};
 
 export const getUser = async (username) => {
     try {

@@ -8,7 +8,7 @@ import { deletePost } from '../../API/postAPI';
 import { useDispatch } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
 
-const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const [comment, setComment] = useState('');

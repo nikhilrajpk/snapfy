@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/userSlice';
 import { showToast } from '../../redux/slices/toastSlice';
-import { Home, Compass, Film, MessageCircle, Bell, PlusCircle, User, Moon, LogOut } from 'lucide-react';
+import { Home, Compass, Film, MessageCircle, Bell, PlusCircle, User, Moon, LogOut, Search } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const NavItem = ({ icon: Icon, label, to, onClick }) => {
@@ -43,13 +43,14 @@ const Navbar = () => {
   return (
     <nav className="bg-white rounded-2xl shadow-sm p-2 mb-4">
       <NavItem icon={Home} label="HOME" to="/home" />
+      <NavItem icon={Search} label="SEARCH" to="/search" />
       <NavItem icon={Compass} label="EXPLORE" to="/explore" />
       <NavItem icon={Film} label="SHORTS" to="/shorts" />
       <NavItem icon={MessageCircle} label="MESSAGES" to="/messages" />
       <NavItem icon={Bell} label="NOTIFICATIONS" to="/notifications" />
       <NavItem icon={PlusCircle} label="CREATE" to="/create-post" />
       <NavItem icon={User} label="PROFILE" to={`/${user?.username}`} />
-      <NavItem icon={Moon} label="THEME MODE" to="/theme" />
+      {/* <NavItem icon={Moon} label="THEME MODE" to="/theme" /> */}
       <NavItem 
         icon={LogOut} 
         label="LOGOUT" 

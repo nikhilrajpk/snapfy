@@ -17,6 +17,8 @@ const EditUserProfile = React.lazy(()=> import('../Components/UserProfile/EditPr
 const CreateContentPage = React.lazy(()=> import('../Pages/CreateContentPage'))
 const EditContentPage = React.lazy(()=> import('../Pages/EditContentPage'))
 
+const SearchBarPage = React.lazy(()=> import('../Pages/SearchBarPage'))
+
 const router = createBrowserRouter([
     {
         path:'/',
@@ -108,6 +110,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={true}>
                         <EditContentPage/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/search',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <SearchBarPage/>
                     </ProtectedRoute>
                 )
             },
