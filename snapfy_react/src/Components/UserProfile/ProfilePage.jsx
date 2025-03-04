@@ -247,24 +247,35 @@ const ProfileContent = ({ posts, type, userData }) => {
     setMediaErrors(prev => new Set(prev).add(index));
   }, []);
 
-  // Filter posts based on type
   const filteredPosts = (posts || []).filter(post => {
     const isVideo = post.file.includes('/video/upload/');
-    if (type === 'posts') return true; // Show all (images and videos)
-    if (type === 'shorts') return isVideo; // Show only videos
+    if (type === 'posts') return true;
+    if (type === 'shorts') return isVideo;
     if (type === 'saved' || type === 'archived') return true;
     return false;
   });
 
-  // Open the post popup
   const openPostPopup = (post) => {
     setSelectedPost(post);
     setIsPopupOpen(true);
   };
 
-  // Close the post popup
   const closePostPopup = () => {
     setIsPopupOpen(false);
+  };
+
+  const handleVideoLoaded = (e, index) => {
+    console.log(`Video ${index} duration loaded:`, e.target.duration);
+  };
+
+  const handleVideoError = (e, index) => {
+    console.log(`Video ${index} load error:`, e);
+    console.log(`Attempted URL:`, e.target.src);
+    handleMediaError(index);
+  };
+
+  const normalizeUrl = (url) => {
+    return url.replace(/^(auto\/upload\/)+/, '');
   };
 
   return (
@@ -272,7 +283,7 @@ const ProfileContent = ({ posts, type, userData }) => {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {filteredPosts.map((post, index) => {
           const isVideo = post.file.includes('/video/upload/');
-          const mediaUrl = post.file.replace('auto/upload/', ''); // Adjust Cloudinary URL if needed
+          const mediaUrl = normalizeUrl(post.file);
 
           return (
             <div 
@@ -286,8 +297,9 @@ const ProfileContent = ({ posts, type, userData }) => {
                     src={mediaErrors.has(index) ? '/default-post.png' : mediaUrl}
                     className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500"
                     muted
-                    autoPlay={false} // Paused by default
-                    onError={() => handleMediaError(index)}
+                    autoPlay={false}
+                    onLoadedMetadata={(e) => handleVideoLoaded(e, index)}
+                    onError={(e) => handleVideoError(e, index)}
                   />
                   <div className="absolute inset-0 flex items-center justify-center opacity-100 group-hover:opacity-100 transition-opacity duration-200 bg-transparent bg-opacity-30">
                     <Play size={40} fill='#1E3932' className="text-[#1E3932]" />
@@ -303,7 +315,6 @@ const ProfileContent = ({ posts, type, userData }) => {
                 />
               )}
               
-              {/* Hover overlay with likes and comments info */}
               <div className="absolute inset-0 bg-[#198754] bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                 <div className="flex space-x-4 text-white">
                   <div className="flex items-center">
@@ -321,14 +332,12 @@ const ProfileContent = ({ posts, type, userData }) => {
         })}
       </div>
 
-      {/* Post popup component */}
       {isPopupOpen && (
         <PostPopup
           post={selectedPost}
           userData={userData}
           isOpen={isPopupOpen}
           onClose={closePostPopup}
-          currentUser={{ username: 'current_user' }} // Replace with your authenticated user
         />
       )}
     </>

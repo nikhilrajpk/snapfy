@@ -15,6 +15,7 @@ const OtherUsersProfile = React.lazy(()=> import('../Pages/ViewOtherUserPage'))
 const EditUserProfile = React.lazy(()=> import('../Components/UserProfile/EditProfile'))
 
 const CreateContentPage = React.lazy(()=> import('../Pages/CreateContentPage'))
+const EditContentPage = React.lazy(()=> import('../Pages/EditContentPage'))
 
 const router = createBrowserRouter([
     {
@@ -99,6 +100,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={true}>
                         <CreateContentPage/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/edit-post/:postId',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <EditContentPage/>
                     </ProtectedRoute>
                 )
             },

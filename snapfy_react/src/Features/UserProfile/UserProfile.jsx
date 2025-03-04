@@ -98,16 +98,16 @@ const UserProfile = () => {
   const fetchUserData = useCallback(async () => {
     setIsLoading(true);
     try {
-      console.log("Fetching user data for:", username);
+      // console.log("Fetching user data for:", username);
       const response = await getUser(username);
-      console.log("User data fetched:", response);
+      // console.log("User data fetched:", response);
       if (!response || typeof response !== 'object') {
         throw new Error("Invalid user data response");
       }
       setUserData(response);
       await fetchProfilePicture(response.profile_picture);
     } catch (error) {
-      console.error("Error retrieving user data:", error.response?.data || error.message || error);
+      // console.error("Error retrieving user data:", error.response?.data || error.message || error);
       navigate('/home', { replace: true });
     } finally {
       setIsLoading(false);
@@ -115,7 +115,7 @@ const UserProfile = () => {
   }, [username, fetchProfilePicture, navigate]);
 
   useEffect(() => {
-    console.log("useEffect triggered for username:", username);
+    // console.log("useEffect triggered for username:", username);
     let isMounted = true;
     fetchUserData().then(() => {
       if (!isMounted) {
@@ -124,7 +124,7 @@ const UserProfile = () => {
     });
     return () => {
       isMounted = false; // Cleanup to prevent state updates on unmount
-      console.log("useEffect cleanup for username:", username);
+      // console.log("useEffect cleanup for username:", username);
     };
   }, [fetchUserData, username]);
 

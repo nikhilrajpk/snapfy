@@ -60,10 +60,10 @@ export const updateProfile = async (formData) =>{
     try {
         const response = await axiosInstance.put('profile/update/', formData, {
           headers: {
-            'Content-Type': 'multipart/form-data', // Ensure this is set
+            'Content-Type': 'multipart/form-data', 
           },
         });
-        // console.log("Update profile response:", response.data); // Debug response
+        // console.log("Update profile response:", response.data); 
         return response.data;
     } catch (err) {
         console.error('Error updating user profile:', err.response?.data || err);
