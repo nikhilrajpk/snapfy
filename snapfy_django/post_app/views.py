@@ -49,3 +49,19 @@ class PostUpdateAPIView(APIView):
             return Response({"message": "Post updated successfully"}, status=status.HTTP_200_OK)
         logger.error(f"Serializer errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    
+class PostDeleteAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        try:
+            post = Post.objects.get(id=pk)
+            # Ensure only the post owner can delete it
+            if post.user != request.user:
+                return Response({"detail": "You do not have permission to delete this post."}, status=status.HTTP_403_FORBIDDEN)
+            serializer = PostDeleteSerializer(post)
+            serializer.delete(post)
+            return Response({"message": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except Post.DoesNotExist:
+            return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)

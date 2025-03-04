@@ -229,3 +229,12 @@ class PostUpdateSerializer(serializers.ModelSerializer):
             instance.hashtags.set(hashtags)
 
         return instance
+    
+    
+class PostDeleteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Post
+        fields = ('id',)
+    
+    def delete(self, instance):
+        instance.delete()
