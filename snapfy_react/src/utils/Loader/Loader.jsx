@@ -3,7 +3,7 @@ import gear2 from '../../assets/gear2.gif'
 
 const LoadingSpinners = () => {
   return (
-    <div className="min-h-screen bg-blue-200 flex flex-col items-center justify-center gap-16 p-4"
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-16 p-4"
     // style={{
     //   backgroundImage: `url(${gear2})`,
     //   backgroundSize: 'cover',

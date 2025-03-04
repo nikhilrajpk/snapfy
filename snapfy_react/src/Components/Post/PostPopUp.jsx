@@ -371,7 +371,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
                 <img 
                 src={normalizeUrl(post?.file)}
                 alt="Post"
-                className="max-h-[90vh] max-w-full object-contain"
+                className="max-h-[90vh] h-full max-w-full object-contain"
                 />
             )}
           
@@ -398,7 +398,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
                 className="w-full h-full object-cover"
               />
             </div>
-            <div className="flex-grow">
+            <div className="flex-grow cursor-pointer" onClick={()=> navigate(`/user/${userData?.username}`)}>
               <span className="font-bold text-sm">{userData?.username}</span>
             </div>
             <div className="relative">
@@ -465,7 +465,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               </div>
               <div className="flex flex-wrap gap-2">
                 {mentionedUsers.map((username, index) => (
-                  <span key={index} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm">
+                  <span key={index} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm" onClick={()=> navigate(`/user/${username}`)}>
                     @{username}
                   </span>
                 ))}
