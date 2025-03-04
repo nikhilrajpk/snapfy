@@ -15,17 +15,18 @@ class HashtagSerializer(serializers.ModelSerializer):
 class UsernameOnlySerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('username',)  
+        fields = ('username', 'profile_picture') 
 
 class PostSerializer(serializers.ModelSerializer):
-    hashtags = HashtagSerializer(many=True) 
-    mentions = UsernameOnlySerializer(many=True)  
+    hashtags = HashtagSerializer(many=True)
+    mentions = UsernameOnlySerializer(many=True)
     id = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    user = UsernameOnlySerializer(read_only=True)
 
     class Meta:
         model = Post
-        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at')
+        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at', 'user')
 
 
 

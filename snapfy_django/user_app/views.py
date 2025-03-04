@@ -11,6 +11,7 @@ from google.auth.transport import requests as google_requests
 import requests, socket
 from django.http import HttpResponse
 from django.conf import settings
+from django.db.models import Q
 
 from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer, UserProfileUpdateSerializer
 from .models import User, Report
@@ -22,12 +23,23 @@ class UserAPIViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'username'
-    
+
     def get_queryset(self):
-        # Allow all users to be fetched for GET, restrict updates for non-staff
+        queryset = super().get_queryset()
+        username = self.request.query_params.get('username', None)
+
+        # Exclude superusers and the logged-in user from the queryset
+        queryset = queryset.exclude(is_superuser=True)
+
+        # Apply username search filter if provided
+        if username:
+            queryset = queryset.filter(Q(username__icontains=username) & ~Q(username__icontains=self.request.user.username))
+
+        # Restrict updates to the logged-in user's own profile for non-staff
         if self.action in ['update', 'partial_update', 'destroy'] and not self.request.user.is_staff:
-            return self.queryset.filter(username=self.request.user.username)
-        return self.queryset
+            return queryset.filter(username=self.request.user.username)
+
+        return queryset
     
     
 class RegisterUserView(APIView):

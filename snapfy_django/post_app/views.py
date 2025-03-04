@@ -10,9 +10,18 @@ from .serializer import *
 import logging
 
 class PostAPIView(ModelViewSet):
-    queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('-created_at')
+    queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('id')
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        hashtag = self.request.query_params.get('hashtag', None)
+        if hashtag:
+            # Remove '#' if present and filter posts containing the hashtag
+            hashtag = hashtag.lstrip('#')
+            queryset = queryset.filter(hashtags__name__icontains=hashtag)
+        return queryset
 
 class PostCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
