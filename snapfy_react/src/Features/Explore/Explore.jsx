@@ -44,7 +44,7 @@ const ExplorePage = () => {
   const [selectedPost, setSelectedPost] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
 
-  console.log('Posts in ExplorePage:', posts);
+//   console.log('Posts in ExplorePage:', posts);
 
   // Virtualization Configuration at top level
   const virtualizer = useVirtualizer({

@@ -20,6 +20,7 @@ const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted }) => {
           <Navbar />
         </div>
       </div> */}
+
       <SideBar/>
       
       {/* Main content */}
@@ -56,7 +57,7 @@ const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
     <div className="w-full">
       {/* Profile image and actions row */}
       <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
-        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md">
+        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md hover:scale-[3] hover:relative hover:translate-x-28 hover:translate-y-10 duration-700">
           <img 
             src={imageError ? '/default-profile.png' : userData?.profileImage}
             alt="Profile" 
@@ -124,7 +125,7 @@ const OtherUserProfile = ({ userData }) => {
     <div className="w-full">
       {/* Profile image and actions row */}
       <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
-        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md">
+        <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md hover:scale-[3] hover:relative hover:translate-x-28 hover:translate-y-10 duration-700">
           <img 
             src={imageError ? '/default-profile.png' : userData?.profileImage}
             alt="Profile" 

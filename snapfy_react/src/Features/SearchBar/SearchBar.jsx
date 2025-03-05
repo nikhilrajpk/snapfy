@@ -17,7 +17,7 @@ const SearchBar = () => {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const navigate = useNavigate();
 
-  console.log("results ::", results);
+  // console.log("results ::", results);
 
   const handleSearchType = (type) => {
     setSearchType(type);
@@ -173,7 +173,7 @@ const SearchBar = () => {
           </div>
         ) : (
           !isLoading && searchText && (
-            <div className="text-center text-gray-500">No results found for "{searchText}"</div>
+            <div className="text-center text-gray-500">No results found for &ldquo;{searchText}&rdquo;</div>
           )
         )}
 

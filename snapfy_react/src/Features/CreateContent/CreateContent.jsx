@@ -283,7 +283,7 @@ const CreateContent = () => {
 
   const errorMessageClass = "mt-1 text-red-300 bg-red-900/40 text-sm flex items-center px-2 py-1 rounded-md border border-red-500/20";
 
-  return loading ? <Loader /> : (
+  return (
     <div className="min-h-screen bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
       <div className="w-full max-w-3xl relative">
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
@@ -576,9 +576,15 @@ const CreateContent = () => {
                 } text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-[#FF6C37] focus:ring-offset-2 focus:ring-offset-[#1E3932] transition-all duration-200 flex items-center justify-center group relative overflow-hidden`}
               >
                 <span className="relative z-10 flex items-center">
-                  Share {contentType === 'post' ? 'Post' : 'Reel'}
-                  <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </span>
+                  {loading ? (
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-[#198754]"></div>
+                    ) : (
+                    <>
+                      {`Share ${contentType === 'post' ? 'Post' : 'Reel'}`}
+                      <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                      </>
+                  )}
+              </span>
                 <div className={`absolute inset-0 ${selectedFile && readyToSubmit ? 'bg-gradient-to-r from-[#198754] to-[#1E3932] opacity-0 group-hover:opacity-100' : ''} transition-opacity duration-300`}></div>
               </button>
               <button
