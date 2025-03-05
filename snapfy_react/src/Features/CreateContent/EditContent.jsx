@@ -117,14 +117,23 @@ const EditContent = () => {
       const video = e.target;
       const duration = video.duration;
       setVideoDuration(duration);
-      setVideoEndTime(Math.min(duration, 60));
-      if (duration > 60) {
+      const initialEndTime = Math.min(duration, 60);
+      setVideoEndTime(initialEndTime);
+      if (duration < 10) {
         dispatch(showToast({ 
-          message: "Video exceeds 60 seconds limit. Trim below (max 60s).", 
+          message: "Video must be at least 10 seconds long.", 
+          type: 'error' 
+        }));
+        setReadyToSubmit(false);
+      } else if (duration > 60) {
+        dispatch(showToast({ 
+          message: "Video exceeds 60 seconds limit. Trim below (max 60s, min 10s).", 
           type: 'warning' 
         }));
+        setReadyToSubmit(true);
+      } else {
+        setReadyToSubmit(true);
       }
-      setReadyToSubmit(true);
     }
   }, [contentType, aspectRatio, dispatch, isSubmitting]);
 
@@ -292,93 +301,104 @@ const EditContent = () => {
     }
   }, [videoStartTime, contentType, updateVideoPlayback, isSubmitting]);
 
+  useEffect(() => {
+    console.log("Loading state changed:", loading);
+  }, [loading]);
+
   const onSubmit = async (data) => {
-    console.log("onSubmit triggered");
+    console.log("onSubmit triggered, loading:", loading);
     if (!readyToSubmit) {
       console.log("Not ready to submit yet");
       dispatch(showToast({
-        message: "Please wait for media to load before submitting.",
+        message: "Please wait for media to load or ensure video meets duration requirements.",
         type: 'warning'
       }));
       return;
     }
 
+    const trimmedDuration = videoEndTime - videoStartTime;
+    if (contentType === 'reel' && (trimmedDuration < 10 || trimmedDuration > 60)) {
+      dispatch(showToast({
+        message: "Video duration must be between 10 and 60 seconds.",
+        type: 'error'
+      }));
+      return;
+    }
+
     setLoading(true);
+    console.log("Loading set to true");
     setIsSubmitting(true);
     try {
-        const formData = new FormData();
-        formData.append('id', postId);
-        formData.append('caption', data.caption);
-        console.log("Mentions before submission :: ", mentions);
-        mentions.forEach(mention => formData.append('mentions', mention));
-        hashtags.forEach(hashtag => formData.append('hashtags', hashtag));
+      const formData = new FormData();
+      formData.append('id', postId);
+      formData.append('caption', data.caption);
+      console.log("Mentions before submission :: ", mentions);
+      mentions.forEach(mention => formData.append('mentions', mention));
+      hashtags.forEach(hashtag => formData.append('hashtags', hashtag));
 
-        if (contentType === 'post') {
+      if (contentType === 'post') {
         if (completedCrop) {
-            const croppedImage = await cropImage();
-            if (croppedImage) {
+          const croppedImage = await cropImage();
+          if (croppedImage) {
             formData.append('file', croppedImage, 'cropped_image.jpg');
-            }
+          }
         } else if (selectedFile) {
-            formData.append('file', selectedFile);
+          formData.append('file', selectedFile);
         }
-        // Do not append 'file' if no new file is selected
-        } else if (contentType === 'reel') {
+      } else if (contentType === 'reel') {
         console.log("Submitting video with trim:", { start: videoStartTime, end: videoEndTime });
         if (selectedFile) {
-            formData.append('file', selectedFile);
-            formData.append('videoStartTime', videoStartTime.toString());
-            formData.append('videoEndTime', videoEndTime.toString());
+          formData.append('file', selectedFile);
+          formData.append('videoStartTime', videoStartTime.toString());
+          formData.append('videoEndTime', videoEndTime.toString());
         } else {
-            // Only send trim times if no new file, and use the existing file URL without prefix stacking
-            formData.append('videoStartTime', videoStartTime.toString());
-            formData.append('videoEndTime', videoEndTime.toString());
+          formData.append('videoStartTime', videoStartTime.toString());
+          formData.append('videoEndTime', videoEndTime.toString());
         }
-        }
+      }
 
-        console.log("Calling updatePost with formData");
-        for (let pair of formData.entries()) {
+      console.log("Calling updatePost with formData");
+      for (let pair of formData.entries()) {
         console.log(pair[0], pair[1]);
-        }
-        const response = await updatePost(formData);
-        console.log("Update response:", response);
+      }
+      const response = await updatePost(formData);
+      console.log("Update response:", response);
 
-        const updatedPost = await getPost(postId);
-        console.log("Post after update:", updatedPost);
-        setPreviewMedia(normalizeUrl(updatedPost.file));
-        dispatch(showToast({ 
+      const updatedPost = await getPost(postId);
+      console.log("Post after update:", updatedPost);
+      setPreviewMedia(normalizeUrl(updatedPost.file));
+      dispatch(showToast({ 
         message: `Your ${contentType} has been updated successfully!`, 
         type: 'success' 
-        }));
-        navigate(`/${user.username}`);
-      } catch (error) {
-        const errorResponse = error.response?.data;
-        let errorMessage = "An unexpected error occurred";
-        
-        if (errorResponse) {
-          if (errorResponse.detail && errorResponse.code === "token_not_valid") {
-            errorMessage = "Your session has expired. Please log in again.";
-          } else if (typeof errorResponse === 'string') {
-            errorMessage = errorResponse;
-          } else if (typeof errorResponse === 'object') {
-            errorMessage = Object.entries(errorResponse)
-              .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
-              .join("\n");
-          }
+      }));
+      navigate(`/${user.username}`);
+    } catch (error) {
+      const errorResponse = error.response?.data;
+      let errorMessage = "An unexpected error occurred";
+      
+      if (errorResponse) {
+        if (errorResponse.detail && errorResponse.code === "token_not_valid") {
+          errorMessage = "Your session has expired. Please log in again.";
+        } else if (typeof errorResponse === 'string') {
+          errorMessage = errorResponse;
+        } else if (typeof errorResponse === 'object') {
+          errorMessage = Object.entries(errorResponse)
+            .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
+            .join("\n");
         }
-        console.log("Error updating post ::", errorMessage, error);
-        dispatch(showToast({ message: errorMessage, type: 'error' }));
-      } finally {
-        setLoading(false);
-        setIsSubmitting(false);
       }
+      console.log("Error updating post ::", errorMessage, error);
+      dispatch(showToast({ message: errorMessage, type: 'error' }));
+    } finally {
+      setLoading(false);
+      console.log("Loading set to false");
+      setIsSubmitting(false);
+    }
   };
 
   const errorMessageClass = "mt-1 text-red-300 bg-red-900/40 text-sm flex items-center px-2 py-1 rounded-md border border-red-500/20";
 
-  
-
-  return loading ? <Loader /> : (
+  return (
     <div className="min-h-screen bg-gradient-to-br from-[#1E3932] via-[#198754] to-[#FF6C37] flex items-center justify-center p-6">
       <div className="w-full max-w-3xl relative">
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
@@ -422,7 +442,7 @@ const EditContent = () => {
                 >
                   <Upload size={40} className="text-white/50 mb-4" />
                   <p className="text-white/70">Click to upload {contentType === 'post' ? 'an image' : 'a video'}</p>
-                  <p className="text-white/50 text-sm mt-2">{contentType === 'post' ? 'JPG, PNG' : 'MP4, MOV (max 60s)'}</p>
+                  <p className="text-white/50 text-sm mt-2">{contentType === 'post' ? 'JPG, PNG' : 'MP4, MOV (10s-60s)'}</p>
                 </div>
               ) : (
                 <div className="relative w-full">
@@ -479,26 +499,27 @@ const EditContent = () => {
                       {videoDuration > 0 && !isSubmitting && (
                         <div className="mt-4">
                           <p className="text-white/70 text-center mb-2">
-                            Duration: {Math.min(videoEndTime - videoStartTime, 60).toFixed(1)}s 
+                            Duration: {(videoEndTime - videoStartTime).toFixed(1)}s 
                             {videoDuration > 60 ? ' (from original ' + videoDuration.toFixed(1) + 's)' : ''}
                           </p>
-                          {videoDuration > 60 && (
+                          {videoDuration >= 10 && (
                             <div className="bg-white/10 p-4 rounded-lg mb-4">
-                              <p className="text-white/80 text-sm mb-3">Trim your video (max 60 seconds):</p>
+                              <p className="text-white/80 text-sm mb-3">Trim your video (10s - 60s):</p>
                               <div className="flex items-center gap-4 mb-2">
                                 <div className="flex-1">
                                   <label className="text-white/70 text-xs mb-1 block">Start Time: {videoStartTime.toFixed(1)}s</label>
                                   <input 
                                     type="range" 
                                     min="0" 
-                                    max={Math.max(0, videoDuration - 60)}
+                                    max={videoDuration - 10}
                                     step="0.1"
                                     value={videoStartTime}
                                     onChange={(e) => {
                                       const newStart = parseFloat(e.target.value);
-                                      const newEnd = Math.min(videoDuration, newStart + 60);
+                                      const minEnd = newStart + 10;
+                                      const maxEnd = Math.min(videoDuration, newStart + 60);
                                       setVideoStartTime(newStart);
-                                      setVideoEndTime(newEnd);
+                                      setVideoEndTime(Math.max(minEnd, Math.min(maxEnd, videoEndTime)));
                                     }}
                                     className="w-full"
                                   />
@@ -507,15 +528,12 @@ const EditContent = () => {
                                   <label className="text-white/70 text-xs mb-1 block">End Time: {videoEndTime.toFixed(1)}s</label>
                                   <input 
                                     type="range" 
-                                    min={videoStartTime}
-                                    max={videoDuration}
+                                    min={videoStartTime + 10}
+                                    max={Math.min(videoDuration, videoStartTime + 60)}
                                     step="0.1"
                                     value={videoEndTime}
                                     onChange={(e) => {
                                       const newEnd = parseFloat(e.target.value);
-                                      if (newEnd - videoStartTime > 60) {
-                                        setVideoStartTime(newEnd - 60);
-                                      }
                                       setVideoEndTime(newEnd);
                                     }}
                                     className="w-full"
@@ -668,14 +686,22 @@ const EditContent = () => {
                 className={`w-full py-3 px-6 ${
                   readyToSubmit && !isSubmitting
                     ? 'bg-[#1E3932] hover:bg-[#198754] transform hover:scale-105'
-                    : 'bg-gray-500 cursor-not-allowed'
-                } text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-[#FF6C37] focus:ring-offset-2 focus:ring-offset-[#1E3932] transition-all duration-200 flex items-center justify-center group relative overflow-hidden`}
+                    : 'bg-[#1E3932] cursor-not-allowed'
+                } text-white rounded-xl border-0 border-b-0 outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus:shadow-none active:outline-none active:ring-0 active:shadow-none transition-all duration-200 flex items-center justify-center group relative overflow-visible`}
               >
-                <span className="relative z-10 flex items-center">
-                  Update {contentType === 'post' ? 'Post' : 'Reel'}
-                  <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                <span className="relative z-20 flex items-center">
+                  {loading ? (
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754] border-solid z-50 opacity-100"></div>
+                  ) : (
+                    <>
+                      Update {contentType === 'post' ? 'Post' : 'Reel'}
+                      <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
                 </span>
-                <div className={`absolute inset-0 ${readyToSubmit && !isSubmitting ? 'bg-gradient-to-r from-[#198754] to-[#1E3932] opacity-0 group-hover:opacity-100' : ''} transition-opacity duration-300`}></div>
+                {readyToSubmit && !isSubmitting && !loading && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#198754] to-[#1E3932] opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10"></div>
+                )}
               </button>
               <button
                 type="button"

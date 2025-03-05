@@ -32,7 +32,7 @@ const CreateContent = () => {
   const [videoEndTime, setVideoEndTime] = useState(60);
   const [isMentionValid, setIsMentionValid] = useState(null);
   const [readyToSubmit, setReadyToSubmit] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false); // New state to track submission
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const imageRef = useRef(null);
   const videoRef = useRef(null);
@@ -52,7 +52,7 @@ const CreateContent = () => {
   };
 
   const onMediaLoad = useCallback((e) => {
-    if (isSubmitting) return; // Prevent toast after submission starts
+    if (isSubmitting) return;
 
     if (contentType === 'post') {
       const { width, height } = e.currentTarget;
@@ -63,14 +63,24 @@ const CreateContent = () => {
       const video = e.target;
       const duration = video.duration;
       setVideoDuration(duration);
-      setVideoEndTime(Math.min(duration, 60));
-      if (duration > 60) {
+      // Set initial end time to min(60, duration) and ensure at least 10s duration
+      const initialEndTime = Math.min(duration, 60);
+      setVideoEndTime(initialEndTime);
+      if (duration < 10) {
         dispatch(showToast({ 
-          message: "Video exceeds 60 seconds limit. Trim below (max 60s).", 
+          message: "Video must be at least 10 seconds long.", 
+          type: 'error' 
+        }));
+        setReadyToSubmit(false);
+      } else if (duration > 60) {
+        dispatch(showToast({ 
+          message: "Video exceeds 60 seconds limit. Trim below (max 60s, min 10s).", 
           type: 'warning' 
         }));
+        setReadyToSubmit(true);
+      } else {
+        setReadyToSubmit(true);
       }
-      setReadyToSubmit(true);
     }
   }, [contentType, aspectRatio, dispatch, isSubmitting]);
 
@@ -118,7 +128,7 @@ const CreateContent = () => {
     setVideoEndTime(60);
     setIsVideoCropped(false);
     setReadyToSubmit(false);
-    setIsSubmitting(false); // Reset submission state
+    setIsSubmitting(false);
   }, [contentType, dispatch]);
 
   const changeAspectRatio = (ratio) => {
@@ -223,14 +233,23 @@ const CreateContent = () => {
   const onSubmit = async (data) => {
     if (!readyToSubmit) {
       dispatch(showToast({
-        message: "Please wait for video metadata to load before submitting.",
+        message: "Please wait for video metadata to load or ensure video meets duration requirements.",
         type: 'warning'
       }));
       return;
     }
 
+    const trimmedDuration = videoEndTime - videoStartTime;
+    if (contentType === 'reel' && (trimmedDuration < 10 || trimmedDuration > 60)) {
+      dispatch(showToast({
+        message: "Video duration must be between 10 and 60 seconds.",
+        type: 'error'
+      }));
+      return;
+    }
+
     setLoading(true);
-    setIsSubmitting(true); // Mark submission start
+    setIsSubmitting(true);
     try {
       const formData = new FormData();
       formData.append('caption', data.caption);
@@ -327,7 +346,7 @@ const CreateContent = () => {
                 >
                   <Upload size={40} className="text-white/50 mb-4" />
                   <p className="text-white/70">Click to upload {contentType === 'post' ? 'an image' : 'a video'}</p>
-                  <p className="text-white/50 text-sm mt-2">{contentType === 'post' ? 'JPG, PNG' : 'MP4, MOV (max 60s)'}</p>
+                  <p className="text-white/50 text-sm mt-2">{contentType === 'post' ? 'JPG, PNG' : 'MP4, MOV (10s-60s)'}</p>
                 </div>
               ) : (
                 <div className="relative w-full">
@@ -383,26 +402,27 @@ const CreateContent = () => {
                       {videoDuration > 0 && !isSubmitting && (
                         <div className="mt-4">
                           <p className="text-white/70 text-center mb-2">
-                            Duration: {Math.min(videoEndTime - videoStartTime, 60).toFixed(1)}s 
+                            Duration: {(videoEndTime - videoStartTime).toFixed(1)}s 
                             {videoDuration > 60 ? ' (from original ' + videoDuration.toFixed(1) + 's)' : ''}
                           </p>
-                          {videoDuration > 60 && (
+                          {videoDuration >= 10 && (
                             <div className="bg-white/10 p-4 rounded-lg mb-4">
-                              <p className="text-white/80 text-sm mb-3">Trim your video (max 60 seconds):</p>
+                              <p className="text-white/80 text-sm mb-3">Trim your video (10s - 60s):</p>
                               <div className="flex items-center gap-4 mb-2">
                                 <div className="flex-1">
                                   <label className="text-white/70 text-xs mb-1 block">Start Time: {videoStartTime.toFixed(1)}s</label>
                                   <input 
                                     type="range" 
                                     min="0" 
-                                    max={Math.max(0, videoDuration - 60)}
+                                    max={videoDuration - 10} // Ensure at least 10s remain
                                     step="0.1"
                                     value={videoStartTime}
                                     onChange={(e) => {
                                       const newStart = parseFloat(e.target.value);
-                                      const newEnd = Math.min(videoDuration, newStart + 60);
+                                      const minEnd = newStart + 10; // Minimum 10s duration
+                                      const maxEnd = Math.min(videoDuration, newStart + 60); // Maximum 60s duration
                                       setVideoStartTime(newStart);
-                                      setVideoEndTime(newEnd);
+                                      setVideoEndTime(Math.max(minEnd, Math.min(maxEnd, videoEndTime)));
                                     }}
                                     className="w-full"
                                   />
@@ -411,15 +431,12 @@ const CreateContent = () => {
                                   <label className="text-white/70 text-xs mb-1 block">End Time: {videoEndTime.toFixed(1)}s</label>
                                   <input 
                                     type="range" 
-                                    min={videoStartTime}
-                                    max={videoDuration}
+                                    min={videoStartTime + 10} // Enforce minimum 10s duration
+                                    max={Math.min(videoDuration, videoStartTime + 60)} // Enforce maximum 60s duration
                                     step="0.1"
                                     value={videoEndTime}
                                     onChange={(e) => {
                                       const newEnd = parseFloat(e.target.value);
-                                      if (newEnd - videoStartTime > 60) {
-                                        setVideoStartTime(newEnd - 60);
-                                      }
                                       setVideoEndTime(newEnd);
                                     }}
                                     className="w-full"
@@ -578,13 +595,13 @@ const CreateContent = () => {
                 <span className="relative z-10 flex items-center">
                   {loading ? (
                     <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-[#198754]"></div>
-                    ) : (
+                  ) : (
                     <>
                       {`Share ${contentType === 'post' ? 'Post' : 'Reel'}`}
                       <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                      </>
+                    </>
                   )}
-              </span>
+                </span>
                 <div className={`absolute inset-0 ${selectedFile && readyToSubmit ? 'bg-gradient-to-r from-[#198754] to-[#1E3932] opacity-0 group-hover:opacity-100' : ''} transition-opacity duration-300`}></div>
               </button>
               <button
