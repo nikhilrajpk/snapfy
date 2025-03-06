@@ -68,13 +68,16 @@ export const isSavedPost = async (data) => {
   try {
     const response = await axiosInstance.get('is-saved-post/', {
       params: data, // { post: 36, user: "f8c18464-..." }
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
     console.log('isSavedPost response:', response.data);
-    return { exists: response.data.message };
+    return {
+      exists: response.data.exists,      // Use 'exists' directly
+      savedPostId: response.data.savedPostId, // Include savedPostId
+    };
   } catch (error) {
     console.error('Error in isSavedPost:', error.response?.data || error.message);
-    return { exists: false };
+    return { exists: false, savedPostId: null };
   }
 };
 

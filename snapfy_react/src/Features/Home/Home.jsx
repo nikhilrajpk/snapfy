@@ -1,7 +1,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { getPosts } from '../../API/postAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
-import Loader from '../../utils/Loader/Loader'
+import Loader from '../../utils/Loader/Loader';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const Stories = React.lazy(() => import('../../Components/Stories/Stories'));
@@ -17,17 +17,17 @@ function Home() {
     const retrievePosts = async () => {
       try {
         const response = await getPosts();
-        console.log("Posts fetched:", response);
+        console.log('Posts fetched:', response);
         setPosts(response);
       } catch (error) {
-        console.log("Error fetching posts on home:", error);
+        console.log('Error fetching posts on home:', error);
       } finally {
         setIsLoading(false);
       }
     };
 
     retrievePosts();
-  }, []); // Empty dependency array to run once on mount
+  }, []);
 
   const normalizeUrl = (url) => {
     return url.replace(/^(auto\/upload\/)+/, '');
@@ -37,30 +37,28 @@ function Home() {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
       <div className="container mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left sidebar - 2 columns */}
           <div className="lg:col-span-2">
             <div className="sticky top-6">
-              <Suspense fallback={<Loader/>}>
+              <Suspense fallback={<Loader />}>
                 <Logo />
               </Suspense>
-              <Suspense fallback={<Loader/>}>
+              <Suspense fallback={<Loader />}>
                 <Navbar />
               </Suspense>
             </div>
           </div>
 
-          {/* Main content - 7 columns */}
           <div className="lg:col-span-7 space-y-6">
-            <Suspense fallback={<Loader/>}>
+            <Suspense fallback={<Loader />}>
               <Stories />
             </Suspense>
-            {/* Posts */}
             {isLoading ? (
               <div className="text-center">Loading posts...</div>
             ) : posts.length > 0 ? (
               posts.map((p) => (
-                <Suspense key={p?.id} fallback={<Loader/>}>
+                <Suspense key={p?.id} fallback={<Loader />}>
                   <Post
+                    id={p?.id}
                     username={p?.user?.username}
                     profileImage={
                       p?.user?.profile_picture
@@ -68,11 +66,11 @@ function Home() {
                         : '/default-profile.png'
                     }
                     image={normalizeUrl(p?.file)}
-                    likes={1234}
-                    description={p?.caption}
-                    hashtags={p?.hashtags.map((tag) => tag.name)} // Converting to array of strings
-                    mentions={p?.mentions.map((m) => m.username)} // Converting to array of strings
-                    commentCount={111}
+                    likes={1234} // Replace with p?.likes if available
+                    caption={p?.caption}
+                    hashtags={p?.hashtags.map((tag) => tag.name)}
+                    mentions={p?.mentions.map((m) => m.username)}
+                    commentCount={111} // Replace with p?.commentCount if available
                   />
                 </Suspense>
               ))
@@ -81,11 +79,10 @@ function Home() {
             )}
           </div>
 
-          {/* Right sidebar - 3 columns */}
           <div className="lg:col-span-3">
             <div className="sticky top-6 space-y-4">
               <h2 className="text-gray-700 font-semibold text-lg mb-3">SUGGESTED FOR YOU</h2>
-              <Suspense fallback={<Loader/>}>
+              <Suspense fallback={<Loader />}>
                 <Suggestions />
               </Suspense>
             </div>

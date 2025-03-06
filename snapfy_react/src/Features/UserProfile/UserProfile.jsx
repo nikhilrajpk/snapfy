@@ -1,63 +1,3 @@
-// import React, { lazy, Suspense, useEffect, useState, useCallback } from "react";
-// import { useSelector, useDispatch } from "react-redux";
-// import axiosInstance from "../../axiosInstance";
-// import { CLOUDINARY_ENDPOINT } from "../../APIEndPoints";
-// import { showToast } from "../../redux/slices/toastSlice";
-
-// const Loader = lazy(() => import('../../utils/Loader/Loader'));
-// const ProfilePage = lazy(() => import('../../Components/UserProfile/ProfilePage'));
-
-// const UserProfile = () => {
-//   const [previewImage, setPreviewImage] = useState(null);
-//   const { user } = useSelector(state => state.user);
-//   const dispatch = useDispatch()
-
-//   const fetchProfilePicture = useCallback(async () => {
-//     if (!user || !user.profile_picture) return;
-//     try {
-//       let imageUrl;
-//       if (user.profile_picture.startsWith('http')) {
-//         const response = await axiosInstance.get('profile/picture/', {
-//           responseType: 'blob',
-//         });
-//         imageUrl = URL.createObjectURL(response.data);
-//       } else {
-//         imageUrl = `${CLOUDINARY_ENDPOINT}${user.profile_picture}`;
-//       }
-//       setPreviewImage(imageUrl);
-//     } catch (error) {
-//       console.error("Error fetching profile picture:", error);
-//       dispatch(showToast({message:"Error fetching profile picture", type:"error"}))
-//       setPreviewImage(null); 
-//     }
-//   }, [user, dispatch]);
-
-//   useEffect(() => {
-//     fetchProfilePicture();
-//   }, [fetchProfilePicture]);
-
-//   const loggedInUserData = {
-//     username: user?.username || '',
-//     profileImage: previewImage || "/path/to/post1.jpg",
-//     postCount: user?.posts?.length || 0,
-//     followerCount: user?.followers?.length || 0,
-//     followingCount: user?.following?.length || 0,
-//     first_name: user?.first_name,
-//     last_name: user?.last_name,
-//     bio: user?.bio || '',
-//     posts: user?.posts || [{ imageUrl: "/path/to/post1.jpg" }],
-//   };
-
-//   return (
-//     <Suspense fallback={<Loader />}>
-//       <ProfilePage isLoggedInUser={true} userData={loggedInUserData} />
-//     </Suspense>
-//   );
-// };
-
-// export default React.memo(UserProfile);
-
-
 import React, { lazy, Suspense, useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axiosInstance from "../../axiosInstance";
@@ -72,11 +12,11 @@ const UserProfile = () => {
   const [userData, setUserData] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const {user} = useSelector(state=> state.user)
+  const { user } = useSelector(state => state.user);
   const navigate = useNavigate();
 
-  const username = user.username
-  
+  const username = user.username;
+
   const fetchProfilePicture = useCallback(async (profilePicture) => {
     if (!profilePicture) {
       console.log("No profile picture provided, using default");
@@ -98,30 +38,25 @@ const UserProfile = () => {
   const fetchUserData = useCallback(async () => {
     setIsLoading(true);
     try {
-      // console.log("Fetching user data for:", username);
       const response = await getUser(username);
-      // console.log("User data fetched:", response);
       if (!response || typeof response !== 'object') {
         throw new Error("Invalid user data response");
       }
       setUserData(response);
       await fetchProfilePicture(response.profile_picture);
     } catch (error) {
-      // console.error("Error retrieving user data:", error.response?.data || error.message || error);
+      console.error("Error retrieving user data:", error.response?.data || error.message || error);
       navigate('/home', { replace: true });
     } finally {
       setIsLoading(false);
     }
   }, [username, fetchProfilePicture, navigate]);
 
-
-  // Expose refetch function to be passed down
   const refetchUserData = useCallback(() => {
     fetchUserData();
   }, [fetchUserData]);
 
   useEffect(() => {
-    // console.log("useEffect triggered for username:", username);
     let isMounted = true;
     fetchUserData().then(() => {
       if (!isMounted) {
@@ -129,8 +64,7 @@ const UserProfile = () => {
       }
     });
     return () => {
-      isMounted = false; // Cleanup to prevent state updates on unmount
-      // console.log("useEffect cleanup for username:", username);
+      isMounted = false;
     };
   }, [fetchUserData, username]);
 
@@ -164,7 +98,12 @@ const UserProfile = () => {
 
   return (
     <Suspense fallback={<Loader />}>
-      <ProfilePage isLoggedInUser={true} userData={profileData} onPostDeleted={refetchUserData} />
+      <ProfilePage
+        isLoggedInUser={true}
+        userData={profileData}
+        onPostDeleted={refetchUserData}
+        onSaveChange={refetchUserData} // Pass refetch as onSaveChange
+      />
     </Suspense>
   );
 };

@@ -2,36 +2,19 @@ import React, { useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle } from 'lucide-react';
-
-// import Logo from '../Logo/Logo';
-// import Navbar from '../Navbar/Navbar';
-import SideBar from '../Navbar/SideBar'
+import SideBar from '../Navbar/SideBar';
 import PostPopup from '../Post/PostPopUp';
 
-const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted }) => {
+const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted, onSaveChange }) => {
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar with Logo and Navbar */}
-      {/* <div className="w-56 border-r border-gray-200 hidden lg:block">
-        <div className="sticky top-0 p-4 h-screen">
-          <div className="mb-3 mt-2 ml-[-6px]">
-            <Logo />
-          </div>
-          <Navbar />
-        </div>
-      </div> */}
-
-      <SideBar/>
-      
-      {/* Main content */}
+      <SideBar />
       <div className="flex-1 max-w-4xl mx-auto p-6">
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          {/* Profile header with background image */}
           <div className="h-40 bg-gradient-to-r from-orange-100 to-amber-100 relative"></div>
-          
           <div className="px-6 pb-6 relative">
             {isLoggedInUser ? (
-              <LoggedInUserProfile userData={userData} onPostDeleted={onPostDeleted} />
+              <LoggedInUserProfile userData={userData} onPostDeleted={onPostDeleted} onSaveChange={onSaveChange} />
             ) : (
               <OtherUserProfile userData={userData} />
             )}
@@ -42,7 +25,7 @@ const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted }) => {
   );
 };
 
-const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
+const LoggedInUserProfile = ({ userData, onPostDeleted, onSaveChange }) => {
   const [activeTab, setActiveTab] = useState('POSTS');
   const { user } = useSelector(state => state.user);
   const [imageError, setImageError] = useState(false);
@@ -55,7 +38,6 @@ const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
 
   return (
     <div className="w-full">
-      {/* Profile image and actions row */}
       <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
         <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md hover:scale-[3] hover:relative hover:translate-x-28 hover:translate-y-10 duration-700">
           <img 
@@ -66,14 +48,12 @@ const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
             onError={handleImageError}
           />
         </div>
-        
         <div className="flex-grow mt-4 md:mt-0 md:ml-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold">{userData?.username}</h1>
               {fullName && <h2 className="text-lg text-gray-700 font-medium">{fullName}</h2>}
             </div>
-            
             <Link 
               to={`/${user?.username}/profile/update`} 
               className="mt-3 md:mt-0 bg-gradient-to-r from-[#1E3932] to-[#198754] hover:from-[#198754] hover:to-[#1E3932] duration-500 hover:scale-110 text-white px-6 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center"
@@ -83,30 +63,23 @@ const LoggedInUserProfile = ({ userData, onPostDeleted }) => {
           </div>
         </div>
       </div>
-
-      {/* Bio section */}
       <div className="mb-8">
         <p className="text-gray-800 whitespace-pre-line">
           {userData?.bio || "No bio available"}
         </p>
       </div>
-      
-      {/* Stats cards */}
       <ProfileStatsCards 
         posts={userData?.postCount} 
         followers={userData?.followerCount} 
         following={userData?.followingCount} 
       />
-      
-      {/* Content tabs */}
       <ProfileContentTabs 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         showArchived={true} 
         showSaved={true}
       />
-      
-      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} onPostDeleted={onPostDeleted} />
+      <ProfileContent posts={userData?.posts} userData={userData} type={activeTab.toLowerCase()} onPostDeleted={onPostDeleted} onSaveChange={onSaveChange} />
     </div>
   );
 };
@@ -241,7 +214,7 @@ const TabButton = ({ label, icon, isActive, onClick }) => (
   </button>
 );
 
-const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
+const ProfileContent = ({ posts, type, userData, onPostDeleted, onSaveChange }) => {
   const [mediaErrors, setMediaErrors] = useState(new Set());
   const [selectedPost, setSelectedPost] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -250,10 +223,8 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
     setMediaErrors(prev => new Set(prev).add(index));
   }, []);
 
-  // Determine which posts to display based on type
   let filteredPosts = [];
   if (type === 'saved') {
-    // Extract post objects from saved_posts
     filteredPosts = (userData?.saved_posts || []).map(saved => saved.post);
   } else {
     filteredPosts = (posts || []).filter(post => {
@@ -323,7 +294,6 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
                   onError={() => handleMediaError(index)}
                 />
               )}
-              
               <div className="absolute inset-0 bg-[#198754] bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                 <div className="flex space-x-4 text-white">
                   <div className="flex items-center">
@@ -340,7 +310,6 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
           );
         })}
       </div>
-
       {isPopupOpen && (
         <PostPopup
           post={selectedPost}
@@ -348,11 +317,11 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
           isOpen={isPopupOpen}
           onClose={closePostPopup}
           onPostDeleted={onPostDeleted}
+          onSaveChange={onSaveChange} // Pass onSaveChange to PostPopup
         />
       )}
     </>
   );
 };
-
 
 export default React.memo(ProfilePage);

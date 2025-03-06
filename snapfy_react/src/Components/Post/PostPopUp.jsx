@@ -8,7 +8,7 @@ import { showToast } from '../../redux/slices/toastSlice';
 import { deletePost, savePost, isSavedPost, removeSavedPost } from '../../API/postAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
-const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null }) => {
   const [liked, setLiked] = useState(false);
   const [comment, setComment] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
@@ -19,7 +19,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedPostId, setSavedPostId] = useState(null);
-  const [shouldRefetch, setShouldRefetch] = useState(false); // New state to track refetch need
+  const [shouldRefetch, setShouldRefetch] = useState(false); // Track if refetch is needed
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
   const menuRef = useRef(null);
@@ -29,7 +29,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const currentUser = user;
-
   // Detect clicks outside to close popup
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -122,31 +121,18 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
 
       console.log('Checking saved status for:', { postId: post.id, userId: user.id });
 
-      const savedEntry = userData?.saved_posts?.find(saved => saved.post.id === post.id);
-      if (savedEntry) {
-        setSavedPostId(savedEntry.id);
-        setSaved(true);
-        console.log(`Found SavedPost ID ${savedEntry.id} for post ${post.id}`);
-      } else {
-        setSavedPostId(null);
-        setSaved(false);
-        console.log(`No SavedPost entry found for post ${post.id}`);
-      }
-
       try {
         const response = await isSavedPost({ post: post.id, user: user.id });
         if (isMounted) {
-          const isSaved = response.exists;
-          setSaved(isSaved);
-          console.log(`Post ${post.id} saved status (API):`, isSaved);
-          if (isSaved && !savedEntry) {
-            console.warn('API indicates saved, but no local SavedPost entry found');
-          }
+          setSaved(response.exists || false);
+          setSavedPostId(response.savedPostId || null);
+          console.log(`Post ${post.id} saved status (API):`, response.exists);
         }
       } catch (error) {
         if (isMounted) {
           console.error('Error checking if post is saved:', error);
           setSaved(false);
+          setSavedPostId(null);
         }
       }
     };
@@ -158,35 +144,26 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
     return () => {
       isMounted = false;
     };
-  }, [isOpen, post?.id, user?.id, userData?.saved_posts]);
+  }, [isOpen, post?.id, user?.id]);
 
   if (!isOpen || !post) return null;
-
-  const handleVideoLoaded = (e) => {
-    console.log("Video duration loaded:", e.target.duration);
-  };
-
-  const handleLike = () => setLiked(!liked);
 
   const handleSave = async () => {
     if (!saved) {
       setSaved(true);
       try {
-        const response = await savePost({ 'post': post?.id });
-        console.log('saved post :: ', response);
-        if (response.data?.id) {
-          setSavedPostId(response.data.id);
-        }
-        dispatch(showToast({ message: `Post ${post?.caption} saved successfully`, type: 'success' }));
-        setShouldRefetch(true); // Mark for refetch on close
+        const response = await savePost({ post: post?.id });
+        console.log('Saved post :: ', response);
+        setSavedPostId(response.id);
+        dispatch(showToast({ message: `Post "${post?.caption}" saved successfully`, type: 'success' }));
+        setShouldRefetch(true); // Flag for refetch on close
       } catch (error) {
-        console.log('error saving post::', error);
+        console.error('Error saving post:', error.response?.data || error.message);
         setSaved(false);
         dispatch(showToast({ message: 'Error saving post', type: 'error' }));
       }
     } else {
       setSaved(false);
-      console.log('Attempting to remove SavedPost ID:', savedPostId);
       if (!savedPostId) {
         console.error('No SavedPost ID available to remove');
         dispatch(showToast({ message: 'Error: Saved post ID not found', type: 'error' }));
@@ -194,14 +171,15 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
       }
       try {
         const response = await removeSavedPost(savedPostId);
+        console.log('Removed saved post :: ', response);
         setSavedPostId(null);
         dispatch(showToast({
           message: response.message || "Post removed from save list",
           type: 'success'
         }));
-        setShouldRefetch(true); // Mark for refetch on close
+        setShouldRefetch(true); // Flag for refetch on close
       } catch (error) {
-        console.log('error in removing post from save list:', error?.response?.data);
+        console.error('Error removing post from save list:', error.response?.data || error.message);
         setSaved(true);
         dispatch(showToast({
           message: 'Error removing post from saved list',
@@ -209,6 +187,15 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
         }));
       }
     }
+  };
+
+  const handleClose = () => {
+    if (shouldRefetch && onSaveChange) {
+      console.log('Refetching user data on popup close due to save/unsave action');
+      onSaveChange(); // Trigger refetch in parent
+    }
+    setShouldRefetch(false); // Reset flag
+    onClose(); // Close popup
   };
 
   const handleCommentSubmit = (e) => {
@@ -243,7 +230,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
       setShowDeleteConfirmation(false);
       onClose();
       if (onPostDeleted) {
-        onPostDeleted();
+        onPostDeleted(post.id);
       }
       dispatch(showToast({ message: "Post deleted successfully", type: "success" }));
       navigate(`/${currentUser.username}`);
@@ -259,6 +246,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
     setShowDeleteConfirmation(false);
   };
 
+
+  const handleLike = ()=> setLiked(!liked)
+
+
   const handleArchivePost = () => {
     console.log("Archive post:", post.id);
     setShowMenu(false);
@@ -268,16 +259,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
     setShowMentions(!showMentions);
   };
 
-  // Custom onClose handler to refetch only if needed
-  const handleClose = () => {
-    if (shouldRefetch && onPostDeleted) {
-      console.log('Refetching user data on popup close due to save/unsave action');
-      onPostDeleted();
-    }
-    setShouldRefetch(false); // Reset for next interaction
-    onClose(); // Call original onClose
-  };
-
+ 
   const formatText = (text) => {
     if (!text) return '';
     
@@ -366,6 +348,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
     { id: 3, username: 'user3', text: 'Where is this? Looks wonderful!', likes: 2, timestamp: new Date(Date.now() - 86400000) }
   ];
 
+  const handleVideoLoaded = (e) => {
+    console.log("Video duration loaded:", e.target.duration);
+  };
+
   const handleVideoError = (e) => {
     console.log("Video load error:", e);
     console.log("Attempted URL:", videoRef.current?.src);
@@ -403,7 +389,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
         className="bg-white rounded-xl border-2 border-[#198754] overflow-hidden max-w-6xl w-full max-h-[90vh] flex flex-col md:flex-row shadow-2xl"
       >
         <button 
-          onClick={handleClose} // Use custom handler instead of onClose directly
+          onClick={handleClose} // Use updated handleClose
           className="absolute top-4 z-999 right-4 bg-[#198754] rounded-full p-1"
         >
           <X size={24} color='white' />
@@ -590,7 +576,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) =>
                 </button>
               </div>
               <button onClick={handleSave}>
-                <Bookmark size={24} className={`${saved ? 'fill-black' : ''} transition-transform hover:scale-110`} />
+                <Bookmark color='#1E3932' size={24} className={`${saved ? 'fill-[#1E3932]' : ''} transition-transform hover:scale-110`} />
               </button>
             </div>
             
