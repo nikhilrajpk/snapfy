@@ -83,15 +83,16 @@ class CreateSavedPostAPIView(APIView):
     
     def post(self, request):
         user = request.user
-        data = request.data.copy()  # Make a mutable copy of request.data
-        data['user'] = user.id      # Set user ID as a single value
+        data = request.data.copy()
+        data['user'] = user.id
         logger.info(f"Received data for saving post: {data}")
         serializer = CreateSavedPostSerializer(data=data)
         if serializer.is_valid():
             saved_post = serializer.save()
             logger.info(f"Saved post created: {saved_post.id}")
             return Response({
-                "message": "Post saved successfully."
+                "message": "Post saved successfully.",
+                "id": saved_post.id  # Include the SavedPost ID
             }, status=status.HTTP_201_CREATED)
         logger.error(f"Serializer errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -123,9 +124,13 @@ class IsSavedPostAPIView(APIView):
             return Response({"error": "Missing 'post' or 'user' parameter"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            is_saved = SavedPost.objects.filter(post=post_id, user=user_id).exists()
+            saved_post = SavedPost.objects.filter(post=post_id, user=user_id).first()
+            is_saved = saved_post is not None
             logger.info(f"Post {post_id} saved status for user {user_id}: {is_saved}")
-            return Response({"message": is_saved}, status=status.HTTP_200_OK)
+            return Response({
+                "exists": is_saved,
+                "savedPostId": saved_post.id if is_saved else None  # Include SavedPost ID if exists
+            }, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Error checking saved status: {str(e)}")
             return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
