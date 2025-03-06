@@ -46,3 +46,44 @@ export const getPosts = async ()=> {
     const response = await axiosInstance.get('posts/')
     return response.data
 }
+
+
+export const savePost = async (data)=>{
+  try{
+    const response = await axiosInstance.post('save-post/', data, {
+      'headers' : {
+        'Content-Type' : 'application/json'
+      }
+    })
+
+    return response.data
+  }catch(error){
+    throw error.response?.data || {'detail' : 'An error occured while saving the post'}
+  }
+}
+
+
+export const isSavedPost = async (data) => {
+  console.log('Sending isSavedPost request with params:', data);
+  try {
+    const response = await axiosInstance.get('is-saved-post/', {
+      params: data, // { post: 36, user: "f8c18464-..." }
+      headers: { 'Content-Type': 'application/json' }
+    });
+    console.log('isSavedPost response:', response.data);
+    return { exists: response.data.message };
+  } catch (error) {
+    console.error('Error in isSavedPost:', error.response?.data || error.message);
+    return { exists: false };
+  }
+};
+
+export const removeSavedPost = async (savedPostId) => {
+  try {
+    const response = await axiosInstance.delete(`remove-saved-post/${savedPostId}/`);
+    return response.data;
+  } catch (error) {
+    console.log(error);
+    throw error
+  }
+};

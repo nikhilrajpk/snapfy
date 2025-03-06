@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Smile, X, Bookmark, Send, MoreHorizontal, ChevronRight, ChevronLeft, Edit, Trash, Archive, ConeIcon } from 'lucide-react';
+import { Heart, MessageCircle, Smile, X, Bookmark, Send, MoreHorizontal, ChevronRight, ChevronLeft, Edit, Trash, Archive } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useSelector } from 'react-redux';
-import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useNavigate } from 'react-router-dom';
-import { deletePost } from '../../API/postAPI';
 import { useDispatch } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
+import { deletePost, savePost, isSavedPost, removeSavedPost } from '../../API/postAPI';
+import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
-const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null }) => {
   const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [comment, setComment] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
@@ -18,15 +17,18 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
   const [mentionedUsers, setMentionedUsers] = useState([]);
   const [showMentions, setShowMentions] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [savedPostId, setSavedPostId] = useState(null);
+  const [shouldRefetch, setShouldRefetch] = useState(false); // New state to track refetch need
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
   const menuRef = useRef(null);
   const confirmationRef = useRef(null);
   const videoRef = useRef(null);
-  const {user} = useSelector(state=> state.user)
-  const navigate = useNavigate() 
-  const dispatch = useDispatch()
-  const currentUser = user
+  const { user } = useSelector(state => state.user);
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const currentUser = user;
 
   // Detect clicks outside to close popup
   useEffect(() => {
@@ -35,12 +37,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         onClose();
       }
     };
-    
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       document.body.style.overflow = 'hidden';
     }
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.body.style.overflow = 'auto';
@@ -54,46 +54,40 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         setShowMenu(false);
       }
     };
-    
     if (showMenu) {
       document.addEventListener('mousedown', handleClickOutsideMenu);
     }
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutsideMenu);
     };
   }, [showMenu]);
 
-  // Handle clicks outside delete confirmation dialog
+  // Handle clicks outside delete confirmation
   useEffect(() => {
     const handleClickOutsideConfirmation = (event) => {
       if (confirmationRef.current && !confirmationRef.current.contains(event.target)) {
         setShowDeleteConfirmation(false);
       }
     };
-    
     if (showDeleteConfirmation) {
       document.addEventListener('mousedown', handleClickOutsideConfirmation);
     }
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutsideConfirmation);
     };
   }, [showDeleteConfirmation]);
-  
+
   // Focus comment input when replying
   useEffect(() => {
     if (replyTo && commentInputRef.current) {
       commentInputRef.current.focus();
     }
   }, [replyTo]);
-  
-  // Extract mentioned users from post caption and comments
+
+  // Extract mentioned users
   useEffect(() => {
     if (post) {
       const mentions = [];
-      
-      // Extract from mentions array
       if (post.mentions && post.mentions.length > 0) {
         post.mentions.forEach(mention => {
           if (!mentions.includes(mention.username)) {
@@ -101,8 +95,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
           }
         });
       }
-      
-      // Extract from comments
       if (post.comments) {
         post.comments.forEach(comment => {
           const commentMentions = comment.text.match(/@(\w+)/g) || [];
@@ -114,48 +106,136 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
           });
         });
       }
-      
       setMentionedUsers(mentions);
     }
   }, [post]);
-  
+
+  // Check saved status and find savedPostId
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkIfPostIsSaved = async () => {
+      if (!post?.id || !user?.id) {
+        console.log('Missing post or user ID, skipping save check:', { post: post?.id, user: user?.id });
+        return;
+      }
+
+      console.log('Checking saved status for:', { postId: post.id, userId: user.id });
+
+      const savedEntry = userData?.saved_posts?.find(saved => saved.post.id === post.id);
+      if (savedEntry) {
+        setSavedPostId(savedEntry.id);
+        setSaved(true);
+        console.log(`Found SavedPost ID ${savedEntry.id} for post ${post.id}`);
+      } else {
+        setSavedPostId(null);
+        setSaved(false);
+        console.log(`No SavedPost entry found for post ${post.id}`);
+      }
+
+      try {
+        const response = await isSavedPost({ post: post.id, user: user.id });
+        if (isMounted) {
+          const isSaved = response.exists;
+          setSaved(isSaved);
+          console.log(`Post ${post.id} saved status (API):`, isSaved);
+          if (isSaved && !savedEntry) {
+            console.warn('API indicates saved, but no local SavedPost entry found');
+          }
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error checking if post is saved:', error);
+          setSaved(false);
+        }
+      }
+    };
+
+    if (isOpen) {
+      checkIfPostIsSaved();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, post?.id, user?.id, userData?.saved_posts]);
+
   if (!isOpen || !post) return null;
-  
-  // Log video duration on load
+
   const handleVideoLoaded = (e) => {
     console.log("Video duration loaded:", e.target.duration);
   };
 
   const handleLike = () => setLiked(!liked);
-  const handleSave = () => setSaved(!saved);
-  
+
+  const handleSave = async () => {
+    if (!saved) {
+      setSaved(true);
+      try {
+        const response = await savePost({ 'post': post?.id });
+        console.log('saved post :: ', response);
+        if (response.data?.id) {
+          setSavedPostId(response.data.id);
+        }
+        dispatch(showToast({ message: `Post ${post?.caption} saved successfully`, type: 'success' }));
+        setShouldRefetch(true); // Mark for refetch on close
+      } catch (error) {
+        console.log('error saving post::', error);
+        setSaved(false);
+        dispatch(showToast({ message: 'Error saving post', type: 'error' }));
+      }
+    } else {
+      setSaved(false);
+      console.log('Attempting to remove SavedPost ID:', savedPostId);
+      if (!savedPostId) {
+        console.error('No SavedPost ID available to remove');
+        dispatch(showToast({ message: 'Error: Saved post ID not found', type: 'error' }));
+        return;
+      }
+      try {
+        const response = await removeSavedPost(savedPostId);
+        setSavedPostId(null);
+        dispatch(showToast({
+          message: response.message || "Post removed from save list",
+          type: 'success'
+        }));
+        setShouldRefetch(true); // Mark for refetch on close
+      } catch (error) {
+        console.log('error in removing post from save list:', error?.response?.data);
+        setSaved(true);
+        dispatch(showToast({
+          message: 'Error removing post from saved list',
+          type: 'error'
+        }));
+      }
+    }
+  };
+
   const handleCommentSubmit = (e) => {
     e.preventDefault();
-    //  send the comment to backend
     console.log(`Submitting comment: ${comment}${replyTo ? ` as reply to ${replyTo.username}` : ''}`);
     setComment('');
     setReplyTo(null);
   };
-  
+
   const handleReply = (username) => {
     setReplyTo({ username });
     setComment(`@${username} `);
   };
-  
+
   const handleEditPost = () => {
     console.log("Edit post:", post.id);
     setShowMenu(false);
-    // navigating to edit-post
     navigate(`/edit-post/${post.id}?username=${currentUser.username}`);
   };
-  
+
   const handleDeletePost = () => {
     setShowMenu(false);
     setShowDeleteConfirmation(true);
   };
 
   const confirmDeletePost = async (e) => {
-    e.stopPropagation(); // Prevent event from bubbling up to the overlay
+    e.stopPropagation();
     console.log("Confirmed delete post");
     try {
       await deletePost(post?.id);
@@ -163,7 +243,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
       setShowDeleteConfirmation(false);
       onClose();
       if (onPostDeleted) {
-        onPostDeleted(); // Trigger refetch in UserProfile
+        onPostDeleted();
       }
       dispatch(showToast({ message: "Post deleted successfully", type: "success" }));
       navigate(`/${currentUser.username}`);
@@ -175,48 +255,48 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
   };
 
   const cancelDeletePost = (e) => {
-    e.stopPropagation(); // Prevent event from bubbling up
+    e.stopPropagation();
     setShowDeleteConfirmation(false);
   };
-  
+
   const handleArchivePost = () => {
     console.log("Archive post:", post.id);
     setShowMenu(false);
-    // archive functionality 
   };
-  
+
   const toggleMentionedUsers = () => {
     setShowMentions(!showMentions);
   };
-  
-  // Format hashtags and mentions in text
+
+  // Custom onClose handler to refetch only if needed
+  const handleClose = () => {
+    if (shouldRefetch && onPostDeleted) {
+      console.log('Refetching user data on popup close due to save/unsave action');
+      onPostDeleted();
+    }
+    setShouldRefetch(false); // Reset for next interaction
+    onClose(); // Call original onClose
+  };
+
   const formatText = (text) => {
     if (!text) return '';
     
-    // Get hashtags and mentions from post
     const hashtags = post.hashtags || [];
     const mentions = post.mentions || [];
     
-    // Split the text into parts to handle hashtags and mentions
     const parts = [];
     let lastIndex = 0;
     
-    // Find hashtags
     const hashtagRegex = /#(\w+)/g;
     let hashMatch;
     while ((hashMatch = hashtagRegex.exec(text)) !== null) {
-      // Add text before the hashtag
       if (hashMatch.index > lastIndex) {
         parts.push({ type: 'text', content: text.substring(lastIndex, hashMatch.index) });
       }
-      
-      // Add the hashtag
       parts.push({ type: 'hashtag', content: hashMatch[0], tag: hashMatch[1] });
-      
       lastIndex = hashMatch.index + hashMatch[0].length;
     }
     
-    // Process the resulting string for mentions
     let processedText = lastIndex < text.length ? text.substring(lastIndex) : '';
     if (parts.length === 0) {
       processedText = text;
@@ -228,43 +308,31 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
     const mentionParts = [];
     
     while ((mentionMatch = mentionRegex.exec(processedText)) !== null) {
-      // Add text before the mention
       if (mentionMatch.index > mentionLastIndex) {
         mentionParts.push({ type: 'text', content: processedText.substring(mentionLastIndex, mentionMatch.index) });
       }
-      
-      // Add the mention
       mentionParts.push({ type: 'mention', content: mentionMatch[0], user: mentionMatch[1] });
-      
       mentionLastIndex = mentionMatch.index + mentionMatch[0].length;
     }
     
-    // Add any remaining text
     if (mentionLastIndex < processedText.length) {
       mentionParts.push({ type: 'text', content: processedText.substring(mentionLastIndex) });
     }
     
-    // If we processed mentions, add them to parts
     if (mentionParts.length > 0) {
       parts.push(...mentionParts);
     } else if (processedText.length > 0) {
       parts.push({ type: 'text', content: processedText });
     }
 
-    // If we have explicit hashtags or mentions from the post data, add them
     if (hashtags.length > 0 || mentions.length > 0) {
-      // Create a formatted caption with explicit hashtags and mentions
       let formattedText = text;
-      
-      // Add hashtags at the end
       hashtags.forEach(hashtag => {
         if (!formattedText.includes(`#${hashtag.name}`)) {
           formattedText += ` #${hashtag.name}`;
           parts.push({ type: 'hashtag', content: `#${hashtag.name}`, tag: hashtag.name });
         }
       });
-      
-      // Add mentions at the end
       mentions.forEach(mention => {
         if (!formattedText.includes(`@${mention.username}`)) {
           formattedText += ` @${mention.username}`;
@@ -273,7 +341,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
       });
     }
     
-    // Render the parts
     return (
       <>
         {parts.map((part, index) => {
@@ -288,35 +355,26 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
       </>
     );
   };
-  
-  // Check if current user is the post owner
-  const isPostOwner = currentUser && currentUser.username === userData?.username;
-  
-  // Dummy emojis - in a real app, use an emoji picker library
+
+  const isPostOwner = currentUser && currentUser.username === post?.user?.username;
+
   const emojis = ['😊', '❤️', '👍', '🔥', '😂', '😍', '🙌', '👏'];
-  
-  // Sample comments (replace with real data from post)
+
   const comments = post?.comments || [
     { id: 1, username: 'user1', text: 'Love this! #amazing', likes: 24, timestamp: new Date(Date.now() - 3600000) },
     { id: 2, username: 'user2', text: 'Great shot @user1 👏', likes: 5, timestamp: new Date(Date.now() - 7200000) },
     { id: 3, username: 'user3', text: 'Where is this? Looks wonderful!', likes: 2, timestamp: new Date(Date.now() - 86400000) }
   ];
 
-
-
   const handleVideoError = (e) => {
     console.log("Video load error:", e);
     console.log("Attempted URL:", videoRef.current?.src);
   };
 
-  
   const isVideo = post?.file?.includes('/video/upload/');
-  
-  // Format caption to include hashtags and mentions explicitly
+
   const getFormattedCaption = () => {
     let caption = post?.caption || '';
-    
-    // Add hashtags if they're not already in the caption
     if (post?.hashtags && post.hashtags.length > 0) {
       post.hashtags.forEach(hashtag => {
         if (!caption.includes(`#${hashtag.name}`)) {
@@ -324,8 +382,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         }
       });
     }
-    
-    // Add mentions if they're not already in the caption
     if (post?.mentions && post.mentions.length > 0) {
       post.mentions.forEach(mention => {
         if (!caption.includes(`@${mention.username}`)) {
@@ -333,12 +389,11 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         }
       });
     }
-    
     return caption;
   };
 
   const normalizeUrl = (url) => {
-    return url.replace(/^(auto\/upload\/)+/, '');
+    return url ? url.replace(/^(auto\/upload\/)+/, '') : '/default-post.png';
   };
 
   return (
@@ -347,33 +402,31 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         ref={popupRef}
         className="bg-white rounded-xl border-2 border-[#198754] overflow-hidden max-w-6xl w-full max-h-[90vh] flex flex-col md:flex-row shadow-2xl"
       >
-        {/* Close button */}
         <button 
-          onClick={onClose}
+          onClick={handleClose} // Use custom handler instead of onClose directly
           className="absolute top-4 z-999 right-4 bg-[#198754] rounded-full p-1"
         >
           <X size={24} color='white' />
         </button>
         
-        {/* Media section - left side */}
         <div className="relative w-full md:w-7/12 bg-black flex items-center justify-center">
-            {isVideo ? (
-                <video 
-                ref={videoRef}
-                src={normalizeUrl(post?.file)} // Normalize URL here
-                className="max-h-[90vh] max-w-full object-contain"
-                controls
-                autoPlay={false}
-                onLoadedMetadata={handleVideoLoaded}
-                onError={handleVideoError}
-                />
-                ) : (
-                <img 
-                src={normalizeUrl(post?.file)}
-                alt="Post"
-                className="max-h-[90vh] h-full max-w-full object-contain"
-                />
-            )}
+          {isVideo ? (
+            <video 
+              ref={videoRef}
+              src={normalizeUrl(post?.file)}
+              className="max-h-[90vh] max-w-full object-contain"
+              controls
+              autoPlay={false}
+              onLoadedMetadata={handleVideoLoaded}
+              onError={handleVideoError}
+            />
+          ) : (
+            <img 
+              src={normalizeUrl(post?.file)}
+              alt="Post"
+              className="max-h-[90vh] h-full max-w-full object-contain"
+            />
+          )}
           
           {post?.hasMultipleMedia && (
             <>
@@ -387,19 +440,17 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
           )}
         </div>
         
-        {/* Content section - right side */}
         <div className="w-full md:w-5/12 flex flex-col max-h-[90vh]">
-          {/* Header */}
           <div className="flex items-center p-4 border-b">
             <div className="w-8 h-8 rounded-full overflow-hidden mr-3">
               <img 
-                src={userData?.profileImage} 
-                alt={userData?.username}
+                src={`${CLOUDINARY_ENDPOINT}${post?.user?.profile_picture}` || '/default-profile.png'} 
+                alt={post?.user?.username || 'Unknown'}
                 className="w-full h-full object-cover"
               />
             </div>
-            <div className="flex-grow cursor-pointer" onClick={()=> navigate(`/user/${userData?.username}`)}>
-              <span className="font-bold text-sm">{userData?.username}</span>
+            <div className="flex-grow cursor-pointer" onClick={() => navigate(`/user/${post?.user?.username}`)}>
+              <span className="font-bold text-sm">{post?.user?.username || 'Unknown'}</span>
             </div>
             <div className="relative">
               <button 
@@ -408,8 +459,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               >
                 <MoreHorizontal size={20} />
               </button>
-              
-              {/* Options menu */}
               {showMenu && (
                 <div 
                   ref={menuRef}
@@ -454,7 +503,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
             </div>
           </div>
           
-          {/* Mentioned users panel */}
           {showMentions && (
             <div className="p-3 bg-gray-50 border-b">
               <div className="flex justify-between items-center mb-2">
@@ -465,7 +513,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               </div>
               <div className="flex flex-wrap gap-2">
                 {mentionedUsers.map((username, index) => (
-                  <span key={index} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm" onClick={()=> navigate(`/user/${username}`)}>
+                  <span key={index} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm" onClick={() => navigate(`/user/${username}`)}>
                     @{username}
                   </span>
                 ))}
@@ -473,21 +521,19 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
             </div>
           )}
           
-          {/* Caption and comments */}
           <div className="flex-grow overflow-y-auto p-4">
-            {/* Original post caption */}
             {post?.caption && (
               <div className="flex mb-4">
                 <div className="w-8 h-8 rounded-full overflow-hidden mr-3 flex-shrink-0">
                   <img 
-                    src={userData?.profileImage} 
-                    alt={userData?.username}
+                    src={`${CLOUDINARY_ENDPOINT}${post?.user?.profile_picture}` || '/default-profile.png'} 
+                    alt={post?.user?.username || 'Unknown'}
                     className="w-full h-full object-cover"
                   />
                 </div>
                 <div>
                   <p>
-                    <span className="font-bold text-sm mr-2">{userData?.username}</span>
+                    <span className="font-bold text-sm mr-2">{post?.user?.username || 'Unknown'}</span>
                     {formatText(getFormattedCaption())}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
@@ -496,14 +542,12 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
                 </div>
               </div>
             )}
-            
-            {/* Comments */}
             <div className="space-y-4">
               {comments.map(comment => (
                 <div key={comment.id} className="flex group">
                   <div className="w-8 h-8 rounded-full overflow-hidden mr-3 flex-shrink-0">
                     <img 
-                      src={`/default-profile.png`} 
+                      src={'/default-profile.png'} 
                       alt={comment.username}
                       className="w-full h-full object-cover"
                     />
@@ -532,7 +576,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
             </div>
           </div>
           
-          {/* Action buttons */}
           <div className="border-t p-4">
             <div className="flex justify-between mb-2">
               <div className="flex space-x-4">
@@ -551,15 +594,11 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               </button>
             </div>
             
-            {/* Like count */}
             <p className="font-bold text-sm mb-1">{post?.likes || 0} likes</p>
-            
-            {/* Timestamp */}
             <p className="text-xs text-gray-500 uppercase mb-3">
               {formatDistanceToNow(new Date(post?.created_at || Date.now()), { addSuffix: true })}
             </p>
             
-            {/* Reply to indicator */}
             {replyTo && (
               <div className="bg-gray-100 p-2 rounded-lg flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">
@@ -571,7 +610,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               </div>
             )}
             
-            {/* Comment form */}
             <form onSubmit={handleCommentSubmit} className="flex items-center">
               <button 
                 type="button" 
@@ -580,7 +618,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               >
                 <Smile size={24} className="text-gray-600" />
               </button>
-              
               <input
                 ref={commentInputRef}
                 type="text"
@@ -589,7 +626,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
-              
               <button 
                 type="submit" 
                 className={`font-semibold text-blue-500 ${!comment.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:text-blue-700'}`}
@@ -599,7 +635,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
               </button>
             </form>
             
-            {/* Emoji picker */}
             {showEmojis && (
               <div className="absolute bottom-16 left-0 bg-white p-2 rounded-lg shadow-lg border flex space-x-2">
                 {emojis.map(emoji => (
@@ -620,7 +655,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted=null }) => {
         </div>
       </div>
 
-      {/* Delete Confirmation Dialog */}
       {showDeleteConfirmation && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-50 z-50 flex items-center justify-center">
           <div 

@@ -144,6 +144,7 @@ const UserProfile = () => {
     last_name: userData.last_name || '',
     bio: userData.bio || '',
     posts: userData.posts || [],
+    saved_posts: userData.saved_posts || [],
   } : {
     username,
     profileImage: '/default-profile.png',
@@ -154,6 +155,7 @@ const UserProfile = () => {
     last_name: '',
     bio: '',
     posts: [],
+    saved_posts: [],
   };
 
   if (isLoading) {

@@ -250,13 +250,19 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted }) => {
     setMediaErrors(prev => new Set(prev).add(index));
   }, []);
 
-  const filteredPosts = (posts || []).filter(post => {
-    const isVideo = post.file.includes('/video/upload/');
-    if (type === 'posts') return true;
-    if (type === 'shorts') return isVideo;
-    if (type === 'saved' || type === 'archived') return true;
-    return false;
-  });
+  // Determine which posts to display based on type
+  let filteredPosts = [];
+  if (type === 'saved') {
+    // Extract post objects from saved_posts
+    filteredPosts = (userData?.saved_posts || []).map(saved => saved.post);
+  } else {
+    filteredPosts = (posts || []).filter(post => {
+      const isVideo = post.file.includes('/video/upload/');
+      if (type === 'posts') return true;
+      if (type === 'shorts') return isVideo;
+      return false;
+    });
+  }
 
   const openPostPopup = (post) => {
     setSelectedPost(post);
