@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Post, Hashtag
+from .models import *
 from user_app.models import User
 from moviepy.editor import VideoFileClip
 import os
@@ -290,5 +290,37 @@ class PostDeleteSerializer(serializers.ModelSerializer):
         model = Post
         fields = ('id',)
     
+    def delete(self, instance):
+        instance.delete()
+        
+        
+class SavedPostSerializer(serializers.ModelSerializer):
+    post = PostSerializer()
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    class Meta:
+        model = SavedPost
+        fields = ('id', 'post', 'saved_at', 'user')
+        
+class CreateSavedPostSerializer(serializers.ModelSerializer):
+    post = serializers.PrimaryKeyRelatedField(queryset=Post.objects.all())
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), default=serializers.CurrentUserDefault())
+
+    class Meta:
+        model = SavedPost
+        fields = ('post', 'user')
+
+    def create(self, validated_data):
+        # Create the SavedPost instance with post and user from validated_data
+        saved_post = SavedPost.objects.create(
+            post=validated_data['post'],
+            user=validated_data['user']
+        )
+        return saved_post
+    
+    
+class RemoveSavedPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedPost
+        fields = (id,)
     def delete(self, instance):
         instance.delete()

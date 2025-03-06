@@ -3,7 +3,7 @@ from django.db.models import Q
 from rest_framework import serializers
 from .models import User, Report
 from django.contrib.auth import authenticate
-from post_app.serializer import PostSerializer
+from post_app.serializer import PostSerializer, SavedPostSerializer
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -113,8 +113,9 @@ class UserSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only = True)
     is_staff = serializers.BooleanField(read_only = True)
     posts = PostSerializer(many=True)
+    saved_posts = SavedPostSerializer(many=True, read_only=True)
     class Meta:
         model = User
         fields = ( 'id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-            'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn'
+            'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts'
         )

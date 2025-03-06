@@ -74,3 +74,58 @@ class PostDeleteAPIView(APIView):
             return Response({"message": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
         except Post.DoesNotExist:
             return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        
+        
+        
+class CreateSavedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        user = request.user
+        data = request.data.copy()  # Make a mutable copy of request.data
+        data['user'] = user.id      # Set user ID as a single value
+        logger.info(f"Received data for saving post: {data}")
+        serializer = CreateSavedPostSerializer(data=data)
+        if serializer.is_valid():
+            saved_post = serializer.save()
+            logger.info(f"Saved post created: {saved_post.id}")
+            return Response({
+                "message": "Post saved successfully."
+            }, status=status.HTTP_201_CREATED)
+        logger.error(f"Serializer errors: {serializer.errors}")
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    
+class RemoveSavedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, pk):
+        try:
+            saved_post = SavedPost.objects.get(id=pk)
+            if saved_post.user.id != request.user.id:  # Compare user IDs directly
+                return Response({"detail": "You do not have permission to delete this saved post."}, status=status.HTTP_403_FORBIDDEN)
+            saved_post.delete()
+            return Response({"message": "Saved post removed successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except SavedPost.DoesNotExist:
+            return Response({"detail": "Saved post not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+class IsSavedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        logger.info(f"Received GET request with query params: {request.GET}")
+        post_id = request.GET.get('post')
+        user_id = request.GET.get('user')
+        
+        if not post_id or not user_id:
+            logger.warning("Missing 'post' or 'user' parameter in request")
+            return Response({"error": "Missing 'post' or 'user' parameter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            is_saved = SavedPost.objects.filter(post=post_id, user=user_id).exists()
+            logger.info(f"Post {post_id} saved status for user {user_id}: {is_saved}")
+            return Response({"message": is_saved}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error checking saved status: {str(e)}")
+            return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
