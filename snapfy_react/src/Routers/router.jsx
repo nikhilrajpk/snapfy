@@ -19,6 +19,7 @@ const EditContentPage = React.lazy(()=> import('../Pages/EditContentPage'))
 
 const SearchBarPage = React.lazy(()=> import('../Pages/SearchBarPage'))
 const ExplorePage = React.lazy(()=> import('../Pages/ExplorePage'))
+const Shorts = React.lazy(()=> import('../Features/Shorts/Shorts'))
 
 const router = createBrowserRouter([
     {
@@ -130,6 +131,15 @@ const router = createBrowserRouter([
                     </ProtectedRoute>
                 )
             },
+            {
+                path: '/shorts',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <Shorts/>
+                    </ProtectedRoute>
+                )
+            },
+
 
             {
                 path: '*',

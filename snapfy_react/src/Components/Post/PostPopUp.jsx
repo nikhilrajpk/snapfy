@@ -5,8 +5,9 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
-import { deletePost, savePost, isSavedPost, removeSavedPost } from '../../API/postAPI';
+import { deletePost, savePost, isSavedPost, removeSavedPost, archivePost, removeArchivedPost, isArchivedPost } from '../../API/postAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
+import { useQueryClient } from '@tanstack/react-query'; // Import useQueryClient
 
 const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null }) => {
   const [liked, setLiked] = useState(false);
@@ -19,6 +20,8 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedPostId, setSavedPostId] = useState(null);
+  const [archived, setArchived] = useState(false);
+  const [archivedPostId, setArchivedPostId] = useState(null);
   const [shouldRefetch, setShouldRefetch] = useState(false); // Track if refetch is needed
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
@@ -29,6 +32,9 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const currentUser = user;
+  const queryClient = useQueryClient(); // Initialize queryClient
+
+
   // Detect clicks outside to close popup
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -146,6 +152,29 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     };
   }, [isOpen, post?.id, user?.id]);
 
+  // Check archived status
+  useEffect(() => {
+    let isMounted = true;
+    const checkIfPostIsArchived = async () => {
+      if (!post?.id || !user?.id) return;
+      try {
+        const response = await isArchivedPost({ post: post.id, user: user.id });
+        if (isMounted) {
+          setArchived(response.exists || false);
+          setArchivedPostId(response.savedPostId || null); // Note: API returns 'savedPostId', should be 'archivedPostId'
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error checking if post is archived:', error);
+          setArchived(false);
+          setArchivedPostId(null);
+        }
+      }
+    };
+    if (isOpen) checkIfPostIsArchived();
+    return () => { isMounted = false; };
+  }, [isOpen, post?.id, user?.id]);
+
   if (!isOpen || !post) return null;
 
   const handleSave = async () => {
@@ -189,9 +218,47 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     }
   };
 
+  const handleArchivePost = async () => {
+    setShowMenu(false);
+    if (!archived) {
+      setArchived(true);
+      try {
+        const response = await archivePost({ post: post?.id, user: user.id });
+        setArchivedPostId(response.id);
+        dispatch(showToast({ message: `Post "${post?.caption}" archived successfully`, type: 'success' }));
+        setShouldRefetch(true);
+      } catch (error) {
+        console.error('Error archiving post:', error.response?.data || error.message);
+        setArchived(false);
+        dispatch(showToast({ message: 'Error archiving post', type: 'error' }));
+      }
+    } else {
+      setArchived(false);
+      if (!archivedPostId) {
+        console.error('No ArchivedPost ID available to remove');
+        dispatch(showToast({ message: 'Error: Archived post ID not found', type: 'error' }));
+        return;
+      }
+      try {
+        const response = await removeArchivedPost(archivedPostId);
+        setArchivedPostId(null);
+        dispatch(showToast({ message: response.message || "Post removed from archive", type: 'success' }));
+        setShouldRefetch(true);
+        
+        // Invalidate explore-posts query to trigger refetch
+        queryClient.invalidateQueries({ queryKey: ['explore-posts'] });
+
+      } catch (error) {
+        console.error('Error removing post from archive:', error.response?.data || error.message);
+        setArchived(true);
+        dispatch(showToast({ message: 'Error removing post from archive', type: 'error' }));
+      }
+    }
+  };
+
   const handleClose = () => {
     if (shouldRefetch && onSaveChange) {
-      console.log('Refetching user data on popup close due to save/unsave action');
+      console.log('Refetching user data on popup close due to save/archive action');
       onSaveChange(); // Trigger refetch in parent
     }
     setShouldRefetch(false); // Reset flag
@@ -249,11 +316,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
 
   const handleLike = ()=> setLiked(!liked)
 
-
-  const handleArchivePost = () => {
-    console.log("Archive post:", post.id);
-    setShowMenu(false);
-  };
 
   const toggleMentionedUsers = () => {
     setShowMentions(!showMentions);
@@ -466,12 +528,9 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                         <Trash size={16} className="mr-2" />
                         <span>Delete Post</span>
                       </button>
-                      <button 
-                        onClick={handleArchivePost}
-                        className="flex items-center w-full p-2 hover:bg-gray-100 text-red-500 text-left"
-                      >
+                      <button onClick={handleArchivePost} className="flex items-center w-full p-2 hover:bg-gray-100 text-gray-700 text-left">
                         <Archive size={16} className="mr-2" />
-                        <span>Archive Post</span>
+                        <span>{archived ? 'Unarchive' : 'Archive'} Post</span>
                       </button>
                     </>
                   )}

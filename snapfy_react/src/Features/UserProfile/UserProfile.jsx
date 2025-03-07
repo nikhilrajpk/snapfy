@@ -42,7 +42,6 @@ const UserProfile = () => {
       if (!response || typeof response !== 'object') {
         throw new Error("Invalid user data response");
       }
-      // Sort posts by id in descending order
       const sortedPosts = (response.posts || []).sort((a, b) => b.id - a.id);
       setUserData({ ...response, posts: sortedPosts });
       await fetchProfilePicture(response.profile_picture);
@@ -79,8 +78,9 @@ const UserProfile = () => {
     first_name: userData.first_name || '',
     last_name: userData.last_name || '',
     bio: userData.bio || '',
-    posts: userData.posts || [], // Already sorted
+    posts: userData.posts || [],
     saved_posts: userData.saved_posts || [],
+    archived_posts: userData.archived_posts || [],
   } : {
     username,
     profileImage: '/default-profile.png',
@@ -92,7 +92,10 @@ const UserProfile = () => {
     bio: '',
     posts: [],
     saved_posts: [],
+    archived_posts: [], 
   };
+
+  console.log('UserProfile profileData:', profileData); // Log profileData
 
   if (isLoading) {
     return <Loader />;

@@ -42,10 +42,17 @@ export const getPost = async (postId)=> {
     return response.data
 }
 
-export const getPosts = async ()=> {
-    const response = await axiosInstance.get('posts/')
-    return response.data
-}
+export const getPosts = async (isExplore = false) => {
+  try {
+    const response = await axiosInstance.get('posts/', {
+      params: isExplore ? { explore: true } : {},
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    throw error;
+  }
+};
 
 
 export const savePost = async (data)=>{
@@ -88,5 +95,50 @@ export const removeSavedPost = async (savedPostId) => {
   } catch (error) {
     console.log(error);
     throw error
+  }
+};
+
+
+export const archivePost = async (data) => {
+  try {
+    const response = await axiosInstance.post('post/archive/', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error archiving post:', error);
+    throw error;
+  }
+};
+
+export const removeArchivedPost = async (archivedPostId) => {
+  try {
+    const response = await axiosInstance.delete(`post/archive/${archivedPostId}/`);
+    return response.data;
+  } catch (error) {
+    console.error('Error removing archived post:', error);
+    throw error;
+  }
+};
+
+export const isArchivedPost = async (data) => {
+  try {
+    const response = await axiosInstance.get('post/is-archived/', { params: data });
+    return response.data;
+  } catch (error) {
+    console.error('Error checking if post is archived:', error);
+    throw error;
+  }
+};
+
+
+
+export const getShorts = async () => {
+  try {
+    const response = await axiosInstance.get('posts/', {
+      params: { shorts: true },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching shorts:', error);
+    throw error;
   }
 };

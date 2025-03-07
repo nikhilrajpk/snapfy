@@ -6,6 +6,7 @@ import SideBar from '../Navbar/SideBar';
 import PostPopup from '../Post/PostPopUp';
 
 const ProfilePage = ({ isLoggedInUser, userData, onPostDeleted, onSaveChange }) => {
+  console.log('ProfilePage userData:', userData); // Log props
   return (
     <div className="flex min-h-screen bg-gray-50">
       <SideBar />
@@ -225,8 +226,17 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted, onSaveChange }) 
 
   let filteredPosts = [];
   if (type === 'saved') {
-    filteredPosts = (userData?.saved_posts || []).map(saved => saved.post);
+    // Sort saved posts by saved_at (latest first)
+    filteredPosts = (userData?.saved_posts || [])
+      .sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at))
+      .map(saved => saved.post);
+  } else if (type === 'archived') {
+    // Sort archived posts by archived_at (latest first)
+    filteredPosts = (userData?.archived_posts || [])
+      .sort((a, b) => new Date(b.archived_at) - new Date(a.archived_at))
+      .map(archived => archived.post);
   } else {
+    // Posts and Shorts remain filtered as before (sorted in UserProfile)
     filteredPosts = (posts || []).filter(post => {
       const isVideo = post.file.includes('/video/upload/');
       if (type === 'posts') return true;
@@ -235,6 +245,9 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted, onSaveChange }) 
     });
   }
 
+  console.log(`ProfileContent type: ${type}, filteredPosts:`, filteredPosts); // Log filtered posts
+
+  
   const openPostPopup = (post) => {
     setSelectedPost(post);
     setIsPopupOpen(true);
