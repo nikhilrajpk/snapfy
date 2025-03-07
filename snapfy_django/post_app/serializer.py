@@ -324,3 +324,35 @@ class RemoveSavedPostSerializer(serializers.ModelSerializer):
         fields = (id,)
     def delete(self, instance):
         instance.delete()
+        
+        
+class ArchivedPostSerializer(serializers.ModelSerializer):
+    post = PostSerializer()
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    
+    class Meta:
+        model = ArchivedPost
+        fields = ('id', 'post', 'user', 'archived_at')
+        
+class CreateArchivedPostSerializer(serializers.ModelSerializer):
+    post = serializers.PrimaryKeyRelatedField(queryset=Post.objects.all())
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    
+    class Meta:
+        model = ArchivedPost
+        fields = ('id', 'post', 'user')
+        
+    def create(self, validated_data):
+        archived_post = ArchivedPost.objects.create(
+            post=validated_data['post'],
+            user=validated_data['user']
+        )
+        return archived_post
+    
+    
+class RemoveArchivedPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ArchivedPost
+        fields = ('id',)
+    def delete(self,instance):
+        instance.delete()

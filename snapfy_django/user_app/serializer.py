@@ -3,7 +3,7 @@ from django.db.models import Q
 from rest_framework import serializers
 from .models import User, Report
 from django.contrib.auth import authenticate
-from post_app.serializer import PostSerializer, SavedPostSerializer
+from post_app.serializer import PostSerializer, SavedPostSerializer, ArchivedPostSerializer
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -110,12 +110,18 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only = True)
-    is_staff = serializers.BooleanField(read_only = True)
-    posts = PostSerializer(many=True)
+    id = serializers.UUIDField(read_only=True)
+    is_staff = serializers.BooleanField(read_only=True)
+    posts = serializers.SerializerMethodField()
     saved_posts = SavedPostSerializer(many=True, read_only=True)
+    archived_posts = ArchivedPostSerializer(many=True, read_only=True)
+
     class Meta:
         model = User
-        fields = ( 'id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-            'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts'
-        )
+        fields = ('id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
+                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts')
+
+    def get_posts(self, obj):
+        archived_post_ids = obj.archived_posts.values_list('post_id', flat=True)
+        posts = obj.posts.exclude(id__in=archived_post_ids).order_by('-id')
+        return PostSerializer(posts, many=True).data

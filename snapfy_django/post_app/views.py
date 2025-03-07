@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework import status
@@ -9,6 +10,7 @@ from .models import Post
 from .serializer import *
 import logging
 
+# posts/views.py
 class PostAPIView(ModelViewSet):
     queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('-id')
     permission_classes = [IsAuthenticated]
@@ -16,11 +18,22 @@ class PostAPIView(ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        user = self.request.user
+        archived_posts = ArchivedPost.objects.values_list('post_id', flat=True)
+        if self.request.user.is_authenticated:
+            if self.request.query_params.get('explore', 'false') == 'true':
+                queryset = queryset.exclude(id__in=archived_posts)
+            else:
+                queryset = queryset.exclude(~Q(user=user) & Q(id__in=archived_posts))
+        
+        # Filter for shorts (videos only)
+        if self.request.query_params.get('shorts', 'false') == 'true':
+            queryset = queryset.filter(file__contains='/video/upload/')
+        
         hashtag = self.request.query_params.get('hashtag', None)
         if hashtag:
-            # Remove '#' if present and filter posts containing the hashtag
             hashtag = hashtag.lstrip('#')
-            queryset = queryset.filter(hashtags__name__icontains=hashtag)
+            queryset = queryset.filter(Q(hashtags__name__icontains=hashtag) & ~Q(id__in=archived_posts))
         return queryset
 
 class PostCreateAPIView(APIView):
@@ -134,3 +147,64 @@ class IsSavedPostAPIView(APIView):
         except Exception as e:
             logger.error(f"Error checking saved status: {str(e)}")
             return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+     
+class CreateArchivedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        user = request.user
+        data = request.data.copy()
+        data['user'] = user.id
+        logger.info(f"Received data for archiving post: {data}")
+        serializer = CreateArchivedPostSerializer(data=data)
+        if serializer.is_valid():
+            archived_post = serializer.save()
+            logger.info(f"Saved post created: {archived_post.id}")
+            return Response({
+                "message": "Post archived successfully.",
+                "id": archived_post.id
+            }, status=status.HTTP_201_CREATED)
+        logger.error(f"Serializer errors: {serializer.errors}")
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    
+class RemoveArchivedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, pk):
+        try:
+            archived_post = ArchivedPost.objects.get(id=pk)
+            if archived_post.user.id != request.user.id:  # Compare user IDs directly
+                return Response({"detail": "You do not have permission to delete this archived post."}, status=status.HTTP_403_FORBIDDEN)
+            archived_post.delete()
+            return Response({"message": "Archived post removed successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except SavedPost.DoesNotExist:
+            return Response({"detail": "Archived post not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+    
+class IsArchivedPostAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        logger.info(f"Received GET request with query params: {request.GET}")
+        post_id = request.GET.get('post')
+        user_id = request.GET.get('user')
+        
+        if not post_id or not user_id:
+            logger.warning("Missing 'post' or 'user' parameter in request")
+            return Response({"error": "Missing 'post' or 'user' parameter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            archived_post = ArchivedPost.objects.filter(post=post_id, user=user_id).first()
+            is_archived = archived_post is not None
+            logger.info(f"Post {post_id} saved status for user {user_id}: {is_archived}")
+            return Response({
+                "exists": is_archived,
+                "savedPostId": archived_post.id if is_archived else None  # Include archive post ID if exists
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error checking archived status: {str(e)}")
+            return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
