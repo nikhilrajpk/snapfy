@@ -42,7 +42,9 @@ const UserProfile = () => {
       if (!response || typeof response !== 'object') {
         throw new Error("Invalid user data response");
       }
-      setUserData(response);
+      // Sort posts by id in descending order
+      const sortedPosts = (response.posts || []).sort((a, b) => b.id - a.id);
+      setUserData({ ...response, posts: sortedPosts });
       await fetchProfilePicture(response.profile_picture);
     } catch (error) {
       console.error("Error retrieving user data:", error.response?.data || error.message || error);
@@ -77,7 +79,7 @@ const UserProfile = () => {
     first_name: userData.first_name || '',
     last_name: userData.last_name || '',
     bio: userData.bio || '',
-    posts: userData.posts || [],
+    posts: userData.posts || [], // Already sorted
     saved_posts: userData.saved_posts || [],
   } : {
     username,
@@ -102,7 +104,7 @@ const UserProfile = () => {
         isLoggedInUser={true}
         userData={profileData}
         onPostDeleted={refetchUserData}
-        onSaveChange={refetchUserData} // Pass refetch as onSaveChange
+        onSaveChange={refetchUserData}
       />
     </Suspense>
   );
