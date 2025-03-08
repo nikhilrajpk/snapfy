@@ -17,6 +17,39 @@ class UsernameOnlySerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('username', 'profile_picture') 
+        
+        
+class CommentReplySerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    profile_picture = serializers.CharField(source='user.profile_picture', read_only=True)
+
+    class Meta:
+        model = CommentReply
+        fields = ['id', 'user', 'profile_picture', 'comment', 'text', 'created_at']
+
+    def create(self, validated_data):
+        # Set the user from the request context
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
+
+class CommentSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True, default=serializers.CurrentUserDefault())
+    replies = CommentReplySerializer(many=True, read_only=True)
+    likes = serializers.SerializerMethodField()
+    username = serializers.CharField(source='user.username', read_only=True)
+    profile_picture = serializers.CharField(source='user.profile_picture', read_only=True)
+
+    class Meta:
+        model = Comment
+        fields = ['id', 'user', 'post', 'text', 'created_at', 'likes', 'replies', 'username', 'profile_picture']
+    
+    def create(self, validated_data):
+        # Ensure the user is set from the request context
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
+
+    def get_likes(self, obj):
+        return Like.objects.filter(post=obj.post, user=obj.user).count()  # Simplified;
 
 class PostSerializer(serializers.ModelSerializer):
     hashtags = HashtagSerializer(many=True)
@@ -24,10 +57,22 @@ class PostSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     user = UsernameOnlySerializer(read_only=True)
+    likes = serializers.SerializerMethodField()
+    comments = CommentSerializer(many=True, read_only=True)
+    is_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
-        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at', 'user')
+        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at', 'user', 'likes', 'comments', 'is_liked')
+    
+    def get_likes(self, obj):
+        return Like.objects.filter(post=obj).count()
+
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return Like.objects.filter(post=obj, user=request.user).exists()
+        return False
 
 
 

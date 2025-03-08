@@ -6,11 +6,12 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from .models import Post
 from .serializer import *
 import logging
 
-# posts/views.py
+
 class PostAPIView(ModelViewSet):
     queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('-id')
     permission_classes = [IsAuthenticated]
@@ -35,6 +36,86 @@ class PostAPIView(ModelViewSet):
             hashtag = hashtag.lstrip('#')
             queryset = queryset.filter(Q(hashtags__name__icontains=hashtag) & ~Q(id__in=archived_posts))
         return queryset
+    
+    # Like a post
+    @action(detail=True, methods=['post'])
+    def like(self, request, pk=None):
+        post = self.get_object()
+        user = request.user
+        like, created = Like.objects.get_or_create(user=user, post=post)
+        if not created:
+            like.delete()
+            return Response({'message': 'Post unliked', 'likes': Like.objects.filter(post=post).count(), 'is_liked': False}, status=status.HTTP_200_OK)
+        return Response({'message': 'Post liked', 'likes': Like.objects.filter(post=post).count(), 'is_liked': True}, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'], url_path='liked_users')
+    def liked_users(self, request, pk=None):
+        post = self.get_object()
+        likes = Like.objects.filter(post=post).select_related('user')
+        users = [
+            {
+                'id': like.user.id,
+                'username': like.user.username,
+                'profile_picture': str(like.user.profile_picture)  # Convert CloudinaryResource to string
+            }
+            for like in likes
+        ]
+        return Response(users)
+
+    # Get like count (optional, if not in serializer)
+    @action(detail=True, methods=['get'])
+    def like_count(self, request, pk=None):
+        post = self.get_object()
+        count = Like.objects.filter(post=post).count()
+        return Response({'likes': count})
+    
+    @action(detail=True, methods=['get'], url_path='is_liked')
+    def is_liked(self, request, pk=None):
+        post = self.get_object()
+        user = request.user
+        exists = Like.objects.filter(user=user, post=post).exists()
+        return Response({'exists': exists})
+    
+    # Comment
+    @action(detail=True, methods=['post'])
+    def comment(self, request, pk=None):
+        post = self.get_object()
+        serializer = CommentSerializer(
+            data={'post': post.id, 'text': request.data.get('text')},
+            context={'request': request}  # Pass request context to serializer
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Comment reply
+    @action(detail=True, methods=['post'], url_path='comment/(?P<comment_id>\d+)/reply')
+    def reply(self, request, pk=None, comment_id=None):
+        post = self.get_object()
+        try:
+            comment = Comment.objects.get(id=comment_id, post=post)
+        except Comment.DoesNotExist:
+            return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = CommentReplySerializer(
+            data={
+                'comment': comment.id,
+                'text': request.data.get('text')
+            },
+            context={'request': request}  # Pass the request context
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['get'], url_path='comments')
+    def get_comments(self, request, pk=None):
+        post = self.get_object()
+        comments = Comment.objects.filter(post=post)
+        serializer = CommentSerializer(comments, many=True)
+        return Response(serializer.data)
 
 class PostCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
