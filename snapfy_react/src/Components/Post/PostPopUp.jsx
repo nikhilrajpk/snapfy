@@ -5,13 +5,16 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
-import { deletePost, savePost, isSavedPost, removeSavedPost, archivePost, removeArchivedPost, isArchivedPost } from '../../API/postAPI';
+import { deletePost, savePost, isSavedPost, removeSavedPost, archivePost, removeArchivedPost, isArchivedPost, likePost, addComment, addCommentReply, getLikeCount, isLikedPost } from '../../API/postAPI';
+import axiosInstance from '../../axiosInstance';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
-import { useQueryClient } from '@tanstack/react-query'; // Import useQueryClient
+import { useQueryClient } from '@tanstack/react-query';
 
 const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null }) => {
-  const [liked, setLiked] = useState(false);
+  const [liked, setLiked] = useState(post?.is_liked || false);
+  const [likeCount, setLikeCount] = useState(post?.likes || 0);
   const [comment, setComment] = useState('');
+  const [comments, setComments] = useState(post?.comments || []);
   const [showEmojis, setShowEmojis] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -22,24 +25,29 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   const [savedPostId, setSavedPostId] = useState(null);
   const [archived, setArchived] = useState(false);
   const [archivedPostId, setArchivedPostId] = useState(null);
-  const [shouldRefetch, setShouldRefetch] = useState(false); // Track if refetch is needed
+  const [shouldRefetch, setShouldRefetch] = useState(false);
+  const [showLikedUsers, setShowLikedUsers] = useState(false);
+  const [likedUsers, setLikedUsers] = useState([]);
+
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
   const menuRef = useRef(null);
   const confirmationRef = useRef(null);
   const videoRef = useRef(null);
   const { user } = useSelector(state => state.user);
+  const currentUser = user;
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const currentUser = user;
-  const queryClient = useQueryClient(); // Initialize queryClient
-
+  const queryClient = useQueryClient();
 
   // Detect clicks outside to close popup
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (popupRef.current && !popupRef.current.contains(event.target) && !confirmationRef.current?.contains(event.target)) {
+      if (popupRef.current && !popupRef.current.contains(event.target) && 
+          !confirmationRef.current?.contains(event.target) && 
+          !menuRef.current?.contains(event.target)) {
         onClose();
+        setShowLikedUsers(false);
       }
     };
     if (isOpen) {
@@ -115,42 +123,31 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     }
   }, [post]);
 
-  // Check saved status and find savedPostId
+  // Check saved status
   useEffect(() => {
     let isMounted = true;
 
     const checkIfPostIsSaved = async () => {
-      if (!post?.id || !user?.id) {
-        console.log('Missing post or user ID, skipping save check:', { post: post?.id, user: user?.id });
-        return;
-      }
-
-      console.log('Checking saved status for:', { postId: post.id, userId: user.id });
-
+      if (!post?.id || !user?.id) return;
       try {
         const response = await isSavedPost({ post: post.id, user: user.id });
-        if (isMounted) {
+        if (isMounted && response.exists !== saved) {
           setSaved(response.exists || false);
           setSavedPostId(response.savedPostId || null);
-          console.log(`Post ${post.id} saved status (API):`, response.exists);
         }
       } catch (error) {
+        console.error('Error checking if post is saved:', error);
         if (isMounted) {
-          console.error('Error checking if post is saved:', error);
           setSaved(false);
           setSavedPostId(null);
         }
       }
     };
 
-    if (isOpen) {
-      checkIfPostIsSaved();
-    }
+    if (isOpen) checkIfPostIsSaved();
 
-    return () => {
-      isMounted = false;
-    };
-  }, [isOpen, post?.id, user?.id]);
+    return () => { isMounted = false; };
+  }, [isOpen, post?.id, user?.id, saved]);
 
   // Check archived status
   useEffect(() => {
@@ -159,13 +156,13 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       if (!post?.id || !user?.id) return;
       try {
         const response = await isArchivedPost({ post: post.id, user: user.id });
-        if (isMounted) {
+        if (isMounted && response.exists !== archived) {
           setArchived(response.exists || false);
-          setArchivedPostId(response.savedPostId || null); // Note: API returns 'savedPostId', should be 'archivedPostId'
+          setArchivedPostId(response.savedPostId || null);
         }
       } catch (error) {
+        console.error('Error checking if post is archived:', error);
         if (isMounted) {
-          console.error('Error checking if post is archived:', error);
           setArchived(false);
           setArchivedPostId(null);
         }
@@ -173,6 +170,46 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     };
     if (isOpen) checkIfPostIsArchived();
     return () => { isMounted = false; };
+  }, [isOpen, post?.id, user?.id, archived]);
+
+  // Fetch comments, like count, and like status
+  useEffect(() => {
+    console.log('useEffect triggered with isOpen:', isOpen, 'postId:', post?.id, 'userId:', user?.id);
+    let isMounted = true;
+    
+    const fetchData = async () => {
+      if (!post?.id || !user?.id) return;
+  
+      try {
+        const [commentsResponse, likeCountResponse, isLikedResponse] = await Promise.all([
+          axiosInstance.get(`/posts/${post.id}/comments/`),
+          getLikeCount(post.id),
+          isLikedPost({ post: post.id, user: user.id })
+        ]);
+  
+        if (isMounted) {
+          setComments(commentsResponse.data);
+          setLikeCount(likeCountResponse.likes || post?.likes || 0);
+          setLiked(isLikedResponse.exists || false);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        if (isMounted && !comments.length && likeCount === 0 && !liked) {
+          // Only set fallback values if no data exists yet
+          setComments(post?.comments || []);
+          setLikeCount(post?.likes || 0);
+          setLiked(post?.is_liked || false);
+        }
+      }
+    };
+  
+    if (isOpen) {
+      fetchData();
+    }
+  
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen, post?.id, user?.id]);
 
   if (!isOpen || !post) return null;
@@ -182,12 +219,11 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       setSaved(true);
       try {
         const response = await savePost({ post: post?.id });
-        console.log('Saved post :: ', response);
         setSavedPostId(response.id);
         dispatch(showToast({ message: `Post "${post?.caption}" saved successfully`, type: 'success' }));
-        setShouldRefetch(true); // Flag for refetch on close
+        setShouldRefetch(true);
       } catch (error) {
-        console.error('Error saving post:', error.response?.data || error.message);
+        console.error('Error saving post:', error);
         setSaved(false);
         dispatch(showToast({ message: 'Error saving post', type: 'error' }));
       }
@@ -200,20 +236,13 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       }
       try {
         const response = await removeSavedPost(savedPostId);
-        console.log('Removed saved post :: ', response);
         setSavedPostId(null);
-        dispatch(showToast({
-          message: response.message || "Post removed from save list",
-          type: 'success'
-        }));
-        setShouldRefetch(true); // Flag for refetch on close
+        dispatch(showToast({ message: response.message || "Post removed from save list", type: 'success' }));
+        setShouldRefetch(true);
       } catch (error) {
-        console.error('Error removing post from save list:', error.response?.data || error.message);
+        console.error('Error removing post from save list:', error);
         setSaved(true);
-        dispatch(showToast({
-          message: 'Error removing post from saved list',
-          type: 'error'
-        }));
+        dispatch(showToast({ message: 'Error removing post from saved list', type: 'error' }));
       }
     }
   };
@@ -228,7 +257,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
         dispatch(showToast({ message: `Post "${post?.caption}" archived successfully`, type: 'success' }));
         setShouldRefetch(true);
       } catch (error) {
-        console.error('Error archiving post:', error.response?.data || error.message);
+        console.error('Error archiving post:', error);
         setArchived(false);
         dispatch(showToast({ message: 'Error archiving post', type: 'error' }));
       }
@@ -244,12 +273,9 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
         setArchivedPostId(null);
         dispatch(showToast({ message: response.message || "Post removed from archive", type: 'success' }));
         setShouldRefetch(true);
-        
-        // Invalidate explore-posts query to trigger refetch
         queryClient.invalidateQueries({ queryKey: ['explore-posts'] });
-
       } catch (error) {
-        console.error('Error removing post from archive:', error.response?.data || error.message);
+        console.error('Error removing post from archive:', error);
         setArchived(true);
         dispatch(showToast({ message: 'Error removing post from archive', type: 'error' }));
       }
@@ -258,27 +284,76 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
 
   const handleClose = () => {
     if (shouldRefetch && onSaveChange) {
-      console.log('Refetching user data on popup close due to save/archive action');
-      onSaveChange(); // Trigger refetch in parent
+      onSaveChange();
     }
-    setShouldRefetch(false); // Reset flag
-    onClose(); // Close popup
+    setShouldRefetch(false);
+    setShowLikedUsers(false);
+    onClose();
   };
 
-  const handleCommentSubmit = (e) => {
+  const handleLike = async () => {
+    try {
+      const response = await likePost(post.id);
+      setLiked(response.is_liked);
+      setLikeCount(response.likes);
+      dispatch(showToast({ message: response.message, type: 'success' }));
+      queryClient.invalidateQueries(['posts', post.id]);
+    } catch (error) {
+      console.error('Error liking post:', error);
+      dispatch(showToast({ message: 'Error liking post', type: 'error' }));
+    }
+  };
+
+  const handleLikeCountClick = async () => {
+    if (showLikedUsers) {
+      setShowLikedUsers(false);
+      return;
+    }
+    try {
+      const response = await axiosInstance.get(`/posts/${post.id}/liked_users/`);
+      setLikedUsers(response.data);
+      setShowLikedUsers(true);
+    } catch (error) {
+      console.error('Error fetching liked users:', error);
+      dispatch(showToast({ message: 'Error fetching liked users', type: 'error' }));
+    }
+  };
+
+  const handleCommentSubmit = async (e) => {
     e.preventDefault();
-    console.log(`Submitting comment: ${comment}${replyTo ? ` as reply to ${replyTo.username}` : ''}`);
-    setComment('');
-    setReplyTo(null);
+    if (!comment.trim()) return;
+
+    try {
+      if (replyTo) {
+        const replyData = { post: post.id, comment: replyTo.id, text: comment };
+        const newReply = await addCommentReply(replyData);
+        setComments(prev =>
+          prev.map(c =>
+            c.id === replyTo.id ? { ...c, replies: [...(c.replies || []), newReply] } : c
+          )
+        );
+        dispatch(showToast({ message: 'Reply added', type: 'success' }));
+      } else {
+        const commentData = { post: post.id, text: comment };
+        const newComment = await addComment(commentData);
+        setComments(prev => [...prev, newComment]);
+        dispatch(showToast({ message: 'Comment added', type: 'success' }));
+      }
+      setComment('');
+      setReplyTo(null);
+      queryClient.invalidateQueries(['posts', post.id]);
+    } catch (error) {
+      console.error('Error adding comment/reply:', error);
+      dispatch(showToast({ message: 'Error adding comment/reply', type: 'error' }));
+    }
   };
 
-  const handleReply = (username) => {
-    setReplyTo({ username });
-    setComment(`@${username} `);
+  const handleReply = (comment) => {
+    setReplyTo(comment);
+    setComment(`@${comment.username || comment.user} `);
   };
 
   const handleEditPost = () => {
-    console.log("Edit post:", post.id);
     setShowMenu(false);
     navigate(`/edit-post/${post.id}?username=${currentUser.username}`);
   };
@@ -290,15 +365,11 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
 
   const confirmDeletePost = async (e) => {
     e.stopPropagation();
-    console.log("Confirmed delete post");
     try {
       await deletePost(post?.id);
-      console.log("Confirmed: Delete post:", post.id);
       setShowDeleteConfirmation(false);
       onClose();
-      if (onPostDeleted) {
-        onPostDeleted(post.id);
-      }
+      if (onPostDeleted) onPostDeleted(post.id);
       dispatch(showToast({ message: "Post deleted successfully", type: "success" }));
       navigate(`/${currentUser.username}`);
     } catch (error) {
@@ -313,24 +384,19 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     setShowDeleteConfirmation(false);
   };
 
-
-  const handleLike = ()=> setLiked(!liked)
-
-
   const toggleMentionedUsers = () => {
     setShowMentions(!showMentions);
   };
 
- 
   const formatText = (text) => {
     if (!text) return '';
-    
+
     const hashtags = post.hashtags || [];
     const mentions = post.mentions || [];
-    
+
     const parts = [];
     let lastIndex = 0;
-    
+
     const hashtagRegex = /#(\w+)/g;
     let hashMatch;
     while ((hashMatch = hashtagRegex.exec(text)) !== null) {
@@ -340,17 +406,15 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       parts.push({ type: 'hashtag', content: hashMatch[0], tag: hashMatch[1] });
       lastIndex = hashMatch.index + hashMatch[0].length;
     }
-    
+
     let processedText = lastIndex < text.length ? text.substring(lastIndex) : '';
-    if (parts.length === 0) {
-      processedText = text;
-    }
-    
+    if (parts.length === 0) processedText = text;
+
     const mentionRegex = /@(\w+)/g;
     let mentionMatch;
     let mentionLastIndex = 0;
     const mentionParts = [];
-    
+
     while ((mentionMatch = mentionRegex.exec(processedText)) !== null) {
       if (mentionMatch.index > mentionLastIndex) {
         mentionParts.push({ type: 'text', content: processedText.substring(mentionLastIndex, mentionMatch.index) });
@@ -358,33 +422,27 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       mentionParts.push({ type: 'mention', content: mentionMatch[0], user: mentionMatch[1] });
       mentionLastIndex = mentionMatch.index + mentionMatch[0].length;
     }
-    
+
     if (mentionLastIndex < processedText.length) {
       mentionParts.push({ type: 'text', content: processedText.substring(mentionLastIndex) });
     }
-    
-    if (mentionParts.length > 0) {
-      parts.push(...mentionParts);
-    } else if (processedText.length > 0) {
-      parts.push({ type: 'text', content: processedText });
-    }
+
+    if (mentionParts.length > 0) parts.push(...mentionParts);
+    else if (processedText.length > 0) parts.push({ type: 'text', content: processedText });
 
     if (hashtags.length > 0 || mentions.length > 0) {
-      let formattedText = text;
       hashtags.forEach(hashtag => {
-        if (!formattedText.includes(`#${hashtag.name}`)) {
-          formattedText += ` #${hashtag.name}`;
+        if (!text.includes(`#${hashtag.name}`)) {
           parts.push({ type: 'hashtag', content: `#${hashtag.name}`, tag: hashtag.name });
         }
       });
       mentions.forEach(mention => {
-        if (!formattedText.includes(`@${mention.username}`)) {
-          formattedText += ` @${mention.username}`;
+        if (!text.includes(`@${mention.username}`)) {
           parts.push({ type: 'mention', content: `@${mention.username}`, user: mention.username });
         }
       });
     }
-    
+
     return (
       <>
         {parts.map((part, index) => {
@@ -401,48 +459,8 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   };
 
   const isPostOwner = currentUser && currentUser.username === post?.user?.username;
-
-  const emojis = ['😊', '❤️', '👍', '🔥', '😂', '😍', '🙌', '👏'];
-
-  const comments = post?.comments || [
-    { id: 1, username: 'user1', text: 'Love this! #amazing', likes: 24, timestamp: new Date(Date.now() - 3600000) },
-    { id: 2, username: 'user2', text: 'Great shot @user1 👏', likes: 5, timestamp: new Date(Date.now() - 7200000) },
-    { id: 3, username: 'user3', text: 'Where is this? Looks wonderful!', likes: 2, timestamp: new Date(Date.now() - 86400000) }
-  ];
-
-  const handleVideoLoaded = (e) => {
-    console.log("Video duration loaded:", e.target.duration);
-  };
-
-  const handleVideoError = (e) => {
-    console.log("Video load error:", e);
-    console.log("Attempted URL:", videoRef.current?.src);
-  };
-
   const isVideo = post?.file?.includes('/video/upload/');
-
-  const getFormattedCaption = () => {
-    let caption = post?.caption || '';
-    if (post?.hashtags && post.hashtags.length > 0) {
-      post.hashtags.forEach(hashtag => {
-        if (!caption.includes(`#${hashtag.name}`)) {
-          caption += ` #${hashtag.name}`;
-        }
-      });
-    }
-    if (post?.mentions && post.mentions.length > 0) {
-      post.mentions.forEach(mention => {
-        if (!caption.includes(`@${mention.username}`)) {
-          caption += ` @${mention.username}`;
-        }
-      });
-    }
-    return caption;
-  };
-
-  const normalizeUrl = (url) => {
-    return url ? url.replace(/^(auto\/upload\/)+/, '') : '/default-post.png';
-  };
+  const normalizeUrl = (url) => url ? url.replace(/^(auto\/upload\/)+/, '') : '/default-post.png';
 
   return (
     <div className="fixed inset-0 bg-transparent bg-opacity-75 z-50 flex items-center justify-center p-4">
@@ -451,7 +469,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
         className="bg-white rounded-xl border-2 border-[#198754] overflow-hidden max-w-6xl w-full max-h-[90vh] flex flex-col md:flex-row shadow-2xl"
       >
         <button 
-          onClick={handleClose} // Use updated handleClose
+          onClick={handleClose}
           className="absolute top-4 z-999 right-4 bg-[#198754] rounded-full p-1"
         >
           <X size={24} color='white' />
@@ -465,8 +483,8 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
               className="max-h-[90vh] max-w-full object-contain"
               controls
               autoPlay={false}
-              onLoadedMetadata={handleVideoLoaded}
-              onError={handleVideoError}
+              onLoadedMetadata={e => console.log("Video duration loaded:", e.target.duration)}
+              onError={e => console.log("Video load error:", e)}
             />
           ) : (
             <img 
@@ -579,10 +597,12 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                 <div>
                   <p>
                     <span className="font-bold text-sm mr-2">{post?.user?.username || 'Unknown'}</span>
-                    {formatText(getFormattedCaption())}
+                    {formatText(post?.caption)}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {formatDistanceToNow(new Date(post?.created_at || Date.now()), { addSuffix: true })}
+                    {post?.created_at
+                      ? formatDistanceToNow(new Date(post.created_at), { addSuffix: true })
+                      : 'Just now'}
                   </p>
                 </div>
               </div>
@@ -592,22 +612,26 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                 <div key={comment.id} className="flex group">
                   <div className="w-8 h-8 rounded-full overflow-hidden mr-3 flex-shrink-0">
                     <img 
-                      src={'/default-profile.png'} 
-                      alt={comment.username}
-                      className="w-full h-full object-cover"
+                      src={`${CLOUDINARY_ENDPOINT}${comment.profile_picture}` || '/default-profile.png'} 
+                      alt={comment.username || 'Unknown'} 
+                      className="w-full h-full object-cover" 
                     />
                   </div>
                   <div className="flex-grow">
-                    <p>
-                      <span className="font-bold text-sm mr-2">{comment.username}</span>
-                      {formatText(comment.text)}
-                    </p>
+                  <p>
+                    <span className="font-bold text-sm mr-2">{comment.username || 'Unknown'}</span>
+                    {comment.text} {/* Use raw text instead of formatText */}
+                  </p>
                     <div className="flex items-center mt-1 text-xs text-gray-500">
-                      <span>{formatDistanceToNow(comment.timestamp, { addSuffix: true })}</span>
+                      <span>
+                        {comment.created_at
+                          ? formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })
+                          : 'Just now'}
+                      </span>
                       {comment.likes > 0 && <span className="mx-2">{comment.likes} likes</span>}
                       <button 
+                        onClick={() => handleReply(comment)} 
                         className="mx-2 font-medium"
-                        onClick={() => handleReply(comment.username)}
                       >
                         Reply
                       </button>
@@ -615,12 +639,36 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                         <Heart size={12} />
                       </button>
                     </div>
+                    {comment.replies && comment.replies.length > 0 && (
+                      <div className="ml-8 mt-2 space-y-2">
+                        {comment.replies.map(reply => (
+                          <div key={reply.id} className="flex">
+                            <div className="w-6 h-6 rounded-full overflow-hidden mr-2 flex-shrink-0">
+                              <img 
+                                src={`${CLOUDINARY_ENDPOINT}${reply.profile_picture}` || '/default-profile.png'} 
+                                alt={reply.user || 'Unknown'} 
+                                className="w-full h-full object-cover" 
+                              />
+                            </div>
+                            <div>
+                            <p>
+                              <span className="font-bold text-xs mr-2">{reply.user || 'Unknown'}</span>
+                              {reply.text} {/* Use raw text instead of formatText */}
+                            </p>
+                              <p className="text-xs text-gray-500">
+                                {reply.created_at ? formatDistanceToNow(new Date(reply.created_at), { addSuffix: true }) : 'Just now'}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
-          
+
           <div className="border-t p-4">
             <div className="flex justify-between mb-2">
               <div className="flex space-x-4">
@@ -639,15 +687,20 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
               </button>
             </div>
             
-            <p className="font-bold text-sm mb-1">{post?.likes || 0} likes</p>
+            <p 
+              className="font-bold text-sm mb-1 cursor-pointer hover:underline" 
+              onClick={handleLikeCountClick}
+            >
+              {likeCount} likes
+            </p>
             <p className="text-xs text-gray-500 uppercase mb-3">
-              {formatDistanceToNow(new Date(post?.created_at || Date.now()), { addSuffix: true })}
+              {post.created_at ? formatDistanceToNow(new Date(post.created_at), { addSuffix: true }) : 'Just now'}
             </p>
             
             {replyTo && (
               <div className="bg-gray-100 p-2 rounded-lg flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">
-                  Replying to <span className="font-medium">@{replyTo.username}</span>
+                  Replying to <span className="font-medium">@{replyTo.username || replyTo.user}</span>
                 </span>
                 <button onClick={() => setReplyTo(null)}>
                   <X size={16} />
@@ -656,11 +709,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
             )}
             
             <form onSubmit={handleCommentSubmit} className="flex items-center">
-              <button 
-                type="button" 
-                className="mr-2"
-                onClick={() => setShowEmojis(!showEmojis)}
-              >
+              <button type="button" onClick={() => setShowEmojis(!showEmojis)} className="mr-2">
                 <Smile size={24} className="text-gray-600" />
               </button>
               <input
@@ -682,7 +731,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
             
             {showEmojis && (
               <div className="absolute bottom-16 left-0 bg-white p-2 rounded-lg shadow-lg border flex space-x-2">
-                {emojis.map(emoji => (
+                {['😊', '❤️', '👍', '🔥', '😂', '😍', '🙌', '👏'].map(emoji => (
                   <button 
                     key={emoji} 
                     className="text-xl hover:bg-gray-100 p-1 rounded"
@@ -699,6 +748,40 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
           </div>
         </div>
       </div>
+
+      {showLikedUsers && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl border-2 border-[#198754] z-[60]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Liked by</h3>
+              <button onClick={() => setShowLikedUsers(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="max-h-60 overflow-y-auto">
+              {likedUsers.length > 0 ? (
+                likedUsers.map(user => (
+                  <div key={user.id} className="flex items-center mb-2">
+                    <img 
+                      src={`${CLOUDINARY_ENDPOINT}${user.profile_picture}` || '/default-profile.png'} 
+                      alt={user.username} 
+                      className="w-8 h-8 rounded-full mr-2"
+                    />
+                    <span 
+                      className="font-medium cursor-pointer hover:underline"
+                      onClick={() => navigate(`/user/${user.username}`)}
+                    >
+                      {user.username}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500">No likes yet</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDeleteConfirmation && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-50 z-50 flex items-center justify-center">

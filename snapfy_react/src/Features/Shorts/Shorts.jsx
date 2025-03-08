@@ -127,7 +127,7 @@ const ShortCard = ({ short, onClick }) => {
       <video
         ref={videoRef}
         src={normalizeUrl(short.file)}
-        className="w-full h-full object-contain bg-black"
+        className="w-full h-full object-contain bg-[#198754]"
         loop
         muted={isMuted}
         onClick={togglePlay}
@@ -135,13 +135,13 @@ const ShortCard = ({ short, onClick }) => {
       />
 
       {/* Overlay: User Info */}
-      <div className="absolute top-4 left-4 text-white p-3 rounded-xl min-w-64 
+      <div className="absolute top-2 left-4 text-white p-1 px-2 rounded-xl min-w-96 
      backdrop-blur-md
      bg-gradient-to-br from-white/20 to-white/5
      shadow-lg
      border border-white/20
-     hover:border-white/30 transition-all duration-300">
-        <div className="flex items-center mb-2">
+     hover:border-white/30 transition-all duration-300 flex items-center justify-between">
+        <div className="flex items-center">
             <img
             src={short.user.profile_picture ? `${CLOUDINARY_ENDPOINT}${short.user.profile_picture}` : '/default-profile.png'}
             alt={short.user.username}

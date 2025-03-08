@@ -142,3 +142,50 @@ export const getShorts = async () => {
     throw error;
   }
 };
+
+
+// Like post
+export const likePost = async (postId) => {
+  try {
+    const response = await axiosInstance.post(`posts/${postId}/like/`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { detail: 'Error liking post' };
+  }
+};
+
+export const getLikeCount = async (postId) => {
+  try {
+    const response = await axiosInstance.get(`posts/${postId}/like_count/`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { detail: 'Error fetching like count' };
+  }
+};
+
+export const isLikedPost = async ({ post, user }) => {
+  try {
+    const response = await axiosInstance.get(`posts/${post}/is_liked/`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { detail: 'Error checking like status' };
+  }
+};
+
+export const addComment = async (data) => {
+  try {
+    const response = await axiosInstance.post(`posts/${data.post}/comment/`, { text: data.text });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { detail: 'Error adding comment' };
+  }
+};
+
+export const addCommentReply = async (data) => {
+  try {
+    const response = await axiosInstance.post(`posts/${data.post}/comment/${data.comment}/reply/`, { text: data.text });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { detail: 'Error adding reply' };
+  }
+};
