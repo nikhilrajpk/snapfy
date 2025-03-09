@@ -116,6 +116,18 @@ class PostAPIView(ModelViewSet):
         comments = Comment.objects.filter(post=post)
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'], url_path='comment/(?P<comment_id>\d+)/replies')
+    def get_replies(self, request, pk=None, comment_id=None):
+        post = self.get_object()
+        try:
+            comment = Comment.objects.get(id=comment_id, post=post)
+        except Comment.DoesNotExist:
+            return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        replies = CommentReply.objects.filter(comment=comment)
+        serializer = CommentReplySerializer(replies, many=True)
+        return Response(serializer.data)
 
 class PostCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]

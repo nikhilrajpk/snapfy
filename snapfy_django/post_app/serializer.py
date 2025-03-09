@@ -60,10 +60,11 @@ class PostSerializer(serializers.ModelSerializer):
     likes = serializers.SerializerMethodField()
     comments = CommentSerializer(many=True, read_only=True)
     is_liked = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
-        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at', 'user', 'likes', 'comments', 'is_liked')
+        fields = ('id', 'caption', 'file', 'hashtags', 'mentions', 'created_at', 'user', 'likes', 'comments', 'is_liked', 'comment_count')
     
     def get_likes(self, obj):
         return Like.objects.filter(post=obj).count()
@@ -73,6 +74,9 @@ class PostSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             return Like.objects.filter(post=obj, user=request.user).exists()
         return False
+    
+    def get_comment_count(self, obj):
+        return Comment.objects.filter(post=obj).count()
 
 
 
