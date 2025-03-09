@@ -11,6 +11,7 @@ urlpatterns = [
     path("auth/google/signin/", views.GoogleLoginView.as_view(), name="google-signin"),
     path("profile/update/", views.UpdateUserProfileView.as_view(), name='update-profile'),
     path('profile/picture/', views.ProxyProfilePictureView.as_view(), name='proxy-profile-picture'),
+    path('users/id/<uuid:id>/', views.get_user_by_id, name='get_user_by_id'),
 ]
 
 router = DefaultRouter()

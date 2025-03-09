@@ -2,6 +2,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.decorators import action, api_view
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -41,6 +42,47 @@ class UserAPIViewSet(viewsets.ModelViewSet):
 
         return queryset
     
+    @action(detail=True, methods=['post'], url_path='follow')
+    def follow(self, request, username=None):
+        """Follow a user."""
+        user_to_follow = self.get_object()  # Gets user by username from URL
+        current_user = request.user
+
+        if current_user == user_to_follow:
+            return Response({"error": "You cannot follow yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if current_user in user_to_follow.followers.all():
+            return Response({"error": "You already follow this user"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_to_follow.followers.add(current_user)
+        serializer = self.get_serializer(user_to_follow)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='unfollow')
+    def unfollow(self, request, username=None):
+        """Unfollow a user."""
+        user_to_unfollow = self.get_object()  # Gets user by username from URL
+        current_user = request.user
+
+        if current_user == user_to_unfollow:
+            return Response({"error": "You cannot unfollow yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if current_user not in user_to_unfollow.followers.all():
+            return Response({"error": "You do not follow this user"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_to_unfollow.followers.remove(current_user)
+        serializer = self.get_serializer(user_to_unfollow)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    
+@api_view(['GET'])
+def get_user_by_id(request, id):
+    try:
+        user = User.objects.get(id=id)
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
+    except User.DoesNotExist:
+        return Response({"detail": "No User matches the given query."}, status=status.HTTP_404_NOT_FOUND)
     
 class RegisterUserView(APIView):
     parser_classes = [MultiPartParser, FormParser]

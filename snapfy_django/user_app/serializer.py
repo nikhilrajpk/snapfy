@@ -115,13 +115,23 @@ class UserSerializer(serializers.ModelSerializer):
     posts = serializers.SerializerMethodField()
     saved_posts = SavedPostSerializer(many=True, read_only=True)
     archived_posts = ArchivedPostSerializer(many=True, read_only=True)
+    follower_count = serializers.SerializerMethodField() 
+    following_count = serializers.SerializerMethodField()
+    followers = serializers.SlugRelatedField(many=True, read_only=True, slug_field='username')
+    following = serializers.SlugRelatedField(many=True, read_only=True, slug_field='username')
 
     class Meta:
         model = User
         fields = ('id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts')
+                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts', 'follower_count', 'following_count')
 
     def get_posts(self, obj):
         archived_post_ids = obj.archived_posts.values_list('post_id', flat=True)
         posts = obj.posts.exclude(id__in=archived_post_ids).order_by('-id')
         return PostSerializer(posts, many=True).data
+    
+    def get_follower_count(self, obj):
+        return obj.followers.count()
+
+    def get_following_count(self, obj):
+        return obj.following.count()
