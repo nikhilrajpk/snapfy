@@ -639,7 +639,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                   </div>
                   <div className="flex-grow">
                     <p>
-                      <span className="font-bold text-sm mr-2">{comment.username || 'Unknown'}</span>
+                      <span onClick={()=> navigate(`/user/${comment?.username}`)} className="font-bold text-sm mr-2">{comment.username || 'Unknown'}</span>
                       {comment.text}
                     </p>
                     <div className="flex items-center mt-1 text-xs text-gray-500">
@@ -675,7 +675,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                             </div>
                             <div>
                               <p>
-                                <span className="font-bold text-xs mr-2">{reply.user || 'Unknown'}</span>
+                                <span onClick={()=> navigate(`/user/${reply?.user}`)} className="font-bold text-xs mr-2">{reply.user || 'Unknown'}</span>
                                 {reply.text}
                               </p>
                               <p className="text-xs text-gray-500">

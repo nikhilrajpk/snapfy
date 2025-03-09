@@ -23,10 +23,13 @@ const userSlice = createSlice({
             state.token = null
             state.isAuthenticated = false
             state.refreshToken = null
+        },
+        setUser: (state, action) => {
+            state.user = action.payload; // Update the logged-in user’s data
         }
     }
 })
 
 
-export const {login, logout} = userSlice.actions
+export const {login, logout, setUser} = userSlice.actions
 export default userSlice.reducer

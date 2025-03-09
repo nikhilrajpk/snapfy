@@ -16,14 +16,12 @@ const OtherUsersProfile = () => {
 
   const fetchProfilePicture = useCallback(async (profilePicture) => {
     if (!profilePicture) {
-      console.log("No profile picture provided, using default");
       setPreviewImage('/default-profile.png');
       return;
     }
     try {
-      console.log("Fetching profile picture for:", profilePicture);
       const imageUrl = profilePicture.startsWith('http')
-        ? URL.createObjectURL((await axiosInstance.get('profile/picture/', { responseType: 'blob' })).data)
+        ? profilePicture
         : `${CLOUDINARY_ENDPOINT}${profilePicture}`;
       setPreviewImage(imageUrl);
     } catch (error) {
@@ -37,7 +35,6 @@ const OtherUsersProfile = () => {
     try {
       console.log("Fetching user data for:", username);
       const response = await getUser(username);
-      console.log("User data fetched:", response);
       if (!response || typeof response !== 'object') {
         throw new Error("Invalid user data response");
       }
@@ -52,39 +49,45 @@ const OtherUsersProfile = () => {
   }, [username, fetchProfilePicture, navigate]);
 
   useEffect(() => {
-    console.log("useEffect triggered for username:", username);
     let isMounted = true;
     fetchUserData().then(() => {
-      if (!isMounted) {
-        console.log("Component unmounted, skipping state update");
-      }
+      if (!isMounted) console.log("Component unmounted, skipping state update");
     });
     return () => {
-      isMounted = false; // Cleanup to prevent state updates on unmount
-      console.log("useEffect cleanup for username:", username);
+      isMounted = false;
     };
-  }, [fetchUserData, username]);
+  }, [fetchUserData]);
+
+  const handleUserUpdate = (updatedUser) => {
+    setUserData(updatedUser);
+  };
 
   const profileData = userData ? {
+    id: userData.id,
     username: userData.username || '',
     profileImage: previewImage || '/default-profile.png',
     postCount: userData.posts?.length || 0,
-    followerCount: userData.followers?.length || 0,
-    followingCount: userData.following?.length || 0,
+    follower_count: userData.follower_count || 0,
+    following_count: userData.following_count || 0,
     first_name: userData.first_name || '',
     last_name: userData.last_name || '',
     bio: userData.bio || '',
     posts: userData.posts || [],
+    followers: userData.followers || [],
+    following: userData.following || [],
   } : {
+    id: '',
     username,
     profileImage: '/default-profile.png',
     postCount: 0,
-    followerCount: 0,
-    followingCount: 0,
+    follower_count: 0,
+    following_count: 0,
     first_name: '',
     last_name: '',
     bio: '',
     posts: [],
+    followers: [],
+    following: [],
   };
 
   if (isLoading) {
@@ -93,7 +96,11 @@ const OtherUsersProfile = () => {
 
   return (
     <Suspense fallback={<Loader />}>
-      <ProfilePage isLoggedInUser={false} userData={profileData} />
+      <ProfilePage 
+        isLoggedInUser={false} 
+        userData={profileData} 
+        onUserUpdate={handleUserUpdate}
+      />
     </Suspense>
   );
 };

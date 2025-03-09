@@ -106,11 +106,25 @@ export const checkUserExists = async (username) => {
     }
 };
 
-// export const removeUser = async (userId) =>{
-//     try {
-//         const response = axiosInstance.delete(`users/${userId}/`)
-//         return response
-//     } catch (error) {
-//         console.error('Error on deleting user data : ', error.response?.data || error)
-//     }
-// }
+export const getUserById = async (id) => {
+    try {
+      const response = await axiosInstance.get(`users/id/${id}/`); // Adjust endpoint
+      console.log("getUserById response:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error on retrieving user by ID: ', error.response?.data || error);
+      throw error;
+    }
+  };
+
+// Follow a user
+export const followUser = async (username) => {
+    const response = await axiosInstance.post(`users/${username}/follow/`);
+    return response.data;
+};
+  
+// Unfollow a user
+export const unfollowUser = async (username) => {
+    const response = await axiosInstance.post(`users/${username}/unfollow/`);
+    return response.data;
+};

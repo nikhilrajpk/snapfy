@@ -81,6 +81,8 @@ const UserProfile = () => {
     posts: userData.posts || [],
     saved_posts: userData.saved_posts || [],
     archived_posts: userData.archived_posts || [],
+    followers: userData.followers || [],
+    following: userData.following || [],
   } : {
     username,
     profileImage: '/default-profile.png',
@@ -93,6 +95,8 @@ const UserProfile = () => {
     posts: [],
     saved_posts: [],
     archived_posts: [], 
+    followers: [],
+    following: [],
   };
 
   console.log('UserProfile profileData:', profileData); // Log profileData
