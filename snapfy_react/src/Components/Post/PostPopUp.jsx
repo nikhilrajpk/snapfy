@@ -28,6 +28,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   const [shouldRefetch, setShouldRefetch] = useState(false);
   const [showLikedUsers, setShowLikedUsers] = useState(false);
   const [likedUsers, setLikedUsers] = useState([]);
+  const [expandedReplies, setExpandedReplies] = useState({}); // New state to track which comments' replies are expanded
 
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
@@ -172,7 +173,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     return () => { isMounted = false; };
   }, [isOpen, post?.id, user?.id, archived]);
 
-  // Fetch comments, like count, and like status
+  // Fetch comments, like count, and like status (without replies initially)
   useEffect(() => {
     console.log('useEffect triggered with isOpen:', isOpen, 'postId:', post?.id, 'userId:', user?.id);
     let isMounted = true;
@@ -195,7 +196,6 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       } catch (error) {
         console.error('Error fetching data:', error);
         if (isMounted && !comments.length && likeCount === 0 && !liked) {
-          // Only set fallback values if no data exists yet
           setComments(post?.comments || []);
           setLikeCount(post?.likes || 0);
           setLiked(post?.is_liked || false);
@@ -353,6 +353,26 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     setComment(`@${comment.username || comment.user} `);
   };
 
+  const handleShowReplies = async (commentId) => {
+    if (expandedReplies[commentId]) {
+      setExpandedReplies(prev => ({ ...prev, [commentId]: false }));
+      return;
+    }
+
+    try {
+      const response = await axiosInstance.get(`/posts/${post.id}/comment/${commentId}/replies/`); // New API endpoint needed
+      setComments(prev =>
+        prev.map(c =>
+          c.id === commentId ? { ...c, replies: response.data } : c
+        )
+      );
+      setExpandedReplies(prev => ({ ...prev, [commentId]: true }));
+    } catch (error) {
+      console.error('Error fetching replies:', error);
+      dispatch(showToast({ message: 'Error fetching replies', type: 'error' }));
+    }
+  };
+
   const handleEditPost = () => {
     setShowMenu(false);
     navigate(`/edit-post/${post.id}?username=${currentUser.username}`);
@@ -470,7 +490,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       >
         <button 
           onClick={handleClose}
-          className="absolute top-4 z-999 right-4 bg-[#198754] rounded-full p-1"
+          className="absolute top-24 z-999 right-4 bg-[#198754] rounded-full p-1"
         >
           <X size={24} color='white' />
         </button>
@@ -618,10 +638,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                     />
                   </div>
                   <div className="flex-grow">
-                  <p>
-                    <span className="font-bold text-sm mr-2">{comment.username || 'Unknown'}</span>
-                    {comment.text} {/* Use raw text instead of formatText */}
-                  </p>
+                    <p>
+                      <span className="font-bold text-sm mr-2">{comment.username || 'Unknown'}</span>
+                      {comment.text}
+                    </p>
                     <div className="flex items-center mt-1 text-xs text-gray-500">
                       <span>
                         {comment.created_at
@@ -630,16 +650,19 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                       </span>
                       {comment.likes > 0 && <span className="mx-2">{comment.likes} likes</span>}
                       <button 
+                        onClick={() => handleShowReplies(comment.id)} 
+                        className="mx-2 font-medium text-blue-500 hover:underline"
+                      >
+                        {expandedReplies[comment.id] ? 'Hide Replies' : 'Show Replies'}
+                      </button>
+                      <button 
                         onClick={() => handleReply(comment)} 
-                        className="mx-2 font-medium"
+                        className="mx-2 font-medium text-blue-500 hover:underline"
                       >
                         Reply
                       </button>
-                      <button className="opacity-0 group-hover:opacity-100">
-                        <Heart size={12} />
-                      </button>
                     </div>
-                    {comment.replies && comment.replies.length > 0 && (
+                    {expandedReplies[comment.id] && comment.replies && comment.replies.length > 0 && (
                       <div className="ml-8 mt-2 space-y-2">
                         {comment.replies.map(reply => (
                           <div key={reply.id} className="flex">
@@ -651,10 +674,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                               />
                             </div>
                             <div>
-                            <p>
-                              <span className="font-bold text-xs mr-2">{reply.user || 'Unknown'}</span>
-                              {reply.text} {/* Use raw text instead of formatText */}
-                            </p>
+                              <p>
+                                <span className="font-bold text-xs mr-2">{reply.user || 'Unknown'}</span>
+                                {reply.text}
+                              </p>
                               <p className="text-xs text-gray-500">
                                 {reply.created_at ? formatDistanceToNow(new Date(reply.created_at), { addSuffix: true }) : 'Just now'}
                               </p>

@@ -315,7 +315,7 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted, onSaveChange }) 
                   </div>
                   <div className="flex items-center">
                     <MessageCircle size={20} fill="white" className="mr-2" />
-                    <span className="font-semibold">{post.comments?.length || 0}</span>
+                    <span className="font-semibold">{post.comment_count || 0}</span>
                   </div>
                 </div>
               </div>
