@@ -6,7 +6,7 @@ import SideBar from '../Navbar/SideBar';
 import PostPopup from '../Post/PostPopUp';
 import { showToast } from '../../redux/slices/toastSlice';
 import { setUser } from '../../redux/slices/userSlice';
-import { followUser, unfollowUser, getUser } from '../../API/authAPI';
+import { followUser, unfollowUser, getUser, blockUser, unblockUser } from '../../API/authAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
 const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted, onSaveChange, onUserUpdate }) => {
@@ -156,6 +156,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const [followsBack, setFollowsBack] = useState(false);
   const [mutualFollowers, setMutualFollowers] = useState([]);
   const [followerCount, setFollowerCount] = useState(userData?.followerCount || userData?.follower_count || 0);
+  const [isBlocked, setIsBlocked] = useState(false); // New state for blocking
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
 
@@ -175,12 +176,15 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         }
 
         const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData.username) || false;
-        if (isMounted) setIsFollowing(isUserFollowing);
+        const isUserBlocked = updatedLoggedInUser.blocked_users?.includes(userData.username) || false;
+        if (isMounted) {
+          setIsFollowing(isUserFollowing);
+          setIsBlocked(isUserBlocked);
+          setFollowerCount(userData.followerCount || userData.follower_count);
+        }
 
         const isFollowedBack = userData.following?.some(f => f.username === user.username) || false;
         if (isMounted) setFollowsBack(isFollowedBack);
-
-        if (isMounted) setFollowerCount(userData.followerCount || userData.follower_count);
 
         const loggedInFollowing = (updatedLoggedInUser.following || []).map(f => f.username);
         const profileFollowers = (userData.followers || []).map(f => f.username);
@@ -234,11 +238,36 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
       }
     } catch (error) {
       console.error('Error toggling follow:', error);
-      if (error.response?.status === 400) {
-        dispatch(showToast({ message: error.response.data.error || 'Action already performed', type: 'info' }));
+      dispatch(showToast({ message: 'Failed to update follow status', type: 'error' }));
+    }
+  };
+
+  const handleBlockToggle = async () => {
+    try {
+      if (isBlocked) {
+        const response = await unblockUser(userData.username);
+        setIsBlocked(false);
+        dispatch(showToast({ message: `Unblocked ${userData.username}`, type: 'success' }));
+        dispatch(setUser(response.user)); // Update Redux with new user data
+        const updatedProfileUser = await getUser(userData.username);
+        onUserUpdate(updatedProfileUser);
+        setFollowerCount(updatedProfileUser.follower_count);
+        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
       } else {
-        dispatch(showToast({ message: 'Failed to update follow status', type: 'error' }));
+        const response = await blockUser(userData.username);
+        setIsBlocked(true);
+        setIsFollowing(false); // Reset follow status
+        setFollowsBack(false); // Reset follows back status
+        dispatch(showToast({ message: `Blocked ${userData.username}`, type: 'success' }));
+        dispatch(setUser(response.user));
+        const updatedProfileUser = await getUser(userData.username);
+        onUserUpdate(updatedProfileUser);
+        setFollowerCount(updatedProfileUser.follower_count);
+        setMutualFollowers([]); // Clear mutuals since block removes follow relationships
       }
+    } catch (error) {
+      console.error('Error toggling block:', error);
+      dispatch(showToast({ message: 'Failed to update block status', type: 'error' }));
     }
   };
 
@@ -246,10 +275,10 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
   const renderMutualFollowers = () => {
     if (mutualFollowers.length === 0) return null;
-    
+
     const firstTwo = mutualFollowers.slice(0, 2);
     const remainingCount = mutualFollowers.length - 2;
-
+    // console.log('mutual 281::',mutualFollowers)
     return (
       <p className="text-sm text-gray-600 mt-1 flex items-center">
         Followed by &nbsp;
@@ -271,7 +300,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
           <>
             &nbsp;{' and '}&nbsp;
             <button
-              onClick={() => fetchFollowList('mutual followers', mutualFollowers)} // Pass mutual followers
+              onClick={() => fetchFollowList('mutual followers', mutualFollowers)}
               className="font-medium text-gray-800 hover:text-[#198754] underline"
             >
               {remainingCount} other{remainingCount > 1 ? 's' : ''}
@@ -307,6 +336,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
                 className={`${
                   isFollowing ? 'bg-gray-200 text-gray-800' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
                 } px-4 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center`}
+                disabled={isBlocked} // Disable follow if blocked
               >
                 {isFollowing ? (
                   <>
@@ -328,8 +358,23 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
               <button className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
                 <Flag size={16} />
               </button>
-              <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
-                <Shield size={16} />
+              <button
+                onClick={handleBlockToggle}
+                className={`${
+                  isBlocked ? 'bg-gray-200 text-gray-800' : 'bg-red-100 hover:bg-red-200 text-red-600'
+                } px-3 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center`}
+              >
+                {isBlocked ? (
+                  <>
+                    <Shield size={16} className="mr-1" />
+                    Unblock
+                  </>
+                ) : (
+                  <>
+                    <Shield size={16} className="mr-1" />
+                    Block
+                  </>
+                )}
               </button>
             </div>
           </div>

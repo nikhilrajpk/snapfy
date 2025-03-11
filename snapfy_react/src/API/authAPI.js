@@ -128,3 +128,13 @@ export const unfollowUser = async (username) => {
     const response = await axiosInstance.post(`users/${username}/unfollow/`);
     return response.data;
 };
+
+export const blockUser = async (username) => {
+    const response = await axiosInstance.post(`/block/${username}/`);
+    return response.data;
+};
+  
+export const unblockUser = async (username) => {
+    const response = await axiosInstance.post(`/unblock/${username}/`);
+    return response.data;
+};

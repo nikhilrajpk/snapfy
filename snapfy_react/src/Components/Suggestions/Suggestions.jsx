@@ -72,11 +72,13 @@ const Suggestions = () => {
         console.log('Fetching users for suggestions:', response);
 
         const followingUsernames = (user?.following || []).map(f => f.username);
+        const blockedUsernames = user?.blocked_users || [];
 
         const filteredUsers = response
           .filter((s) => s.username !== user?.username)
           .filter((s) => !followingUsernames.includes(s.username))
-          .filter((s) => !followedUsers.includes(s.username));
+          .filter((s) => !followedUsers.includes(s.username))
+          .filter((s) => !blockedUsernames.includes(s.username)); // Exclude blocked users
 
         const shuffledUsers = shuffleArray(filteredUsers);
         const randomSuggestions = shuffledUsers.slice(0, 7);
