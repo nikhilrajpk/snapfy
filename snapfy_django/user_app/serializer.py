@@ -117,8 +117,9 @@ class UserSerializer(serializers.ModelSerializer):
     archived_posts = ArchivedPostSerializer(many=True, read_only=True)
     follower_count = serializers.SerializerMethodField() 
     following_count = serializers.SerializerMethodField()
-    followers = serializers.SlugRelatedField(many=True, read_only=True, slug_field='username')
-    following = serializers.SlugRelatedField(many=True, read_only=True, slug_field='username')
+    followers = serializers.SerializerMethodField()
+    following = serializers.SerializerMethodField()
+    profile_picture = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -135,3 +136,25 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_following_count(self, obj):
         return obj.following.count()
+    
+    def get_followers(self, obj):
+        return [
+            {
+                'username': user.username,
+                'profile_picture': str(user.profile_picture) if user.profile_picture else None
+            } 
+            for user in obj.followers.all()
+        ]
+
+    def get_following(self, obj):
+        return [
+            {
+                'username': user.username,
+                'profile_picture': str(user.profile_picture) if user.profile_picture else None
+            } 
+            for user in obj.following.all()
+        ]
+
+    def get_profile_picture(self, obj):
+        # If profile_picture exists, convert it to string (Cloudinary public ID)
+        return str(obj.profile_picture) if obj.profile_picture else None
