@@ -420,41 +420,65 @@ const FollowModal = ({ type, list, onClose }) => {
   }, [list, searchQuery]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <h2 className="text-xl font-bold mb-4 capitalize">{type}</h2>
+    <div className="fixed inset-0 backdrop-blur-sm bg-transparent bg-opacity-30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold capitalize text-gray-800">{type}</h2>
+          <button 
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        
         <div className="relative mb-4">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={`Search ${type}...`}
-            className="w-full p-2 pl-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#198754]"
+            className="w-full p-3 pl-10 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#198754] bg-gray-50"
           />
-          <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
         </div>
-        <ul className="max-h-60 overflow-y-auto">
+        
+        <div className="max-h-64 overflow-y-auto pr-1 custom-scrollbar">
           {filteredList.length > 0 ? (
-            filteredList.map((user) => (
-              <li key={user.id} className="py-2 border-b flex items-center">
-                <img
-                  src={imageErrors[user.username] ? '/default-profile.png' : user.profile_picture}
-                  alt={user.username}
-                  className="w-8 h-8 rounded-full mr-2 object-cover"
-                  onError={() => handleImageError(user.username)}
-                />
-                <Link to={`/user/${user.username}`} className="text-gray-800 hover:text-[#198754]">
-                  {user.username}
-                </Link>
-              </li>
-            ))
+            <ul className="divide-y divide-gray-100">
+              {filteredList.map((user) => (
+                <li key={user.id} className="py-3 flex items-center hover:bg-gray-50 rounded-lg px-2 transition-colors">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={imageErrors[user.username] ? '/default-profile.png' : user.profile_picture}
+                      alt={user.username}
+                      className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                      onError={() => handleImageError(user.username)}
+                    />
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <Link 
+                      to={`/user/${user.username}`} 
+                      className="text-gray-800 font-medium hover:text-[#198754] transition-colors"
+                    >
+                      {user.username}
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
           ) : (
-            <li className="py-2 text-gray-600">No {type} found</li>
+            <div className="py-6 text-center text-gray-500">
+              <p>No {type} found</p>
+            </div>
           )}
-        </ul>
+        </div>
+        
         <button 
           onClick={onClose}
-          className="mt-4 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg w-full hover:bg-gray-300 transition duration-200"
+          className="mt-4 bg-[#198754] text-white px-4 py-3 rounded-xl w-full hover:bg-[#157347] transition duration-200 font-medium"
         >
           Close
         </button>
