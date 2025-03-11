@@ -15,7 +15,7 @@ from django.conf import settings
 from django.db.models import Q
 
 from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer, UserProfileUpdateSerializer
-from .models import User, Report
+from .models import User, Report, BlockedUser
 from .tasks import send_otp_email
 
 
@@ -74,6 +74,50 @@ class UserAPIViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(user_to_unfollow)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
+class BlockUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, username):
+        try:
+            user_to_block = User.objects.get(username=username)
+            if user_to_block == request.user:
+                return Response({"error": "You cannot block yourself"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if already blocked
+            if BlockedUser.objects.filter(blocker=request.user, blocked=user_to_block).exists():
+                return Response({"error": f"{username} is already blocked"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Remove follow relationships
+            if user_to_block in request.user.following.all():
+                request.user.following.remove(user_to_block)
+            if request.user in user_to_block.following.all():
+                user_to_block.following.remove(request.user)
+
+            # Create block record
+            BlockedUser.objects.create(blocker=request.user, blocked=user_to_block)
+            
+            # Serialize updated user
+            serializer = UserSerializer(request.user)
+            return Response({"message": f"Blocked {username}", "user": serializer.data}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class UnblockUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, username):
+        try:
+            user_to_unblock = User.objects.get(username=username)
+            block_record = BlockedUser.objects.filter(blocker=request.user, blocked=user_to_unblock).first()
+            if not block_record:
+                return Response({"error": f"{username} is not blocked"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            block_record.delete()
+            serializer = UserSerializer(request.user)
+            return Response({"message": f"Unblocked {username}", "user": serializer.data}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+ 
     
 @api_view(['GET'])
 def get_user_by_id(request, id):

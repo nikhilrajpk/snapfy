@@ -120,11 +120,12 @@ class UserSerializer(serializers.ModelSerializer):
     followers = serializers.SerializerMethodField()
     following = serializers.SerializerMethodField()
     profile_picture = serializers.SerializerMethodField()
+    blocked_users = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ('id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts', 'follower_count', 'following_count')
+                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts', 'follower_count', 'following_count', 'blocked_users')
 
     def get_posts(self, obj):
         archived_post_ids = obj.archived_posts.values_list('post_id', flat=True)
@@ -158,3 +159,6 @@ class UserSerializer(serializers.ModelSerializer):
     def get_profile_picture(self, obj):
         # If profile_picture exists, convert it to string (Cloudinary public ID)
         return str(obj.profile_picture) if obj.profile_picture else None
+    
+    def get_blocked_users(self, obj):
+        return [blocked.blocked.username for blocked in obj.blocked_users.all()]

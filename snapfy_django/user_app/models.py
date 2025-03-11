@@ -28,6 +28,20 @@ class User(AbstractUser):
         return self.username
 
 
+class BlockedUser(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name="blocked_users")
+    blocked = models.ForeignKey(User, on_delete=models.CASCADE, related_name="blocked_by")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [['blocker', 'blocked']]  # Prevent duplicate blocks
+        verbose_name = "Blocked User"
+        verbose_name_plural = "Blocked Users"
+
+    def __str__(self):
+        return f"{self.blocker.username} blocked {self.blocked.username}"
+
 class Report(models.Model):
     reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reports_made")
     reported_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reports_received")
