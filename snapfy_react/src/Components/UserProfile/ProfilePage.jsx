@@ -1,12 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle, UserMinus } from 'lucide-react';
+import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle, UserMinus, Search } from 'lucide-react';
 import SideBar from '../Navbar/SideBar';
 import PostPopup from '../Post/PostPopUp';
 import { showToast } from '../../redux/slices/toastSlice';
 import { setUser } from '../../redux/slices/userSlice';
 import { followUser, unfollowUser, getUser } from '../../API/authAPI';
+import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
 const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted, onSaveChange, onUserUpdate }) => {
   const [showFollowModal, setShowFollowModal] = useState(null);
@@ -33,18 +34,26 @@ const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted,
     }
   }, [isLoggedInUser, user, userData.followers, userData.following, dispatch]);
 
-  const fetchFollowList = (type) => {
-    const usernames = type === 'followers' ? userData?.followers : userData?.following;
-    // console.log(`Fetching ${type} list:`, usernames);
-    setFollowList(usernames?.map(username => ({ id: username, username })) || []);
-    setShowFollowModal(type);
+  const fetchFollowList = (type, customList = null) => {
+    let userList;
+    if (customList) {
+      userList = customList;
+    } else {
+      userList = (type === 'followers' ? userData?.followers : userData?.following) || [];
+    }
+    const formattedList = userList.map(user => ({
+      id: user.username,
+      username: user.username,
+      profile_picture: user.profile_picture ? `${CLOUDINARY_ENDPOINT}${user.profile_picture}` : '/default-profile.png'
+    }));
+    setFollowList(formattedList);
+    setShowFollowModal(type || 'mutual followers'); // Use type or default to 'mutual followers'
   };
 
   const closeModal = () => {
     setShowFollowModal(null);
     setFollowList([]);
   };
-
   return (
     <div className="flex min-h-screen bg-gray-50">
       <SideBar />
@@ -145,6 +154,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const [imageError, setImageError] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followsBack, setFollowsBack] = useState(false);
+  const [mutualFollowers, setMutualFollowers] = useState([]);
   const [followerCount, setFollowerCount] = useState(userData?.followerCount || userData?.follower_count || 0);
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
@@ -158,25 +168,31 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
     const syncFollowStatus = async () => {
       if (user && userData && isMounted) {
-        // console.log('User (logged-in):', user);
-        // console.log('UserData (profile):', userData);
-
-        // Only fetch if we don't have following data yet
         let updatedLoggedInUser = user;
-        if (!user.following) {
+        if (!user.following || !Array.isArray(user.following)) {
           updatedLoggedInUser = await getUser(user.username);
           dispatch(setUser(updatedLoggedInUser));
         }
 
-        const isUserFollowing = updatedLoggedInUser.following?.includes(userData.username) || false;
-        // console.log('isUserFollowing:', isUserFollowing, 'following:', updatedLoggedInUser.following, 'userData.username:', userData.username);
+        const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData.username) || false;
         if (isMounted) setIsFollowing(isUserFollowing);
 
-        const isFollowedBack = userData.following?.includes(user.username) || false;
-        // console.log('isFollowedBack:', isFollowedBack, 'userData.following:', userData.following, 'user.username:', user.username);
+        const isFollowedBack = userData.following?.some(f => f.username === user.username) || false;
         if (isMounted) setFollowsBack(isFollowedBack);
 
         if (isMounted) setFollowerCount(userData.followerCount || userData.follower_count);
+
+        const loggedInFollowing = (updatedLoggedInUser.following || []).map(f => f.username);
+        const profileFollowers = (userData.followers || []).map(f => f.username);
+        const mutuals = userData.followers.filter(follower =>
+          loggedInFollowing.includes(follower.username)
+        ).map(follower => ({
+          username: follower.username,
+          profile_picture: follower.profile_picture
+            ? `${follower.profile_picture}`
+            : '/default-profile.png'
+        }));
+        if (isMounted) setMutualFollowers(mutuals);
       }
     };
 
@@ -185,7 +201,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
     return () => {
       isMounted = false;
     };
-  }, [user.username, userData.username, dispatch]); // Depend only on stable identifiers
+  }, [user?.username, userData?.username, dispatch]);
 
   const handleFollowToggle = async () => {
     try {
@@ -197,16 +213,24 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         dispatch(showToast({ message: `Unfollowed ${userData.username}`, type: 'success' }));
         const updatedLoggedInUser = await getUser(user.username);
         dispatch(setUser(updatedLoggedInUser));
-        setFollowsBack(userData.following?.includes(user.username) || false);
+        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
+        setMutualFollowers(prev => prev.filter(f => f.username !== user.username));
       } else {
         const updatedProfileUser = await followUser(userData.username);
         setIsFollowing(true);
         setFollowerCount(updatedProfileUser.follower_count);
         onUserUpdate(updatedProfileUser);
-        dispatch(showToast({ message: `Now following ${userData.username}`, type: 'success' }));
+        dispatch(showToast({ message: `Now following ${userData?.username}`, type: 'success' }));
         const updatedLoggedInUser = await getUser(user.username);
         dispatch(setUser(updatedLoggedInUser));
-        setFollowsBack(userData.following?.includes(user.username) || false);
+        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
+        const newMutual = {
+          username: user.username,
+          profile_picture: updatedLoggedInUser.profile_picture
+            ? `${CLOUDINARY_ENDPOINT}${updatedLoggedInUser.profile_picture}`
+            : '/default-profile.png'
+        };
+        setMutualFollowers(prev => [...prev, newMutual]);
       }
     } catch (error) {
       console.error('Error toggling follow:', error);
@@ -220,15 +244,53 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
   const fullName = `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim();
 
+  const renderMutualFollowers = () => {
+    if (mutualFollowers.length === 0) return null;
+    
+    const firstTwo = mutualFollowers.slice(0, 2);
+    const remainingCount = mutualFollowers.length - 2;
+
+    return (
+      <p className="text-sm text-gray-600 mt-1 flex items-center">
+        Followed by &nbsp;
+        {firstTwo.map((mutual, index) => (
+          <span key={mutual.username} className="flex items-center">
+            <img
+              src={`${CLOUDINARY_ENDPOINT}${mutual.profile_picture}`}
+              alt={mutual.username}
+              className="w-5 h-5 rounded-full mr-1"
+              onError={(e) => (e.target.src = '/default-profile.png')}
+            />
+            <Link to={`/user/${mutual.username}`} className="font-medium text-gray-800 hover:text-[#198754]">
+              {mutual.username}
+            </Link>
+            {index < firstTwo.length - 1 ? ', ' : ''}
+          </span>
+        ))}
+        {remainingCount > 0 && (
+          <>
+            &nbsp;{' and '}&nbsp;
+            <button
+              onClick={() => fetchFollowList('mutual followers', mutualFollowers)} // Pass mutual followers
+              className="font-medium text-gray-800 hover:text-[#198754] underline"
+            >
+              {remainingCount} other{remainingCount > 1 ? 's' : ''}
+            </button>
+          </>
+        )}
+      </p>
+    );
+  };
+
   return (
     <div className="w-full">
       <div className="flex flex-col md:flex-row md:items-end -mt-16 mb-6 relative z-10">
         <div className="w-32 h-32 rounded-full border-4 border-white overflow-hidden bg-white shadow-md hover:scale-[3] hover:relative hover:translate-x-28 hover:translate-y-10 duration-700">
-          <img 
-            src={imageError ? '/default-profile.png' : userData?.profileImage}
-            alt="Profile" 
-            loading="lazy" 
-            className="w-full h-full object-cover" 
+          <img
+            src={imageError ? '/default-profile.png' : `${userData?.profileImage}`}
+            alt="Profile"
+            loading="lazy"
+            className="w-full h-full object-cover"
             onError={handleImageError}
           />
         </div>
@@ -237,9 +299,10 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
             <div>
               <h1 className="text-2xl font-bold">{userData?.username}</h1>
               {fullName && <h2 className="text-lg text-gray-700 font-medium">{fullName}</h2>}
+              {renderMutualFollowers()}
             </div>
             <div className="flex gap-2 mt-3 md:mt-0">
-              <button 
+              <button
                 onClick={handleFollowToggle}
                 className={`${
                   isFollowing ? 'bg-gray-200 text-gray-800' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
@@ -250,7 +313,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
                     <UserMinus size={16} className="mr-1" />
                     Unfollow
                   </>
-                ) : followsBack ? (
+                ) : followsBack && !isFollowing ? (
                   <>
                     <UserPlus size={16} className="mr-1" />
                     Follow Back
@@ -275,53 +338,85 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
       <div className="mb-8">
         <p className="text-gray-800 whitespace-pre-line">{userData?.bio || "No bio available"}</p>
       </div>
-      <ProfileStatsCards 
-        posts={userData?.postCount} 
+      <ProfileStatsCards
+        posts={userData?.posts?.length}
         followers={followerCount}
-        following={userData?.followingCount || userData?.following_count}
+        following={userData?.following_count || userData?.following?.length}
         fetchFollowList={fetchFollowList}
       />
-      <ProfileContentTabs 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        showArchived={false} 
+      <ProfileContentTabs
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        showArchived={false}
         showSaved={false}
       />
-      <ProfileContent 
-        posts={userData?.posts} 
-        userData={userData} 
-        type={activeTab.toLowerCase()} 
+      <ProfileContent
+        posts={userData?.posts}
+        userData={userData}
+        type={activeTab.toLowerCase()}
       />
     </div>
   );
 };
 
-const FollowModal = ({ type, list, onClose }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white rounded-lg p-6 w-full max-w-md">
-      <h2 className="text-xl font-bold mb-4 capitalize">{type}</h2>
-      <ul className="max-h-60 overflow-y-auto">
-        {list?.length > 0 ? (
-          list.map((user) => (
-            <li key={user.id} className="py-2 border-b">
-              <Link to={`/user/${user.username}`} className="text-gray-800 hover:text-orange-500">
-                {user.username}
-              </Link>
-            </li>
-          ))
-        ) : (
-          <li className="py-2 text-gray-600">No {type} found</li>
-        )}
-      </ul>
-      <button 
-        onClick={onClose}
-        className="mt-4 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg w-full"
-      >
-        Close
-      </button>
+const FollowModal = ({ type, list, onClose }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [imageErrors, setImageErrors] = useState({});
+
+  const handleImageError = useCallback((username) => {
+    setImageErrors(prev => ({ ...prev, [username]: true }));
+  }, []);
+
+  const filteredList = useMemo(() => {
+    if (!searchQuery) return list;
+    return list.filter(user => 
+      user.username.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [list, searchQuery]);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-bold mb-4 capitalize">{type}</h2>
+        <div className="relative mb-4">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={`Search ${type}...`}
+            className="w-full p-2 pl-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#198754]"
+          />
+          <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+        </div>
+        <ul className="max-h-60 overflow-y-auto">
+          {filteredList.length > 0 ? (
+            filteredList.map((user) => (
+              <li key={user.id} className="py-2 border-b flex items-center">
+                <img
+                  src={imageErrors[user.username] ? '/default-profile.png' : user.profile_picture}
+                  alt={user.username}
+                  className="w-8 h-8 rounded-full mr-2 object-cover"
+                  onError={() => handleImageError(user.username)}
+                />
+                <Link to={`/user/${user.username}`} className="text-gray-800 hover:text-[#198754]">
+                  {user.username}
+                </Link>
+              </li>
+            ))
+          ) : (
+            <li className="py-2 text-gray-600">No {type} found</li>
+          )}
+        </ul>
+        <button 
+          onClick={onClose}
+          className="mt-4 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg w-full hover:bg-gray-300 transition duration-200"
+        >
+          Close
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ProfileStatsCards = ({ posts, followers, following, fetchFollowList }) => (
   <div className="grid grid-cols-3 gap-4 mb-8">
@@ -376,7 +471,7 @@ const TabButton = ({ label, icon, isActive, onClick }) => (
     onClick={onClick}
     className={`flex-1 flex items-center justify-center py-3 font-medium transition duration-200 ${
       isActive 
-        ? 'border-b-2 border-orange-500 text-orange-500' 
+        ? 'border-b-2 border-[#198754] text-[#198754]' 
         : 'text-gray-500 hover:text-gray-800'
     }`}
   >

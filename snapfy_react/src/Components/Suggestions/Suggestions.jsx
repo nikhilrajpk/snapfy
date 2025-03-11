@@ -6,7 +6,7 @@ import { showToast } from '../../redux/slices/toastSlice';
 import { setUser } from '../../redux/slices/userSlice';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
-const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowingMe, onFollow, followedUsers }) => {
+const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowingMe, onFollow, followedUsers, isAlreadyFollowing }) => {
   return (
     <div className="flex items-center justify-between bg-white rounded-xl p-3 shadow-md hover:shadow-lg transition-shadow duration-200">
       <div className="flex items-center space-x-3">
@@ -24,7 +24,7 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
           >
             {username}
           </Link>
-          {isFollowingMe ? (
+          {isFollowingMe && !isAlreadyFollowing ? (
             <div className="text-xs text-gray-600 italic">Follows you</div>
           ) : mutualFollowers > 0 ? (
             <div className="text-xs text-gray-600">
@@ -38,13 +38,13 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
       <button
         onClick={onFollow}
         className={`px-3 py-1 rounded-full text-sm font-medium transition-colors duration-200 ${
-          followedUsers.includes(username)
+          followedUsers.includes(username) || isAlreadyFollowing
             ? 'bg-gray-200 text-gray-600 cursor-not-allowed'
             : 'bg-[#198754] text-white hover:bg-[#146c43]'
         }`}
-        disabled={followedUsers.includes(username)}
+        disabled={followedUsers.includes(username) || isAlreadyFollowing}
       >
-        {followedUsers.includes(username) ? 'Following' : isFollowingMe ? 'Follow Back' : 'Follow+'}
+        {followedUsers.includes(username) || isAlreadyFollowing ? 'Following' : isFollowingMe ? 'Follow Back' : 'Follow+'}
       </button>
     </div>
   );
@@ -52,24 +52,36 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
 
 const Suggestions = () => {
   const [suggestions, setSuggestions] = useState([]);
-  const [followedUsers, setFollowedUsers] = useState([]); // Local state for UI feedback
-  const { user } = useSelector((state) => state.user); // Logged-in user (e.g., sung)
+  const [followedUsers, setFollowedUsers] = useState([]);
+  const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
 
-  // Fetch suggestions only once on mount, not on user state change
+  const shuffleArray = (array) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
+
   useEffect(() => {
     const retrieveUsers = async () => {
       try {
         const response = await getAllUser();
         console.log('Fetching users for suggestions:', response);
 
-        // Filter out current user and users already followed, then limit to 7
-        const filteredUsers = response
-          .filter((s) => s.username !== user?.username) // Exclude self
-          .filter((s) => !user?.following?.includes(s.username)) // Exclude followed users
-          .slice(0, 7); // Limit to 7
+        const followingUsernames = (user?.following || []).map(f => f.username);
 
-        setSuggestions(filteredUsers);
+        const filteredUsers = response
+          .filter((s) => s.username !== user?.username)
+          .filter((s) => !followingUsernames.includes(s.username))
+          .filter((s) => !followedUsers.includes(s.username));
+
+        const shuffledUsers = shuffleArray(filteredUsers);
+        const randomSuggestions = shuffledUsers.slice(0, 7);
+
+        setSuggestions(randomSuggestions);
       } catch (error) {
         console.error('Error retrieving users in suggestions:', error);
         dispatch(showToast({ message: 'Failed to load suggestions', type: 'error' }));
@@ -79,7 +91,6 @@ const Suggestions = () => {
     if (user) {
       retrieveUsers();
     }
-    // Dependency array includes only dispatch, not user, to avoid re-fetch on user change
   }, [dispatch]);
 
   const handleFollow = async (username) => {
@@ -87,11 +98,11 @@ const Suggestions = () => {
       await followUser(username);
       dispatch(showToast({ message: `Now following ${username}`, type: 'success' }));
 
-      // Update logged-in user's following list in Redux (for persistence)
-      const updatedUser = { ...user, following: [...(user.following || []), username] };
+      const updatedUser = { 
+        ...user, 
+        following: [...(user.following || []), { username, profile_picture: null }] 
+      };
       dispatch(setUser(updatedUser));
-
-      // Track locally for UI feedback, but don’t update suggestions
       setFollowedUsers((prev) => [...prev, username]);
     } catch (error) {
       console.error('Error following user:', error);
@@ -99,27 +110,23 @@ const Suggestions = () => {
     }
   };
 
-  // Calculate mutual followers and check if user follows me
   const getSuggestionInfo = (suggestion) => {
-    const suggestionFollowers = suggestion.followers || [];
-    const userFollowing = user?.following || [];
-
-    // Mutual followers: overlap between suggestion's followers and user's following
+    const suggestionFollowers = (suggestion.followers || []).map(f => f.username);
+    const userFollowing = (user?.following || []).map(f => f.username);
     const mutualFollowers = suggestionFollowers.filter((follower) =>
       userFollowing.includes(follower)
     ).length;
-
-    // Check if this suggestion follows the logged-in user
-    const isFollowingMe = suggestion.following?.includes(user?.username) || false;
-
-    return { mutualFollowers, isFollowingMe };
+    const isFollowingMe = (suggestion.following || []).some(f => f.username === user?.username);
+    const isAlreadyFollowing = userFollowing.includes(suggestion.username);
+    console.log(`Suggestion: ${suggestion.username}, Mutual followers: ${mutualFollowers}, Follows me: ${isFollowingMe}, Already following: ${isAlreadyFollowing}`);
+    return { mutualFollowers, isFollowingMe, isAlreadyFollowing };
   };
 
   return (
     <div className="space-y-4">
       {suggestions.length > 0 ? (
         suggestions.map((suggestion) => {
-          const { mutualFollowers, isFollowingMe } = getSuggestionInfo(suggestion);
+          const { mutualFollowers, isFollowingMe, isAlreadyFollowing } = getSuggestionInfo(suggestion);
           return (
             <SuggestionItem
               key={suggestion.id}
@@ -129,6 +136,7 @@ const Suggestions = () => {
               isFollowingMe={isFollowingMe}
               onFollow={() => handleFollow(suggestion.username)}
               followedUsers={followedUsers}
+              isAlreadyFollowing={isAlreadyFollowing}
             />
           );
         })
