@@ -1,7 +1,10 @@
 import React, { Suspense, useRef, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { usePostsQuery } from '../../API/usePostsQuery';
-import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
+import { useDispatch } from 'react-redux';
+import { showToast } from '../../redux/slices/toastSlice';
+import { logout } from '../../redux/slices/userSlice';
+import { useNavigate } from 'react-router-dom';
 import Loader from '../../utils/Loader/Loader';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
@@ -13,37 +16,46 @@ const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 function Home() {
   const { posts, isLoading, error } = usePostsQuery();
   const containerRef = useRef(null);
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const virtualizer = useVirtualizer({
     count: posts.length,
     getScrollElement: () => containerRef.current,
-    estimateSize: () => 600, // Adjust based on average post height (e.g., 600px)
-    overscan: 5, // Load 5 items above/below viewport
+    estimateSize: () => 700,
+    overscan: 5,
   });
 
   useEffect(() => {
     virtualizer.measure();
-  }, [posts.length, virtualizer]); // Re-measure when post count changes
+  }, [posts.length, virtualizer]);
+
+  useEffect(() => {
+    if (error) {
+      // Check if the error is due to token expiration
+      if (error.response?.status === 401) {
+        dispatch(
+          showToast({
+            message: 'Session expired. Please log in again.',
+            type: 'error',
+          })
+        );
+        dispatch(logout())
+        navigate('/')
+      } else {
+        dispatch(
+          showToast({
+            message: `Failed to load posts: ${error.message}. Please try again.`,
+            type: 'error',
+          })
+        );
+      }
+    }
+  }, [error, dispatch, navigate]);
 
   const normalizeUrl = (url) => {
     return url.replace(/^(auto\/upload\/)+/, '');
   };
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-screen bg-gradient-to-br from-amber-50 to-orange-50">
-        <Loader />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="text-center text-red-500 p-4 bg-gradient-to-br from-amber-50 to-orange-50">
-        Failed to load posts: {error.message}. Please try again later.
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
@@ -66,7 +78,7 @@ function Home() {
             <div
               ref={containerRef}
               className="overflow-y-auto"
-              style={{ height: 'calc(100vh - 48px)' }} // Adjust 48px for padding/margins
+              style={{ height: 'calc(100vh - 48px)' }}
             >
               <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
                 {/* Stories and Posts */}
@@ -74,39 +86,49 @@ function Home() {
                   <Suspense fallback={<Loader />}>
                     <Stories />
                   </Suspense>
-                  <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-                    {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const p = posts[virtualItem.index];
-                      return (
-                        <div
-                          key={virtualItem.key}
-                          className="absolute top-0 left-0 w-full"
-                          style={{
-                            transform: `translateY(${virtualItem.start}px)`,
-                            height: `${virtualItem.size}px`,
-                          }}
-                        >
-                          <Suspense fallback={<Loader />}>
-                            <Post
-                              id={p?.id}
-                              username={p?.user?.username}
-                              profileImage={
-                                p?.user?.profile_picture
-                                  ? `${p.user.profile_picture}`
-                                  : '/default-profile.png'
-                              }
-                              image={normalizeUrl(p?.file)}
-                              likes={p?.likes || 0}
-                              caption={p?.caption}
-                              hashtags={p?.hashtags?.map((tag) => tag.name) || []}
-                              mentions={p?.mentions?.map((m) => m.username) || []}
-                              commentCount={p?.comment_count || 0}
-                            />
-                          </Suspense>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {isLoading ? (
+                    <div className="flex justify-center items-center h-64">
+                      <Loader />
+                    </div>
+                  ) : error ? (
+                    <div className="text-center text-red-500 p-4">
+                      Failed to load posts. Please try refreshing the page or log in again.
+                    </div>
+                  ) : (
+                    <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+                      {virtualizer.getVirtualItems().map((virtualItem) => {
+                        const p = posts[virtualItem.index];
+                        return (
+                          <div
+                            key={virtualItem.key}
+                            className="absolute top-0 left-0 w-full"
+                            style={{
+                              transform: `translateY(${virtualItem.start}px)`,
+                              height: `${virtualItem.size}px`,
+                            }}
+                          >
+                            <Suspense fallback={<Loader />}>
+                              <Post
+                                id={p?.id}
+                                username={p?.user?.username}
+                                profileImage={
+                                  p?.user?.profile_picture
+                                    ? `${p.user.profile_picture}`
+                                    : '/default-profile.png'
+                                }
+                                image={normalizeUrl(p?.file)}
+                                likes={p?.likes || 0}
+                                caption={p?.caption}
+                                hashtags={p?.hashtags?.map((tag) => tag.name) || []}
+                                mentions={p?.mentions?.map((m) => m.username) || []}
+                                commentCount={p?.comment_count || 0}
+                              />
+                            </Suspense>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Suggestions */}

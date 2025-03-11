@@ -7,7 +7,7 @@ export const usePostsQuery = () => {
     queryFn: async () => {
       try {
         const response = await getPosts(true); // explore=true to exclude archived posts
-        console.log('Fetched posts in usePostsQuery:', response);
+        // console.log('Fetched posts in usePostsQuery:', response);
         return response;
       } catch (err) {
         console.error('Failed to fetch posts:', err);

@@ -39,16 +39,16 @@ const Post = ({
 
       try {
         const savedResponse = await isSavedPost({ post: id, user: user.id });
-        console.log('isSavedPost response in Post:', savedResponse);
+        // console.log('isSavedPost response in Post:', savedResponse);
         setSaved(savedResponse.exists || false);
         setSavedPostId(savedResponse.savedPostId || null);
 
         const likedResponse = await isLikedPost({ post: id, user: user.id });
-        console.log(`Initial liked status for post ${id}:`, likedResponse);
+        // console.log(`Initial liked status for post ${id}:`, likedResponse);
         setIsLiked(likedResponse.exists);
 
         const countResponse = await getLikeCount(id);
-        console.log(`Initial like count for post ${id}:`, countResponse);
+        // console.log(`Initial like count for post ${id}:`, countResponse);
         setLikes(countResponse.likes);
       } catch (error) {
         console.error('Error checking initial status:', error);
@@ -65,7 +65,7 @@ const Post = ({
   // Handle like/unlike
   const handleLike = async () => {
     try {
-      console.log(`Liking/unliking post ${id}, current isLiked:`, isLiked);
+      // console.log(`Liking/unliking post ${id}, current isLiked:`, isLiked);
       await likePost(id);
       const likedResponse = await isLikedPost({ post: id, user: user.id });
       setIsLiked(likedResponse.exists);
@@ -83,13 +83,13 @@ const Post = ({
     try {
       if (!saved) {
         const response = await savePost({ post: id, user: user.id });
-        console.log('Saved post response:', response);
+        // console.log('Saved post response:', response);
         setSaved(true);
         setSavedPostId(response.id);
         dispatch(showToast({ message: `Post "${caption}" saved successfully`, type: 'success' }));
       } else {
         await removeSavedPost(savedPostId);
-        console.log('Removed saved post:', savedPostId);
+        // console.log('Removed saved post:', savedPostId);
         setSaved(false);
         setSavedPostId(null);
         dispatch(showToast({ message: 'Post removed from saved list', type: 'success' }));

@@ -8,7 +8,7 @@ export const useShortsQuery = () => {
     queryFn: async () => {
       try {
         const response = await getShorts();
-        console.log('Fetched shorts in useShortsQuery:', response);
+        // console.log('Fetched shorts in useShortsQuery:', response);
         return response;
       } catch (err) {
         console.error('Failed to fetch shorts:', err);

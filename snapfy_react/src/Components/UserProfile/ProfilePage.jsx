@@ -15,8 +15,8 @@ const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted,
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
 
-  console.log('ProfilePage initialUserData:', initialUserData);
-  console.log('ProfilePage logged-in user:', user);
+  // console.log('ProfilePage initialUserData:', initialUserData);
+  // console.log('ProfilePage logged-in user:', user);
 
   useEffect(() => {
     if (isLoggedInUser && user && (!userData.followers || !userData.following)) {
@@ -35,7 +35,7 @@ const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted,
 
   const fetchFollowList = (type) => {
     const usernames = type === 'followers' ? userData?.followers : userData?.following;
-    console.log(`Fetching ${type} list:`, usernames);
+    // console.log(`Fetching ${type} list:`, usernames);
     setFollowList(usernames?.map(username => ({ id: username, username })) || []);
     setShowFollowModal(type);
   };
@@ -158,8 +158,8 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
     const syncFollowStatus = async () => {
       if (user && userData && isMounted) {
-        console.log('User (logged-in):', user);
-        console.log('UserData (profile):', userData);
+        // console.log('User (logged-in):', user);
+        // console.log('UserData (profile):', userData);
 
         // Only fetch if we don't have following data yet
         let updatedLoggedInUser = user;
@@ -169,11 +169,11 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         }
 
         const isUserFollowing = updatedLoggedInUser.following?.includes(userData.username) || false;
-        console.log('isUserFollowing:', isUserFollowing, 'following:', updatedLoggedInUser.following, 'userData.username:', userData.username);
+        // console.log('isUserFollowing:', isUserFollowing, 'following:', updatedLoggedInUser.following, 'userData.username:', userData.username);
         if (isMounted) setIsFollowing(isUserFollowing);
 
         const isFollowedBack = userData.following?.includes(user.username) || false;
-        console.log('isFollowedBack:', isFollowedBack, 'userData.following:', userData.following, 'user.username:', user.username);
+        // console.log('isFollowedBack:', isFollowedBack, 'userData.following:', userData.following, 'user.username:', user.username);
         if (isMounted) setFollowsBack(isFollowedBack);
 
         if (isMounted) setFollowerCount(userData.followerCount || userData.follower_count);
@@ -412,7 +412,7 @@ const ProfileContent = ({ posts, type, userData, onPostDeleted, onSaveChange }) 
     });
   }
 
-  console.log(`ProfileContent type: ${type}, filteredPosts:`, filteredPosts);
+  // console.log(`ProfileContent type: ${type}, filteredPosts:`, filteredPosts);
 
   const openPostPopup = (post) => {
     setSelectedPost(post);
