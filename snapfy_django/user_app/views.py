@@ -83,20 +83,27 @@ class BlockUserView(APIView):
             if user_to_block == request.user:
                 return Response({"error": "You cannot block yourself"}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Check if already blocked
             if BlockedUser.objects.filter(blocker=request.user, blocked=user_to_block).exists():
                 return Response({"error": f"{username} is already blocked"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Remove follow relationships
+            print(f"Before block: {user_to_block.username}’s following: {list(user_to_block.following.all())}")
             if user_to_block in request.user.following.all():
                 request.user.following.remove(user_to_block)
+                request.user.save()
             if request.user in user_to_block.following.all():
-                user_to_block.following.remove(request.user)
+                user_to_block.following.remove(request.user)  # Naruto unfollows Sanji
+                user_to_block.save()  # Persist the change
+            if request.user in user_to_block.followers.all():
+                user_to_block.followers.remove(request.user)
+                user_to_block.save()
+            if user_to_block in request.user.followers.all():
+                request.user.followers.remove(user_to_block)
+                request.user.save()
+                
+            print(f"After block: {user_to_block.username}’s following: {list(user_to_block.following.all())}")
 
-            # Create block record
             BlockedUser.objects.create(blocker=request.user, blocked=user_to_block)
             
-            # Serialize updated user
             serializer = UserSerializer(request.user)
             return Response({"message": f"Blocked {username}", "user": serializer.data}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
