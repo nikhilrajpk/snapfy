@@ -2,6 +2,9 @@ from rest_framework import serializers
 from .models import Story
 from user_app.models import User
 import cloudinary
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
@@ -23,10 +26,12 @@ class StorySerializer(serializers.ModelSerializer):
     viewer_count = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
     has_liked = serializers.SerializerMethodField()
+    videoStartTime = serializers.FloatField(required=False, default=0)
+    videoEndTime = serializers.FloatField(required=False, default=30)
 
     class Meta:
         model = Story
-        fields = ['id', 'user', 'file', 'caption', 'created_at', 'expires_at', 'viewer_count', 'like_count', 'has_liked']
+        fields = ['id', 'user', 'file', 'caption', 'created_at', 'expires_at', 'viewer_count', 'like_count', 'has_liked', 'videoStartTime', 'videoEndTime']
 
     def get_file(self, obj):
         if obj.file:
