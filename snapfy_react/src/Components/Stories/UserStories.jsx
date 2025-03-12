@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
-  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon
+  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors
 } from 'lucide-react';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { showToast } from '../../redux/slices/toastSlice';
 import { 
   createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers 
 } from '../../API/authAPI';
+import { useNavigate } from 'react-router-dom';
 
 const StoryCircle = ({ user, onClick, hasNewStory }) => {
   const userImage = user?.userImage?.includes("http://res.cloudinary.com/dk5georkh/image/upload/") 
@@ -49,7 +50,7 @@ const StoryViewerModal = ({
   onPreviousUser, 
   onDelete, 
   isUserStory, 
-  onAddNewStory // New prop to trigger CreateStoryModal
+  onAddNewStory 
 }) => {
   const [timeLeft, setTimeLeft] = useState(10);
   const [liked, setLiked] = useState(false);
@@ -57,6 +58,7 @@ const StoryViewerModal = ({
   const [paused, setPaused] = useState(false);
   const [viewers, setViewers] = useState([]);
   const dispatch = useDispatch();
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (paused) return;
@@ -155,7 +157,7 @@ const StoryViewerModal = ({
             onError={(e) => (e.target.src = '/default-profile.png')}
           />
           <div>
-            <p className="text-white font-medium">{currentStory.user.username}</p>
+            <p onClick={()=>navigate(`/user/${currentStory?.user.username}`) } className="text-white font-medium">{currentStory.user.username}</p>
             <p className="text-white/60 text-xs">{getTimeAgo(currentStory.created_at)}</p>
           </div>
         </div>
@@ -178,7 +180,7 @@ const StoryViewerModal = ({
               <Plus 
                 size={18} 
                 className="text-white/80 cursor-pointer hover:text-[#198754]" 
-                onClick={onAddNewStory} // Trigger CreateStoryModal
+                onClick={onAddNewStory}
               />
             </>
           )}
@@ -307,7 +309,11 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   const [caption, setCaption] = useState('');
   const [loading, setLoading] = useState(false);
   const [validationError, setValidationError] = useState('');
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoStartTime, setVideoStartTime] = useState(0);
+  const [videoEndTime, setVideoEndTime] = useState(30);
   const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
   const dispatch = useDispatch();
 
   const validateFile = (file) => {
@@ -344,24 +350,28 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
     setValidationError('');
     return true;
   };
-  
-  const checkVideoDuration = (videoFile) => {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.onloadedmetadata = function() {
-        window.URL.revokeObjectURL(video.src);
-        if (video.duration > 30) {
-          setValidationError('Video is too long. Maximum duration is 30 seconds.');
-          resolve(false);
-        } else {
-          resolve(true);
-        }
-      };
-      video.src = URL.createObjectURL(videoFile);
-    });
+
+  const onVideoLoad = (e) => {
+    const duration = e.target.duration;
+    setVideoDuration(duration);
+    const initialEndTime = Math.min(duration, 30); // Max 30s
+    setVideoEndTime(initialEndTime);
+    if (duration < 3) { // Minimum 3s for stories
+      setValidationError('Video must be at least 3 seconds long.');
+    } else if (duration > 30) {
+      dispatch(showToast({ 
+        message: 'Video exceeds 30 seconds. Trim below (max 30s, min 3s).', 
+        type: 'warning' 
+      }));
+    }
   };
-  
+
+  const updateVideoPlayback = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = videoStartTime;
+    }
+  };
+
   const handleMediaChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -369,40 +379,49 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
     const isValid = validateFile(file);
     if (!isValid) return;
     
-    if (file.type.startsWith('video/')) {
-      const isValidDuration = await checkVideoDuration(file);
-      if (!isValidDuration) return;
-    }
-    
     setSelectedFile(file);
     setPreviewMedia(URL.createObjectURL(file));
+    setVideoDuration(0);
+    setVideoStartTime(0);
+    setVideoEndTime(30);
   };
   
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFile) return;
+
+    const trimmedDuration = videoEndTime - videoStartTime;
+    if (mediaType === 'video' && (trimmedDuration < 3 || trimmedDuration > 30)) {
+      setValidationError('Video duration must be between 3 and 30 seconds.');
+      return;
+    }
     
     setLoading(true);
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('caption', caption);
+      if (mediaType === 'video') {
+        formData.append('videoStartTime', videoStartTime);
+        formData.append('videoEndTime', videoEndTime);
+      }
       const response = await createStory(formData);
       dispatch(showToast({ message: 'Story created successfully', type: 'success' }));
       onSuccess(response);
     } catch (error) {
-      setValidationError('Error creating story. Please try again.');
+      const errorMessage = error.response?.data?.error || 'Error creating story. Please try again.';
+      setValidationError(errorMessage);
       console.error('Error creating story:', error);
+      dispatch(showToast({ message: errorMessage, type: 'error' }));
     } finally {
       setLoading(false);
-      onClose();
     }
   };
   
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-6">
-      <div className="bg-white rounded-xl max-w-md w-full overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b">
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-start justify-center p-6 overflow-y-auto">
+      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto my-6">
+        <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10">
           <h3 className="text-lg font-semibold">Create New Story</h3>
           <X size={20} className="text-gray-500 cursor-pointer" onClick={onClose} />
         </div>
@@ -452,7 +471,62 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                 {mediaType === 'image' ? (
                   <img src={previewMedia} alt="Preview" className="w-full max-h-64 object-contain rounded-lg" />
                 ) : (
-                  <video src={previewMedia} className="w-full max-h-64 object-contain rounded-lg" controls />
+                  <div>
+                    <video
+                      ref={videoRef}
+                      src={previewMedia}
+                      controls
+                      onLoadedMetadata={onVideoLoad}
+                      className="w-full max-h-64 object-contain rounded-lg"
+                    />
+                    {videoDuration > 0 && (
+                      <div className="mt-4 bg-gray-100 p-4 rounded-lg">
+                        <p className="text-gray-700 text-sm mb-2">
+                          Duration: {(videoEndTime - videoStartTime).toFixed(1)}s 
+                          {videoDuration > 30 ? ` (from ${videoDuration.toFixed(1)}s)` : ''}
+                        </p>
+                        <div className="flex items-center gap-4 mb-2">
+                          <div className="flex-1">
+                            <label className="text-gray-600 text-xs mb-1 block">Start: {videoStartTime.toFixed(1)}s</label>
+                            <input 
+                              type="range" 
+                              min="0" 
+                              max={videoDuration - 3} // Ensure at least 3s
+                              step="0.1"
+                              value={videoStartTime}
+                              onChange={(e) => {
+                                const newStart = parseFloat(e.target.value);
+                                const minEnd = newStart + 3;
+                                const maxEnd = Math.min(videoDuration, newStart + 30);
+                                setVideoStartTime(newStart);
+                                setVideoEndTime(Math.max(minEnd, Math.min(maxEnd, videoEndTime)));
+                              }}
+                              className="w-full"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-gray-600 text-xs mb-1 block">End: {videoEndTime.toFixed(1)}s</label>
+                            <input 
+                              type="range" 
+                              min={videoStartTime + 3} // Min 3s duration
+                              max={Math.min(videoDuration, videoStartTime + 30)} // Max 30s
+                              step="0.1"
+                              value={videoEndTime}
+                              onChange={(e) => setVideoEndTime(parseFloat(e.target.value))}
+                              className="w-full"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={updateVideoPlayback}
+                          className="bg-[#198754] text-white px-3 py-1 rounded-lg flex items-center gap-1 mx-auto"
+                        >
+                          <Scissors size={14} /> Preview Trim
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 
                 <textarea
@@ -475,7 +549,13 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setPreviewMedia(null); setSelectedFile(null); setCaption(''); setValidationError(''); }}
+                    onClick={() => { 
+                      setPreviewMedia(null); 
+                      setSelectedFile(null); 
+                      setCaption(''); 
+                      setValidationError(''); 
+                      setVideoDuration(0);
+                    }}
                     className="bg-red-100 text-red-600 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2"
                   >
                     <X size={16} />
@@ -494,7 +574,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
             />
           </div>
           
-          <div className="p-4 border-t">
+          <div className="p-4 border-t sticky bottom-0 bg-white z-10">
             <button
               type="submit"
               disabled={!selectedFile || loading || validationError}
@@ -551,6 +631,10 @@ const UserStories = () => {
         }
       });
 
+      Object.values(groupedStories).forEach(user => {
+        user.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      });
+
       let usersArray = Object.values(groupedStories);
       if (!usersArray.some(u => u.isCurrentUser)) {
         usersArray.unshift({
@@ -576,6 +660,10 @@ const UserStories = () => {
 
   useEffect(() => {
     fetchStories();
+    const intervalId = setInterval(() => {
+      fetchStories();
+    }, 30000); // Poll every 30 seconds
+    return () => clearInterval(intervalId);
   }, [fetchStories]);
 
   const handleScroll = (direction) => {
@@ -600,15 +688,19 @@ const UserStories = () => {
     
     const updatedUsers = [...usersWithStories];
     const updatedUser = { ...userStories };
+    
+    // Mark all unseen stories as seen
     for (const story of updatedUser.stories) {
       if (!story.is_seen) {
-        const updatedStory = await getStory(story.id);
+        const updatedStory = await getStory(story.id); // Assumes this marks it as seen in the backend
         story.is_seen = true;
         story.viewer_count = updatedStory.viewer_count;
       }
     }
-    updatedUser.allStoriesSeen = true;
-    updatedUser.hasNewStory = false;
+    
+    // Recalculate allStoriesSeen and hasNewStory
+    updatedUser.allStoriesSeen = updatedUser.stories.every(story => story.is_seen);
+    updatedUser.hasNewStory = !updatedUser.allStoriesSeen;
     updatedUsers[userIndex] = updatedUser;
     setUsersWithStories(updatedUsers);
     
@@ -629,6 +721,15 @@ const UserStories = () => {
   };
   
   const handleNextUser = () => {
+    const updatedUsers = [...usersWithStories];
+    const currentUser = updatedUsers[viewingUserIndex];
+    
+    // Ensure all stories for the current user are marked as seen
+    currentUser.allStoriesSeen = currentUser.stories.every(story => story.is_seen);
+    currentUser.hasNewStory = !currentUser.allStoriesSeen;
+    updatedUsers[viewingUserIndex] = currentUser;
+    setUsersWithStories(updatedUsers);
+
     if (viewingUserIndex < usersWithStories.length - 1) {
       setViewingUserIndex(viewingUserIndex + 1);
       setViewingStoryIndex(0);
@@ -689,8 +790,8 @@ const UserStories = () => {
   };
 
   const handleAddNewStory = () => {
-    setViewingUserIndex(null); // Close StoryViewerModal
-    setCreatingStory(true);    // Open CreateStoryModal
+    setViewingUserIndex(null);
+    setCreatingStory(true);
   };
   
   return (
@@ -742,7 +843,7 @@ const UserStories = () => {
           onPreviousUser={handlePreviousUser}
           onDelete={handleDeleteStory}
           isUserStory={usersWithStories[viewingUserIndex].isCurrentUser}
-          onAddNewStory={handleAddNewStory} // Pass handler to StoryViewerModal
+          onAddNewStory={handleAddNewStory}
         />
       )}
       
