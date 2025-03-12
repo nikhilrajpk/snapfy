@@ -11,6 +11,7 @@ def generate_otp():
 @shared_task
 def send_otp_email(user_email):
     otp = generate_otp()
+    print("OTP ::", otp)
     # user = User.objects.get(email=user_email)
     user = get_object_or_404(User, email=user_email)
     user.set_otp(otp)
