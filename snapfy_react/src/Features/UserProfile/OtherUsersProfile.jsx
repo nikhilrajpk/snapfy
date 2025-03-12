@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import axiosInstance from "../../axiosInstance";
 import { CLOUDINARY_ENDPOINT } from "../../APIEndPoints";
 import { getUser } from "../../API/authAPI";
+import { store } from "../../redux/store";
+import { setUser } from "../../redux/slices/userSlice";
 
 const Loader = lazy(() => import('../../utils/Loader/Loader'));
 const ProfilePage = lazy(() => import('../../Components/UserProfile/ProfilePage'));
@@ -58,8 +60,12 @@ const OtherUsersProfile = () => {
     };
   }, [fetchUserData]);
 
-  const handleUserUpdate = (updatedUser) => {
+  const handleUserUpdate = async (updatedUser) => {
     setUserData(updatedUser);
+    // After update (e.g., block), refresh logged-in user’s state
+    const { user } = store.getState().user; // Access Redux store directly for simplicity
+    const updatedLoggedInUser = await getUser(user.username);
+    store.dispatch(setUser(updatedLoggedInUser));
   };
 
   const profileData = userData ? {
@@ -75,6 +81,7 @@ const OtherUsersProfile = () => {
     posts: userData.posts || [],
     followers: userData.followers || [],
     following: userData.following || [],
+    blocked_users: userData.blocked_users || [],
   } : {
     id: '',
     username,
@@ -88,6 +95,7 @@ const OtherUsersProfile = () => {
     posts: [],
     followers: [],
     following: [],
+    blocked_users: [],
   };
 
   if (isLoading) {

@@ -156,7 +156,8 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const [followsBack, setFollowsBack] = useState(false);
   const [mutualFollowers, setMutualFollowers] = useState([]);
   const [followerCount, setFollowerCount] = useState(userData?.followerCount || userData?.follower_count || 0);
-  const [isBlocked, setIsBlocked] = useState(false); // New state for blocking
+  const [isBlocked, setIsBlocked] = useState(false); // Logged-in user blocked profile owner
+  const [isBlockedByUser, setIsBlockedByUser] = useState(false); // Profile owner blocked logged-in user
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
 
@@ -166,46 +167,63 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
   useEffect(() => {
     let isMounted = true;
-
+  
     const syncFollowStatus = async () => {
       if (user && userData && isMounted) {
-        let updatedLoggedInUser = user;
-        if (!user.following || !Array.isArray(user.following)) {
-          updatedLoggedInUser = await getUser(user.username);
-          dispatch(setUser(updatedLoggedInUser));
-        }
-
-        const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData.username) || false;
-        const isUserBlocked = updatedLoggedInUser.blocked_users?.includes(userData.username) || false;
+        const updatedLoggedInUser = await getUser(user.username);
+        dispatch(setUser(updatedLoggedInUser));
+  
+        console.log('Naruto’s following:', updatedLoggedInUser.following);
+        console.log('Sanji’s username:', userData.username);
+        const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData?.username) || false;
+        console.log('isUserFollowing:', isUserFollowing);
+  
+        const isUserBlocked = updatedLoggedInUser.blocked_users?.includes(userData?.username) || false;
+        const isBlockedByProfileOwner = userData?.blocked_users?.includes(user.username) || false;
+  
         if (isMounted) {
           setIsFollowing(isUserFollowing);
           setIsBlocked(isUserBlocked);
-          setFollowerCount(userData.followerCount || userData.follower_count);
+          setIsBlockedByUser(isBlockedByProfileOwner);
+          setFollowerCount(userData?.followerCount || userData?.follower_count);
         }
-
-        const isFollowedBack = userData.following?.some(f => f.username === user.username) || false;
+  
+        const isFollowedBack = userData?.following?.some(f => f.username === user.username) || false;
         if (isMounted) setFollowsBack(isFollowedBack);
-
+  
         const loggedInFollowing = (updatedLoggedInUser.following || []).map(f => f.username);
         const profileFollowers = (userData.followers || []).map(f => f.username);
-        const mutuals = userData.followers.filter(follower =>
-          loggedInFollowing.includes(follower.username)
-        ).map(follower => ({
-          username: follower.username,
-          profile_picture: follower.profile_picture
-            ? `${follower.profile_picture}`
-            : '/default-profile.png'
-        }));
+        const mutuals = userData?.followers
+          ?.filter(follower => 
+            loggedInFollowing.includes(follower.username) && follower.username !== user.username // Exclude self
+          )
+          .map(follower => ({
+            username: follower.username,
+            profile_picture: follower.profile_picture
+              ? `${follower.profile_picture}`
+              : '/default-profile.png'
+          }));
         if (isMounted) setMutualFollowers(mutuals);
       }
     };
-
+  
     syncFollowStatus();
-
+  
     return () => {
       isMounted = false;
     };
   }, [user?.username, userData?.username, dispatch]);
+
+
+  // If the logged-in user is blocked by the profile owner, show restricted message
+  if (isBlockedByUser) {
+    return (
+      <div className="w-full text-center py-10">
+        <h1 className="text-2xl font-bold text-gray-800">Restricted Access</h1>
+        <p className="text-gray-600 mt-2">You are restricted by this user.</p>
+      </div>
+    );
+  }
 
   const handleFollowToggle = async () => {
     try {
@@ -228,13 +246,15 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         const updatedLoggedInUser = await getUser(user.username);
         dispatch(setUser(updatedLoggedInUser));
         setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
-        const newMutual = {
-          username: user.username,
-          profile_picture: updatedLoggedInUser.profile_picture
-            ? `${CLOUDINARY_ENDPOINT}${updatedLoggedInUser.profile_picture}`
-            : '/default-profile.png'
-        };
-        setMutualFollowers(prev => [...prev, newMutual]);
+        if (updatedProfileUser.following?.some(f => f.username === user.username)) {
+          const newMutual = {
+            username: user.username,
+            profile_picture: updatedLoggedInUser.profile_picture
+              ? `${CLOUDINARY_ENDPOINT}${updatedLoggedInUser.profile_picture}`
+              : '/default-profile.png'
+          };
+          setMutualFollowers(prev => [...prev, newMutual]);
+        }
       }
     } catch (error) {
       console.error('Error toggling follow:', error);
@@ -248,7 +268,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         const response = await unblockUser(userData.username);
         setIsBlocked(false);
         dispatch(showToast({ message: `Unblocked ${userData.username}`, type: 'success' }));
-        dispatch(setUser(response.user)); // Update Redux with new user data
+        dispatch(setUser(response.user));
         const updatedProfileUser = await getUser(userData.username);
         onUserUpdate(updatedProfileUser);
         setFollowerCount(updatedProfileUser.follower_count);
@@ -256,14 +276,19 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
       } else {
         const response = await blockUser(userData.username);
         setIsBlocked(true);
-        setIsFollowing(false); // Reset follow status
-        setFollowsBack(false); // Reset follows back status
+        setIsFollowing(false); // Reset local state
+        setFollowsBack(false);
         dispatch(showToast({ message: `Blocked ${userData.username}`, type: 'success' }));
-        dispatch(setUser(response.user));
+        dispatch(setUser(response.user)); // Update Sanji’s state
+  
+        // Update the blocked user’s state (Naruto)
+        const updatedLoggedInUser = await getUser(user.username);
+        dispatch(setUser(updatedLoggedInUser));
+  
         const updatedProfileUser = await getUser(userData.username);
         onUserUpdate(updatedProfileUser);
         setFollowerCount(updatedProfileUser.follower_count);
-        setMutualFollowers([]); // Clear mutuals since block removes follow relationships
+        setMutualFollowers([]);
       }
     } catch (error) {
       console.error('Error toggling block:', error);
@@ -336,7 +361,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
                 className={`${
                   isFollowing ? 'bg-gray-200 text-gray-800' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
                 } px-4 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center`}
-                disabled={isBlocked} // Disable follow if blocked
+                disabled={isBlocked}
               >
                 {isFollowing ? (
                   <>
