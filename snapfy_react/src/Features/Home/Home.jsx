@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import Loader from '../../utils/Loader/Loader';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
-const Stories = React.lazy(() => import('../../Components/Stories/Stories'));
+const UserStories = React.lazy(() => import('../../Components/Stories/UserStories'));
 const Post = React.lazy(() => import('../../Components/Post/Post'));
 const Suggestions = React.lazy(() => import('../../Components/Suggestions/Suggestions'));
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
@@ -84,7 +84,7 @@ function Home() {
                 {/* Stories and Posts */}
                 <div className="lg:col-span-7 space-y-6">
                   <Suspense fallback={<Loader />}>
-                    <Stories />
+                    <UserStories />
                   </Suspense>
                   {isLoading ? (
                     <div className="flex justify-center items-center h-64">

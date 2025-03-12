@@ -173,8 +173,8 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         const updatedLoggedInUser = await getUser(user.username);
         dispatch(setUser(updatedLoggedInUser));
   
-        console.log('Naruto’s following:', updatedLoggedInUser.following);
-        console.log('Sanji’s username:', userData.username);
+        console.log(`${updatedLoggedInUser?.username} following:`, updatedLoggedInUser.following);
+        console.log(`${userData?.username} username:`, userData.username);
         const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData?.username) || false;
         console.log('isUserFollowing:', isUserFollowing);
   

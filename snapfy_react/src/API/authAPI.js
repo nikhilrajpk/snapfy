@@ -138,3 +138,36 @@ export const unblockUser = async (username) => {
     const response = await axiosInstance.post(`/unblock/${username}/`);
     return response.data;
 };
+
+// Stories
+export const createStory = async (formData) => {
+    const response = await axiosInstance.post('/stories/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  };
+  
+  export const getStories = async () => {
+    const response = await axiosInstance.get('/stories/');
+    return response.data;
+  };
+  
+  export const getStory = async (storyId) => {
+    const response = await axiosInstance.get(`/stories/${storyId}/`);
+    return response.data;
+  };
+  
+  export const deleteStory = async (storyId) => {
+    const response = await axiosInstance.delete(`/stories/${storyId}/`);
+    return response.data;
+  };
+  
+  export const toggleStoryLike = async (storyId) => {
+    const response = await axiosInstance.post(`/stories/${storyId}/like/`);
+    return response.data;
+  };
+  
+  export const getStoryViewers = async (storyId) => {
+    const response = await axiosInstance.get(`/stories/${storyId}/viewers/`);
+    return response.data;
+  };

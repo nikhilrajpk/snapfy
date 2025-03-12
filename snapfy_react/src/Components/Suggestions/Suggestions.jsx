@@ -117,7 +117,7 @@ const Suggestions = () => {
     const retrieveUsers = async () => {
       try {
         const response = await getAllUser();
-        console.log('Fetching users for suggestions:', response);
+        // console.log('Fetching users for suggestions:', response);
 
         const followingUsernames = (user?.following || []).map(f => f.username);
         const blockedUsernames = user?.blocked_users || [];
@@ -168,7 +168,7 @@ const Suggestions = () => {
     ).length;
     const isFollowingMe = (suggestion.following || []).some(f => f.username === user?.username);
     const isAlreadyFollowing = userFollowing.includes(suggestion.username);
-    console.log(`Suggestion: ${suggestion.username}, Mutual followers: ${mutualFollowers}, Follows me: ${isFollowingMe}, Already following: ${isAlreadyFollowing}`);
+    // console.log(`Suggestion: ${suggestion.username}, Mutual followers: ${mutualFollowers}, Follows me: ${isFollowingMe}, Already following: ${isAlreadyFollowing}`);
     return { mutualFollowers, isFollowingMe, isAlreadyFollowing };
   };
 
