@@ -1,5 +1,5 @@
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Case, When, IntegerField, Q
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework import status
@@ -13,30 +13,65 @@ import logging
 
 
 class PostAPIView(ModelViewSet):
-    queryset = Post.objects.prefetch_related('hashtags', 'mentions').order_by('-id')
+    queryset = Post.objects.prefetch_related('hashtags', 'mentions')
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
         user = self.request.user
         archived_posts = ArchivedPost.objects.values_list('post_id', flat=True)
-        if self.request.user.is_authenticated:
-            if self.request.query_params.get('explore', 'false') == 'true':
-                queryset = queryset.exclude(id__in=archived_posts)
-            else:
-                queryset = queryset.exclude(~Q(user=user) & Q(id__in=archived_posts))
-        
+        following = user.following.all()
+        liked_posts = Like.objects.filter(user=user).values_list('post_id', flat=True)
+
+        # Base queryset
+        queryset = super().get_queryset()
+
+        # Annotate posts for ordering
+        queryset = queryset.annotate(
+            is_followed=Case(
+                When(user__in=following, then=1),
+                default=0,
+                output_field=IntegerField()
+            ),
+            is_liked_by_user=Case(
+                When(id__in=liked_posts, then=1),
+                default=0,
+                output_field=IntegerField()
+            )
+        )
+
+        # Exclude archived posts from others
+        queryset = queryset.exclude(~Q(user=user) & Q(id__in=archived_posts))
+
+        # Handle explore vs home mode
+        if self.request.query_params.get('explore', 'false') == 'true':
+            # Explore mode: only unfollowed users' posts, exclude liked
+            queryset = queryset.filter(
+                ~Q(user__in=following) & ~Q(user=user)
+            ).exclude(id__in=liked_posts)
+        else:
+            # Home mode: all posts, followed at top, unfollowed at bottom
+            pass  # No additional filter, just ordering
+
+        # Ordering: followed first, then unliked vs liked, then recency
+        queryset = queryset.order_by(
+            '-is_followed',  # Followed (1) before unfollowed (0)
+            'is_liked_by_user',  # Unliked (0) before liked (1)
+            '-created_at'  # Newest first
+        )
+
         # Filter for shorts (videos only)
         if self.request.query_params.get('shorts', 'false') == 'true':
             queryset = queryset.filter(file__contains='/video/upload/')
-        
+
+        # Filter by hashtag (for profile or hashtag pages, unaffected)
         hashtag = self.request.query_params.get('hashtag', None)
         if hashtag:
             hashtag = hashtag.lstrip('#')
             queryset = queryset.filter(Q(hashtags__name__icontains=hashtag) & ~Q(id__in=archived_posts))
-        return queryset
-    
+
+        return queryset.distinct()
+
     # Like a post
     @action(detail=True, methods=['post'])
     def like(self, request, pk=None):
@@ -56,13 +91,12 @@ class PostAPIView(ModelViewSet):
             {
                 'id': like.user.id,
                 'username': like.user.username,
-                'profile_picture': str(like.user.profile_picture)  # Convert CloudinaryResource to string
+                'profile_picture': str(like.user.profile_picture)
             }
             for like in likes
         ]
         return Response(users)
 
-    # Get like count (optional, if not in serializer)
     @action(detail=True, methods=['get'])
     def like_count(self, request, pk=None):
         post = self.get_object()
@@ -76,20 +110,18 @@ class PostAPIView(ModelViewSet):
         exists = Like.objects.filter(user=user, post=post).exists()
         return Response({'exists': exists})
     
-    # Comment
     @action(detail=True, methods=['post'])
     def comment(self, request, pk=None):
         post = self.get_object()
         serializer = CommentSerializer(
             data={'post': post.id, 'text': request.data.get('text')},
-            context={'request': request}  # Pass request context to serializer
+            context={'request': request}
         )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    # Comment reply
     @action(detail=True, methods=['post'], url_path='comment/(?P<comment_id>\d+)/reply')
     def reply(self, request, pk=None, comment_id=None):
         post = self.get_object()
@@ -99,11 +131,8 @@ class PostAPIView(ModelViewSet):
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
         
         serializer = CommentReplySerializer(
-            data={
-                'comment': comment.id,
-                'text': request.data.get('text')
-            },
-            context={'request': request}  # Pass the request context
+            data={'comment': comment.id, 'text': request.data.get('text')},
+            context={'request': request}
         )
         if serializer.is_valid():
             serializer.save()
