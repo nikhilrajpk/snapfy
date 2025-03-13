@@ -69,7 +69,7 @@ class StoryListCreateView(APIView):
                 trimmed_video = video.subclip(start_time, end_time)
                 trimmed_path = tempfile.mktemp(suffix=file.name)
                 
-                # Write the trimmed video and ensure clips are closed before file operations
+                
                 trimmed_video.write_videofile(trimmed_path, codec='libx264', audio_codec='aac', logger=None)
                 video.close()
                 trimmed_video.close()

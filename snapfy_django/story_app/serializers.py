@@ -16,7 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
     def get_profile_picture(self, obj):
         if obj.profile_picture:
             # Extract the public ID from the CloudinaryResource
-            public_id = str(obj.profile_picture)  # or obj.profile_picture.public_id
+            public_id = str(obj.profile_picture)  
             return cloudinary.utils.cloudinary_url(public_id)[0]
         return None
 
@@ -36,7 +36,7 @@ class StorySerializer(serializers.ModelSerializer):
     def get_file(self, obj):
         if obj.file:
             # Extract the public ID from the CloudinaryResource
-            public_id = str(obj.file)  # or obj.file.public_id
+            public_id = str(obj.file)
             return cloudinary.utils.cloudinary_url(public_id)[0]
         return None
 
