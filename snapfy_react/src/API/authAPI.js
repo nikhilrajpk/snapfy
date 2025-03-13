@@ -108,7 +108,7 @@ export const checkUserExists = async (username) => {
 
 export const getUserById = async (id) => {
     try {
-      const response = await axiosInstance.get(`users/id/${id}/`); // Adjust endpoint
+      const response = await axiosInstance.get(`users/id/${id}/`);
       console.log("getUserById response:", response.data);
       return response.data;
     } catch (error) {

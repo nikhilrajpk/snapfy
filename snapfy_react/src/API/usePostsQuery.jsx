@@ -14,8 +14,8 @@ export const usePostsQuery = () => {
         throw err;
       }
     },
-    // Optional: Configure refetch behavior
-    refetchOnWindowFocus: false, // Avoid unnecessary refetches
+    
+    refetchOnWindowFocus: false, 
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 

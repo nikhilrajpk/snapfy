@@ -157,7 +157,7 @@ const StoryViewerModal = ({
             onError={(e) => (e.target.src = '/default-profile.png')}
           />
           <div>
-            <p onClick={()=>navigate(`/user/${currentStory?.user.username}`) } className="text-white font-medium">{currentStory.user.username}</p>
+            <p onClick={()=>navigate(`/user/${currentStory?.user.username}`) } className="text-white font-medium cursor-pointer">{currentStory.user.username}</p>
             <p className="text-white/60 text-xs">{getTimeAgo(currentStory.created_at)}</p>
           </div>
         </div>
@@ -692,7 +692,7 @@ const UserStories = () => {
     // Mark all unseen stories as seen
     for (const story of updatedUser.stories) {
       if (!story.is_seen) {
-        const updatedStory = await getStory(story.id); // Assumes this marks it as seen in the backend
+        const updatedStory = await getStory(story.id);
         story.is_seen = true;
         story.viewer_count = updatedStory.viewer_count;
       }
