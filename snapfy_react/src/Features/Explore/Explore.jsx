@@ -5,6 +5,10 @@ import SideBar from '../../Components/Navbar/SideBar';
 import PostPopup from '../../Components/Post/PostPopup';
 import { useSelector } from 'react-redux';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
+import { useDispatch } from 'react-redux';
+import { showToast } from '../../redux/slices/toastSlice';
+import { logout } from '../../redux/slices/userSlice';
+import { useNavigate } from 'react-router-dom';
 
 const Card = ({ post, onClick }) => {
   const normalizeUrl = (url) => url.replace(/^(auto\/upload\/)+/, '');
@@ -38,15 +42,14 @@ const Card = ({ post, onClick }) => {
 };
 
 const ExplorePage = () => {
-  const { posts = [], isLoading, error } = usePostsQuery();
+  const { posts = [], isLoading, error, invalidatePosts } = usePostsQuery(true); // Explore mode
   const { user } = useSelector((state) => state.user);
   const containerRef = useRef(null);
   const [selectedPost, setSelectedPost] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
 
-//   console.log('Posts in ExplorePage:', posts);
-
-  // Virtualization Configuration at top level
   const virtualizer = useVirtualizer({
     count: posts.length ? Math.ceil(posts.length / 3) : 0,
     estimateSize: () => 300,
@@ -54,10 +57,21 @@ const ExplorePage = () => {
     overscan: 5,
   });
 
-  // Recompute virtualizer when posts change
   useEffect(() => {
     virtualizer.measure();
   }, [posts, virtualizer]);
+
+  useEffect(() => {
+    if (error) {
+      if (error.response?.status === 401) {
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        dispatch(logout());
+        navigate('/');
+      } else {
+        dispatch(showToast({ message: `Failed to load posts: ${error.message}. Please try again.`, type: 'error' }));
+      }
+    }
+  }, [error, dispatch, navigate]);
 
   const openPostPopup = useCallback((post) => {
     setSelectedPost(post);
@@ -69,8 +83,12 @@ const ExplorePage = () => {
     setSelectedPost(null);
   }, []);
 
-  const handleLike = (postId) => {
-    console.log('Liked post:', postId);
+  const handleLike = async (postId) => {
+    try {
+      await invalidatePosts(); // Refetch after liking to remove liked post
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to update like status', type: 'error' }));
+    }
   };
 
   const handleComment = (postId) => {
@@ -132,7 +150,7 @@ const ExplorePage = () => {
           </div>
         ) : (
           <div className="text-center text-gray-500 p-6">
-            No posts available to explore. {posts.length === 0 ? 'No data returned from API.' : ''}
+            No posts available to explore.
           </div>
         )}
       </div>
@@ -148,6 +166,7 @@ const ExplorePage = () => {
           }}
           isOpen={isPopupOpen}
           onClose={closePostPopup}
+          onLike={handleLike} // Pass handleLike to PostPopup
         />
       )}
     </div>

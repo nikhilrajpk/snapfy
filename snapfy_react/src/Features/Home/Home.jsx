@@ -14,7 +14,7 @@ const Suggestions = React.lazy(() => import('../../Components/Suggestions/Sugges
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 
 function Home() {
-  const { posts, isLoading, error } = usePostsQuery();
+  const { posts, isLoading, error, invalidatePosts } = usePostsQuery(false); // Home mode
   const containerRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -32,23 +32,12 @@ function Home() {
 
   useEffect(() => {
     if (error) {
-      // Check if the error is due to token expiration
       if (error.response?.status === 401) {
-        dispatch(
-          showToast({
-            message: 'Session expired. Please log in again.',
-            type: 'error',
-          })
-        );
-        dispatch(logout())
-        navigate('/')
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        dispatch(logout());
+        navigate('/');
       } else {
-        dispatch(
-          showToast({
-            message: `Failed to load posts: ${error.message}. Please try again.`,
-            type: 'error',
-          })
-        );
+        dispatch(showToast({ message: `Failed to load posts: ${error.message}. Please try again.`, type: 'error' }));
       }
     }
   }, [error, dispatch, navigate]);
@@ -57,11 +46,18 @@ function Home() {
     return url.replace(/^(auto\/upload\/)+/, '');
   };
 
+  const handleLike = async (postId) => {
+    try {
+      await invalidatePosts(); // Refetch after liking
+    } catch (err) {
+      dispatch(showToast({ message: 'Failed to update like status', type: 'error' }));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
       <div className="container mx-auto px-4 py-4">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Sidebar (Logo and Navbar) */}
           <div className="lg:col-span-2">
             <div className="sticky top-6">
               <Suspense fallback={<Loader />}>
@@ -72,16 +68,9 @@ function Home() {
               </Suspense>
             </div>
           </div>
-
-          {/* Main Scrollable Content */}
           <div className="lg:col-span-10">
-            <div
-              ref={containerRef}
-              className="overflow-y-auto"
-              style={{ height: 'calc(100vh - 48px)' }}
-            >
+            <div ref={containerRef} className="overflow-y-auto" style={{ height: 'calc(100vh - 48px)' }}>
               <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
-                {/* Stories and Posts */}
                 <div className="lg:col-span-7 space-y-6">
                   <Suspense fallback={<Loader />}>
                     <UserStories />
@@ -122,6 +111,9 @@ function Home() {
                                 hashtags={p?.hashtags?.map((tag) => tag.name) || []}
                                 mentions={p?.mentions?.map((m) => m.username) || []}
                                 commentCount={p?.comment_count || 0}
+                                isLiked={p?.is_liked}
+                                created_at={p?.created_at} // Pass created_at
+                                onLike={() => handleLike(p?.id)}
                               />
                             </Suspense>
                           </div>
@@ -130,8 +122,6 @@ function Home() {
                     </div>
                   )}
                 </div>
-
-                {/* Suggestions */}
                 <div className="lg:col-span-3 space-y-6">
                   <h2 className="text-gray-700 font-semibold text-lg mb-3">SUGGESTED FOR YOU</h2>
                   <Suspense fallback={<Loader />}>
