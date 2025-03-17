@@ -21,7 +21,7 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
             alt={username}
             className="w-14 h-14 rounded-full object-cover shadow-sm"
             loading="lazy"
-            onError={(e) => (e.target.src = '/default-profile.png')}
+            // onError={(e) => (e.target.src = '/default-profile.png')}
           />
         </div>
         <div>

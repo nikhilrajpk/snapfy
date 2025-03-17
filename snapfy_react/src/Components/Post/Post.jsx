@@ -19,7 +19,7 @@ const Post = ({
   hashtags = [],
   mentions = [],
   commentCount: initialCommentCount,
-  created_at, // Add created_at prop
+  created_at,
 }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -62,12 +62,11 @@ const Post = ({
 
   const handleLike = async () => {
     try {
-      await likePost(id);
-      const likedResponse = await isLikedPost({ post: id, user: user.id });
-      setIsLiked(likedResponse.exists);
-      const countResponse = await getLikeCount(id);
-      setLikes(countResponse.likes);
-      dispatch(showToast({ message: isLiked ? 'Post unliked' : 'Post liked', type: 'success' }));
+      const response = await likePost(id);
+      // Assuming likePost returns { is_liked: boolean, likes: number }
+      setIsLiked(response.is_liked); // Use is_liked instead of exists
+      setLikes(response.likes);
+      dispatch(showToast({ message: response.is_liked ? 'Post liked' : 'Post unliked', type: 'success' }));
     } catch (error) {
       console.error('Error liking post:', id, error);
       dispatch(showToast({ message: 'Failed to like post', type: 'error' }));
@@ -100,6 +99,12 @@ const Post = ({
 
   const closePostPopup = () => {
     setIsPopupOpen(false);
+  };
+
+  // Callback to update like status from PostPopup
+  const handleLikeChange = (newLikes, newIsLiked) => {
+    setLikes(newLikes);
+    setIsLiked(newIsLiked);
   };
 
   const renderMedia = () => {
@@ -224,7 +229,8 @@ const Post = ({
                 likes,
                 comment_count: commentCount,
                 user: { username, profile_picture: profileImage },
-                created_at, // Pass created_at to PostPopup if needed
+                created_at,
+                is_liked: isLiked, // Pass initial like status
               }}
               userData={{
                 username,
@@ -232,7 +238,7 @@ const Post = ({
               }}
               isOpen={isPopupOpen}
               onClose={closePostPopup}
-              onCommentAdded={() => setCommentCount((prev) => prev + 1)}
+              onLikeChange={handleLikeChange} // Pass callback to update like status
             />
           </div>,
           document.body

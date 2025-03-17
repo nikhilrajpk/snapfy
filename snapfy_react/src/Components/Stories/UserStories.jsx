@@ -25,7 +25,7 @@ const StoryCircle = ({ user, onClick, hasNewStory }) => {
           src={`${CLOUDINARY_ENDPOINT}${userImage}`}
           alt={user?.username} 
           className="w-full h-full object-cover rounded-full border-2 border-white" 
-          onError={(e) => (e.target.src = '/default-profile.png')}
+          // onError={(e) => (e.target.src = '/default-profile.png')}
         />
         {user?.isCurrentUser && (
           <div className="absolute bottom-0 right-0 w-6 h-6 bg-[#198754] rounded-full flex items-center justify-center border-2 border-white">

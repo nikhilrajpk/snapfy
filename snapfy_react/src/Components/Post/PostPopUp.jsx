@@ -10,7 +10,7 @@ import axiosInstance from '../../axiosInstance';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useQueryClient } from '@tanstack/react-query';
 
-const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null, onLikeChange = null }) => {
   const [liked, setLiked] = useState(post?.is_liked || false);
   const [likeCount, setLikeCount] = useState(post?.likes || 0);
   const [comment, setComment] = useState('');
@@ -297,7 +297,10 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       setLiked(response.is_liked);
       setLikeCount(response.likes);
       dispatch(showToast({ message: response.message, type: 'success' }));
-      queryClient.invalidateQueries(['posts', post.id]);
+      if (onLikeChange) {
+        onLikeChange(response.likes, response.is_liked); // Notify parent Post component
+      }
+      // queryClient.invalidateQueries(['posts', post.id]);
     } catch (error) {
       console.error('Error liking post:', error);
       dispatch(showToast({ message: 'Error liking post', type: 'error' }));

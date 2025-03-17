@@ -14,7 +14,7 @@ const Suggestions = React.lazy(() => import('../../Components/Suggestions/Sugges
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 
 function Home() {
-  const { posts, isLoading, error, invalidatePosts } = usePostsQuery(false); // Home mode
+  const { posts, isLoading, error } = usePostsQuery(false); // Home mode
   const containerRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -44,14 +44,6 @@ function Home() {
 
   const normalizeUrl = (url) => {
     return url.replace(/^(auto\/upload\/)+/, '');
-  };
-
-  const handleLike = async (postId) => {
-    try {
-      await invalidatePosts(); // Refetch after liking
-    } catch (err) {
-      dispatch(showToast({ message: 'Failed to update like status', type: 'error' }));
-    }
   };
 
   return (
@@ -111,9 +103,7 @@ function Home() {
                                 hashtags={p?.hashtags?.map((tag) => tag.name) || []}
                                 mentions={p?.mentions?.map((m) => m.username) || []}
                                 commentCount={p?.comment_count || 0}
-                                isLiked={p?.is_liked}
-                                created_at={p?.created_at} // Pass created_at
-                                onLike={() => handleLike(p?.id)}
+                                created_at={p?.created_at}
                               />
                             </Suspense>
                           </div>
