@@ -8,8 +8,8 @@ import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
 const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowingMe, onFollow, followedUsers, isAlreadyFollowing }) => {
   return (
-    <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-all duration-300 border border-gray-100">
-      <div className="flex items-center space-x-3">
+    <div className="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-all duration-300 border border-gray-100">
+      <div className="flex items-start space-x-3">
         <div className="relative">
           {isFollowingMe && !isAlreadyFollowing && (
             <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white z-10" 
@@ -17,14 +17,14 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
             </div>
           )}
           <img
-            src={profile_picture ? `${CLOUDINARY_ENDPOINT}${profile_picture}` : '/default-profile.png'}
+            src={String(profile_picture).startsWith('http') ? profile_picture : `${CLOUDINARY_ENDPOINT}${profile_picture}`}
             alt={username}
             className="w-14 h-14 rounded-full object-cover shadow-sm"
             loading="lazy"
             // onError={(e) => (e.target.src = '/default-profile.png')}
           />
         </div>
-        <div>
+        <div className="flex-1">
           <Link
             to={`/user/${username}`}
             className="font-semibold text-gray-800 hover:text-[#198754] transition-colors duration-150 text-base flex items-center"
@@ -60,40 +60,42 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
         </div>
       </div>
       
-      <button
-        onClick={onFollow}
-        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
-          followedUsers.includes(username) || isAlreadyFollowing
-            ? 'bg-gray-100 text-gray-500 border border-gray-200'
-            : isFollowingMe
-              ? 'bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100'
-              : 'bg-[#198754] text-white hover:bg-[#146c43]'
-        }`}
-        disabled={followedUsers.includes(username) || isAlreadyFollowing}
-      >
-        {followedUsers.includes(username) || isAlreadyFollowing ? (
-          <span className="flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
-              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
-            </svg>
-            Following
-          </span>
-        ) : isFollowingMe ? (
-          <span className="flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
-              <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0zM2.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 018 18a9.953 9.953 0 01-5.385-1.572zM16.25 5.75a.75.75 0 00-1.5 0v2h-2a.75.75 0 000 1.5h2v2a.75.75 0 001.5 0v-2h2a.75.75 0 000-1.5h-2v-2z" />
-            </svg>
-            Follow Back
-          </span>
-        ) : (
-          <span className="flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
-              <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0zM2.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 018 18a9.953 9.953 0 01-5.385-1.572zM16.25 5.75a.75.75 0 00-1.5 0v2h-2a.75.75 0 000 1.5h2v2a.75.75 0 001.5 0v-2h2a.75.75 0 000-1.5h-2v-2z" />
-            </svg>
-            Follow
-          </span>
-        )}
-      </button>
+      <div className="mt-3 ml-16">
+        <button
+          onClick={onFollow}
+          className={`w-full px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
+            followedUsers.includes(username) || isAlreadyFollowing
+              ? 'bg-gray-100 text-gray-500 border border-gray-200'
+              : isFollowingMe
+                ? 'bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100'
+                : 'bg-[#198754] text-white hover:bg-[#146c43]'
+          }`}
+          disabled={followedUsers.includes(username) || isAlreadyFollowing}
+        >
+          {followedUsers.includes(username) || isAlreadyFollowing ? (
+            <span className="flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
+                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+              </svg>
+              Following
+            </span>
+          ) : isFollowingMe ? (
+            <span className="flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
+                <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0zM2.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 018 18a9.953 9.953 0 01-5.385-1.572zM16.25 5.75a.75.75 0 00-1.5 0v2h-2a.75.75 0 000 1.5h2v2a.75.75 0 001.5 0v-2h2a.75.75 0 000-1.5h-2v-2z" />
+              </svg>
+              Follow Back
+            </span>
+          ) : (
+            <span className="flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
+                <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0zM2.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 018 18a9.953 9.953 0 01-5.385-1.572zM16.25 5.75a.75.75 0 00-1.5 0v2h-2a.75.75 0 000 1.5h2v2a.75.75 0 001.5 0v-2h2a.75.75 0 000-1.5h-2v-2z" />
+              </svg>
+              Follow
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 };
