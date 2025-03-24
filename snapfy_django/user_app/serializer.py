@@ -125,7 +125,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('id', 'posts', 'is_staff', 'username', 'email', 'first_name', 'last_name', 'bio', 'profile_picture',
-                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts', 'follower_count', 'following_count', 'blocked_users')
+                  'followers', 'following', 'is_blocked', 'is_verified', 'is_google_signIn', 'saved_posts', 'archived_posts', 'follower_count', 'following_count', 'blocked_users', 'is_online', 'last_seen')
 
     def get_posts(self, obj):
         archived_post_ids = obj.archived_posts.values_list('post_id', flat=True)

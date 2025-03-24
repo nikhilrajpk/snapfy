@@ -13,6 +13,8 @@ class User(AbstractUser):
     is_verified = models.BooleanField(default=False)
     email = models.EmailField(max_length=255)
     is_google_signIn = models.BooleanField(default=False)
+    is_online = models.BooleanField(default=False)
+    last_seen = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         unique_together = [['username', 'is_verified'], ['email', 'is_verified']]

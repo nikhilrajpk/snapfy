@@ -20,6 +20,7 @@ const EditContentPage = React.lazy(()=> import('../Pages/EditContentPage'))
 const SearchBarPage = React.lazy(()=> import('../Pages/SearchBarPage'))
 const ExplorePage = React.lazy(()=> import('../Pages/ExplorePage'))
 const Shorts = React.lazy(()=> import('../Features/Shorts/Shorts'))
+const Message = React.lazy(()=> import('../Features/Messages/Message'))
 
 const router = createBrowserRouter([
     {
@@ -136,6 +137,22 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={true}>
                         <Shorts/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/messages',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <Message/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/messages/:conversationId',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <Message/>
                     </ProtectedRoute>
                 )
             },
