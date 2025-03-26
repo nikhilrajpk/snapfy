@@ -110,7 +110,7 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
+    id = serializers.UUIDField(read_only=True, format='hex_verbose')
     is_staff = serializers.BooleanField(read_only=True)
     posts = serializers.SerializerMethodField()
     saved_posts = SavedPostSerializer(many=True, read_only=True)
@@ -121,6 +121,8 @@ class UserSerializer(serializers.ModelSerializer):
     following = serializers.SerializerMethodField()
     profile_picture = serializers.SerializerMethodField()
     blocked_users = serializers.SerializerMethodField()
+    last_seen = serializers.DateTimeField(read_only=True, allow_null=True)
+    is_online = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
@@ -162,3 +164,9 @@ class UserSerializer(serializers.ModelSerializer):
     
     def get_blocked_users(self, obj):
         return [blocked.blocked.username for blocked in obj.blocked_users.all()]
+    
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Ensure UUID id is a string (redundant with format='hex_verbose', but safe)
+        data['id'] = str(data['id'])
+        return data

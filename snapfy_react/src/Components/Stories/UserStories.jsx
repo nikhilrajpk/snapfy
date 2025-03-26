@@ -91,7 +91,7 @@ const StoryViewerModal = ({
 
   const fetchViewers = async () => {
     try {
-      const data = await getStoryViewers(currentStory.id);
+      const data = await getStoryViewers(currentStory?.id);
       setViewers(data.viewers || []);
     } catch (error) {
       console.error('Error fetching viewers:', error);
@@ -100,7 +100,7 @@ const StoryViewerModal = ({
 
   const toggleLike = async () => {
     try {
-      const data = await toggleStoryLike(currentStory.id);
+      const data = await toggleStoryLike(currentStory?.id);
       setLiked(!liked);
       currentStory.has_liked = !liked;
       currentStory.like_count = data.story.like_count;
@@ -111,7 +111,7 @@ const StoryViewerModal = ({
   
   const handleDelete = () => {
     if (window.confirm('Are you sure you want to delete this story?')) {
-      onDelete(currentStory.id);
+      onDelete(currentStory?.id);
     }
   };
   
@@ -135,7 +135,7 @@ const StoryViewerModal = ({
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
       <div className="w-full flex space-x-1 px-2 mt-2">
         {userStories.map((story, idx) => (
-          <div key={story.id} className="h-1 bg-gray-700 flex-1">
+          <div key={story?.id} className="h-1 bg-gray-700 flex-1">
             <div 
               className="h-full bg-white"
               style={{ 
@@ -268,7 +268,7 @@ const StoryViewerModal = ({
             
             <div className="overflow-y-auto max-h-[calc(70vh-8rem)]">
               {viewers.map(viewer => (
-                <div key={viewer.id} className="flex items-center justify-between p-4 border-b">
+                <div key={viewer?.id} className="flex items-center justify-between p-4 border-b">
                   <div className="flex items-center space-x-3">
                     <img 
                       src={viewer.profile_picture || "/default-profile.png"} 
@@ -612,20 +612,20 @@ const UserStories = () => {
       const groupedStories = {};
       
       stories.forEach(story => {
-        const userId = story.user.id;
+        const userId = story?.user?.id;
         if (!groupedStories[userId]) {
           groupedStories[userId] = {
             userId,
             username: story.user.username,
             userImage: story.user.profile_picture,
-            isCurrentUser: story.user.id === user.id,
+            isCurrentUser: story?.user?.id === user?.id,
             stories: [],
             allStoriesSeen: true,
             hasNewStory: false
           };
         }
         groupedStories[userId].stories.push(story);
-        if (!story.is_seen && story.user.id !== user.id) {
+        if (!story.is_seen && story?.user?.id !== user?.id) {
           groupedStories[userId].allStoriesSeen = false;
           groupedStories[userId].hasNewStory = true;
         }
@@ -638,9 +638,9 @@ const UserStories = () => {
       let usersArray = Object.values(groupedStories);
       if (!usersArray.some(u => u.isCurrentUser)) {
         usersArray.unshift({
-          userId: user.id,
-          username: user.username,
-          userImage: user.profile_picture,
+          userId: user?.id,
+          username: user?.username,
+          userImage: user?.profile_picture,
           isCurrentUser: true,
           stories: [],
           allStoriesSeen: true,
@@ -656,7 +656,7 @@ const UserStories = () => {
       console.error('Error fetching stories:', error);
       dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
     }
-  }, [user.id, user.username, user.profile_picture, dispatch]);
+  }, [user?.id, user?.username, user?.profile_picture, dispatch]);
 
   useEffect(() => {
     fetchStories();
@@ -776,9 +776,9 @@ const UserStories = () => {
       updatedUsers[currentUserIndex].hasNewStory = true;
     } else {
       updatedUsers.unshift({
-        userId: user.id,
-        username: user.username,
-        userImage: user.profile_picture,
+        userId: user?.id,
+        username: user?.username,
+        userImage: user?.profile_picture,
         isCurrentUser: true,
         stories: [newStory],
         allStoriesSeen: false,

@@ -4,15 +4,15 @@ from user_app.models import User
 from cloudinary.models import CloudinaryField
 import os
 
-def generate_encryption_key_salt():
-    """Generate a random 32-character hex string for encryption key salt."""
-    return os.urandom(16).hex()
+def generate_encryption_key():
+    """Generate a random 32-byte (64-char hex) encryption key."""
+    return os.urandom(32).hex()
 
 class ChatRoom(models.Model):
     users = models.ManyToManyField(User, related_name="chat_rooms")
     created_at = models.DateTimeField(auto_now_add=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
-    encryption_key_salt = models.CharField(max_length=32, default=generate_encryption_key_salt)  # Use function instead of lambda
+    encryption_key = models.CharField(max_length=64, default=generate_encryption_key)
 
     def update_last_message_at(self):
         latest_message = self.messages.filter(is_deleted=False).order_by('-sent_at').first()
@@ -20,8 +20,7 @@ class ChatRoom(models.Model):
         self.save()
 
     def get_encryption_key(self):
-        user_ids = ''.join(sorted(str(user.id) for user in self.users.all()))
-        return f"{user_ids}-{self.encryption_key_salt}"[:32]  # Truncate/pad to 32 bytes
+        return self.encryption_key
 
     def __str__(self):
         return f"ChatRoom {self.id} with users {', '.join(user.username for user in self.users.all())}"

@@ -21,10 +21,14 @@ function Message() {
   const dispatch = useDispatch();
   const { user, token } = useSelector((state) => state.user);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const fileInputRef = useRef(null);
   const socketRef = useRef(null);
+  const statusSocketRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const [message, setMessage] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [chatRooms, setChatRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -34,7 +38,20 @@ function Message() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [encryptionKey, setEncryptionKey] = useState('');
+  const [initialLoad, setInitialLoad] = useState(true);
 
+  // Scroll to bottom on new messages if at bottom
+  useEffect(() => {
+    const chatContainer = messagesContainerRef.current;
+    if (chatContainer) {
+      const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop <= chatContainer.clientHeight + 50;
+      if (isAtBottom && !initialLoad) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [messages, initialLoad]);
+
+  // Fetch chat rooms
   useEffect(() => {
     if (!token || !user) {
       navigate('/');
@@ -42,10 +59,21 @@ function Message() {
     }
 
     const fetchChatRooms = async () => {
+      setIsLoading(true);
       try {
-        setIsLoading(true);
         const response = await axiosInstance.get('/chatrooms/my-chats/');
-        setChatRooms(response.data || []);
+        const rooms = response.data.map((room) => ({
+          ...room,
+          encryption_key: room.encryption_key,
+          last_message: room.last_message
+            ? {
+                ...room.last_message,
+                content: decryptMessage(room.last_message.content, room.encryption_key),
+              }
+            : null,
+          unread_count: room.unread_count || 0,
+        }));
+        setChatRooms(rooms);
       } catch (error) {
         console.error('Error fetching chat rooms:', error);
         dispatch(showToast({ message: 'Failed to load chats', type: 'error' }));
@@ -53,182 +81,330 @@ function Message() {
         setIsLoading(false);
       }
     };
+
     fetchChatRooms();
   }, [dispatch, user, token, navigate]);
 
+  // Fetch room and messages
   useEffect(() => {
     if (!conversationId || !user || !token) return;
-  
+
     const fetchRoomAndMessages = async () => {
-        try {
-          setIsLoading(true);
-          const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then(res => res.data);
-          const roomUsers = roomData.users.map(u => ({
-            id: u.id,
-            username: u.username,
-            profile_picture: u.profile_picture,
-            is_online: u.is_online,
-            last_seen: u.last_seen,
-          }));
-          setSelectedRoom({ id: roomData.id, users: roomUsers });
-          setEncryptionKey(roomData.encryption_key);
-      
-          const msgs = await getMessages(conversationId);
-          const decryptedMessages = msgs.map((msg) => ({
-            ...msg,
-            content: msg.content && !msg.is_deleted ? decryptMessage(msg.content, roomData.encryption_key) : msg.content,
-          }));
-          setMessages(decryptedMessages || []);
-        } catch (error) {
-          console.error('Error fetching room/messages:', error);
-          dispatch(showToast({ message: 'Failed to load chat', type: 'error' }));
-        } finally {
-          setIsLoading(false);
+      setIsLoading(true);
+      try {
+        const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then((res) => res.data);
+        const roomUsers = roomData.users.map((u) => ({
+          id: u.id,
+          username: u.username,
+          profile_picture: u.profile_picture || null,
+          is_online: u.is_online,
+          last_seen: u.last_seen,
+        }));
+        const room = {
+          id: roomData.id,
+          users: roomUsers,
+          encryption_key: roomData.encryption_key,
+          unread_count: roomData.unread_count || 0,
+        };
+        setSelectedRoom(room);
+        setEncryptionKey(roomData.encryption_key);
+
+        const msgs = await getMessages(conversationId);
+        const decryptedMessages = msgs.map((msg) => ({
+          ...msg,
+          content: decryptMessage(msg.content, roomData.encryption_key),
+          sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
+        }));
+        setMessages(decryptedMessages || []);
+        setInitialLoad(true);
+
+        // Mark messages as read on load
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
         }
-      };
-    fetchRoomAndMessages();
-  
-    return () => {
-      if (socketRef.current) socketRef.current.close();
-    };
-  }, [conversationId, dispatch, user, token, navigate]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target)) {
-        setShowEmojiPicker(false);
+      } catch (error) {
+        console.error('Error fetching room/messages:', error);
+        dispatch(showToast({ message: 'Failed to load chat', type: 'error' }));
+      } finally {
+        setIsLoading(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
+    fetchRoomAndMessages();
+  }, [conversationId, dispatch, user, token, navigate]);
+
+  // Scroll on initial load
   useEffect(() => {
-    const delayDebounce = setTimeout(() => handleSearchUsers(searchTerm), 300);
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
+    if (initialLoad && messages.length) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setInitialLoad(false);
+    }
+  }, [initialLoad, messages]);
+
+  // Chat WebSocket
+  useEffect(() => {
+    if (!conversationId || !user?.id || !token) return;
+
+    const connectWebSocket = () => {
+      const socket = new WebSocket(`ws://localhost:8000/ws/chat/${conversationId}/?token=${token}`);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        console.log('Chat WebSocket connection established');
+        socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('WebSocket data:', data);
+
+        if (data.type === 'chat_message') {
+          const message = data.message;
+          const key = selectedRoom?.encryption_key || encryptionKey;
+          const decryptedContent = decryptMessage(message.content, key);
+          const newMessage = {
+            ...message,
+            content: message.is_deleted ? '[Deleted]' : decryptedContent,
+            file_url: message.file_url || null,
+            sent_at: message.sent_at || new Date().toISOString(),
+            is_read: message.is_read || false,
+            is_deleted: message.is_deleted || false,
+            sender: {
+              id: message.sender.id,
+              username: message.sender.username || 'Unknown',
+              profile_picture: message.sender.profile_picture || null,
+            },
+          };
+          setMessages((prev) => {
+            const exists = prev.some((msg) => String(msg.id) === String(newMessage.id));
+            return exists ? prev : [...prev, newMessage];
+          });
+          updateChatRoomsOrder(newMessage);
+        } else if (data.type === 'mark_as_read') {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              String(msg.sender.id) !== String(user?.id) && !msg.is_read ? { ...msg, is_read: true } : msg
+            )
+          );
+          setChatRooms((prev) =>
+            prev.map((room) =>
+              String(room.id) === String(conversationId) ? { ...room, unread_count: 0 } : room
+            )
+          );
+          setSelectedRoom((prev) => (prev ? { ...prev, unread_count: 0 } : prev));
+        }
+      };
+
+      socket.onerror = (error) => console.error('Chat WebSocket error:', error);
+      socket.onclose = (event) => {
+        console.log('Chat WebSocket closed:', event.code);
+        if (event.code !== 1000) setTimeout(connectWebSocket, 1000); // Reconnect on abnormal closure
+      };
+    };
+
+    connectWebSocket();
+    return () => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.close(1000, 'Component unmounted');
+    };
+  }, [conversationId, user?.id, token, encryptionKey, selectedRoom?.encryption_key]);
+
+  // Status WebSocket
+  useEffect(() => {
+    if (!user?.id || !token) return;
+
+    const connectStatusWebSocket = () => {
+      const socket = new WebSocket(`ws://localhost:8000/ws/user/${user.id}/?token=${token}`);
+      statusSocketRef.current = socket;
+
+      socket.onopen = () => console.log('Status WebSocket connection established');
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'user_status_update') {
+          setSelectedRoom((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              users: prev.users.map((u) =>
+                String(u.id) === String(data.user_id) ? { ...u, is_online: data.is_online, last_seen: data.last_seen } : u
+              ),
+            };
+          });
+          setChatRooms((prev) =>
+            prev.map((room) => ({
+              ...room,
+              users: room.users.map((u) =>
+                String(u.id) === String(data.user_id) ? { ...u, is_online: data.is_online, last_seen: data.last_seen } : u
+              ),
+            }))
+          );
+        }
+      };
+
+      socket.onerror = (error) => console.error('Status WebSocket error:', error);
+      socket.onclose = (event) => {
+        console.log('Status WebSocket closed:', event.code);
+        if (event.code !== 1000) setTimeout(connectStatusWebSocket, 1000); // Reconnect on abnormal closure
+      };
+    };
+
+    connectStatusWebSocket();
+    return () => {
+      if (statusSocketRef.current?.readyState === WebSocket.OPEN) statusSocketRef.current.close(1000, 'Component unmounted');
+    };
+  }, [user?.id, token]);
 
   const encryptMessage = (text, key) => {
+    if (!text || !key || key.length !== 64) return text;
     return CryptoJS.AES.encrypt(text, key).toString();
   };
+
   const decryptMessage = (ciphertext, key) => {
-    if (!ciphertext || !key) return ciphertext || '';
+    if (!ciphertext || !key || key.length !== 64 || !ciphertext.startsWith('U2FsdGVkX1')) return ciphertext || '[No Content]';
     try {
       const bytes = CryptoJS.AES.decrypt(ciphertext, key);
       const decrypted = bytes.toString(CryptoJS.enc.Utf8);
       return decrypted || '[Decryption Failed]';
     } catch (e) {
-      console.error('Decryption error:', e.message);
+      console.error('Decryption error:', e.message, { ciphertext, key });
       return '[Decryption Failed]';
     }
   };
 
   const updateChatRoomsOrder = (newMessage) => {
-    setChatRooms(prev => {
-      const updatedRooms = prev.map(room => {
+    setChatRooms((prev) => {
+      const updatedRooms = prev.map((room) => {
         if (String(room.id) === String(newMessage.room)) {
-          return { ...room, last_message_at: newMessage.sent_at };
+          const key = room.encryption_key;
+          const decryptedContent = decryptMessage(newMessage.content, key);
+          return {
+            ...room,
+            last_message: {
+              ...newMessage,
+              content: decryptedContent,
+              sender: { ...newMessage.sender, profile_picture: newMessage.sender.profile_picture || null },
+            },
+            last_message_at: newMessage.sent_at,
+            unread_count: String(newMessage.sender.id) !== String(user?.id) && !newMessage.is_read
+              ? (room.unread_count || 0) + 1
+              : 0,
+          };
         }
         return room;
       });
-      return updatedRooms.sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
+      return updatedRooms.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
     });
   };
 
-  const handleStartChat = async (username) => {
-    try {
-      const response = await axiosInstance.post('/chatrooms/start-chat/', { username });
-      const roomUsers = response.data.users.map(u => ({
-        id: u.id,
-        username: u.username,
-        profile_picture: u.profile_picture,
-        is_online: u.is_online,
-        last_seen: u.last_seen,
-      }));
-      const newRoom = { id: response.data.id, users: roomUsers, last_message_at: response.data.last_message_at };
-      setSelectedRoom(newRoom);
-      setChatRooms(prev => {
-        if (!prev.some(r => r.id === newRoom.id)) {
-          return [newRoom, ...prev];
-        }
-        return prev;
-      });
-      navigate(`/messages/${newRoom.id}`);
-      const msgs = await getMessages(newRoom.id);
-      setMessages(msgs.map(msg => ({
-        ...msg,
-        content: msg.content && !msg.is_deleted ? decryptMessage(msg.content) : msg.content,
-      })) || []);
-    } catch (error) {
-      console.error('Error starting chat:', error);
-      dispatch(showToast({ message: 'Failed to start chat', type: 'error' }));
-    }
-  };
-
   const handleSendMessage = async () => {
-    if (!message.trim() && !fileInputRef.current?.files[0]) return;
-    if (!selectedRoom?.id || !encryptionKey) return;
-  
+    if (!message.trim() && !selectedFile) return;
+    if (!selectedRoom?.id || !selectedRoom.encryption_key) {
+      console.error('Missing room or key:', selectedRoom);
+      return;
+    }
+
     setIsSending(true);
     try {
-      const file = fileInputRef.current?.files[0];
       const formData = new FormData();
       if (message.trim()) {
-        const encrypted = encryptMessage(message, encryptionKey);
+        const encrypted = encryptMessage(message, selectedRoom.encryption_key);
         formData.append('content', encrypted);
-        console.log('Sending encrypted content:', encrypted);
       }
-      if (file) {
-        formData.append('file', file);
-      }
-      // Add the room ID to the payload
+      if (selectedFile) formData.append('file', selectedFile);
       formData.append('room', selectedRoom.id);
-  
+
       const response = await axiosInstance.post(
         `/chatrooms/${selectedRoom.id}/send-message/`,
         formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        }
+        { headers: { 'Content-Type': 'multipart/form-data' } }
       );
-  
-      const newMessage = response.data;
-      newMessage.content = message; // Show unencrypted locally
-      setMessages((prev) => [...prev, newMessage]);
+
+      const newMessage = {
+        ...response.data,
+        content: message || '', // Sender sees plaintext
+        file_url: response.data.file_url || null,
+        sender: { id: user.id, username: user.username, profile_picture: user.profile_picture || null },
+        is_read: false,
+      };
+      setMessages((prev) => {
+        if (!prev.some((msg) => String(msg.id) === String(newMessage.id))) return [...prev, newMessage];
+        return prev;
+      });
       updateChatRoomsOrder(newMessage);
       setMessage('');
+      setSelectedFile(null);
+      setFilePreview(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setShowEmojiPicker(false);
-  
-      // Check if WebSocket connection is open
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ mark_read: true }));
-      } else {
-        console.error('WebSocket connection is not open');
-      }
     } catch (error) {
-      console.error('Error sending message:', error.response?.data || error.message);
+      console.error('Error sending message:', error);
       dispatch(showToast({ message: 'Failed to send message', type: 'error' }));
     } finally {
       setIsSending(false);
     }
   };
 
-  
+  const handleStartChat = async (username) => {
+    try {
+      const response = await axiosInstance.post('/chatrooms/start-chat/', { username });
+      const roomUsers = response.data.users.map((u) => ({
+        id: u.id,
+        username: u.username,
+        profile_picture: u.profile_picture || null,
+        is_online: u.is_online,
+        last_seen: u.last_seen,
+      }));
+      const newRoom = {
+        id: response.data.id,
+        users: roomUsers,
+        last_message_at: response.data.last_message_at,
+        encryption_key: response.data.encryption_key,
+        unread_count: 0,
+      };
+      setSelectedRoom(newRoom);
+      setEncryptionKey(newRoom.encryption_key);
+      setChatRooms((prev) => {
+        if (!prev.some((r) => String(r.id) === String(newRoom.id))) return [newRoom, ...prev];
+        return prev;
+      });
+      navigate(`/messages/${newRoom.id}`);
+      const msgs = await getMessages(newRoom.id);
+      setMessages(
+        msgs.map((msg) => ({
+          ...msg,
+          content: decryptMessage(msg.content, newRoom.encryption_key),
+          sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
+        })) || []
+      );
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      dispatch(showToast({ message: 'Failed to start chat', type: 'error' }));
+    }
+  };
+
   const handleDeleteMessage = async (messageId) => {
     try {
-      await axiosInstance.post(`/chatrooms/${selectedRoom.id}/delete-message/`, { message_id: messageId });
-      setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, is_deleted: true, content: '[Deleted]' } : msg));
-      if (socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ message: { id: messageId, is_deleted: true } }));
+      const response = await axiosInstance.post(`/chatrooms/${selectedRoom.id}/delete-message/`, { message_id: messageId });
+      if (response.status === 200) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            String(msg.id) === String(messageId) ? { ...msg, is_deleted: true, content: '[Deleted]' } : msg
+          )
+        );
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(
+            JSON.stringify({
+              type: 'chat_message',
+              message: { id: messageId, room: selectedRoom.id, is_deleted: true },
+            })
+          );
+        }
       }
     } catch (error) {
-      console.error('Error deleting message:', error);
-      dispatch(showToast({ message: 'Failed to delete message', type: 'error' }));
+      console.error('Error deleting message:', error.response?.data || error.message);
+      if (error.response?.status !== 404) {
+        dispatch(showToast({ message: 'Failed to delete message', type: 'error' }));
+      }
     }
   };
 
@@ -238,59 +414,44 @@ function Message() {
       return;
     }
     try {
-      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${term}`);
-      setSearchResults(response.data);
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
+      setSearchResults(response.data || []);
     } catch (error) {
       console.error('Error searching users:', error);
       setSearchResults([]);
+      dispatch(showToast({ message: 'Search failed', type: 'error' }));
     }
   };
 
   const handleEmojiClick = (emoji) => {
-    setMessage(prev => prev + emoji.emoji);
+    setMessage((prev) => prev + emoji.emoji);
     setShowEmojiPicker(false);
+  };
+
+  const handleFileSelected = (e) => {
+    if (e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+      setFilePreview(URL.createObjectURL(e.target.files[0]));
+    }
   };
 
   const formatMessageTime = (timestamp) => {
     if (!timestamp || isNaN(new Date(timestamp).getTime())) return 'Unknown';
     return format(new Date(timestamp), 'h:mm a');
   };
+
   const formatLastActive = (timestamp) => {
-    if (!timestamp) return 'Unknown';
+    if (!timestamp || isNaN(new Date(timestamp).getTime())) return 'Recently';
     const now = new Date();
     const time = new Date(timestamp);
     const diffInHours = (now - time) / (1000 * 60 * 60);
-    return diffInHours < 24 ? format(time, 'h:mm a') : diffInHours < 48 ? 'Yesterday' : format(time, 'MMM d');
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return format(time, 'h:mm a');
+    if (diffInHours < 48) return 'Yesterday';
+    return format(time, 'MMM d');
   };
 
-
-  useEffect(() => {
-    if (!conversationId || !user || !token) return;
-  
-    const socket = new WebSocket(`ws://your-backend-url/ws/chat/${conversationId}/`);
-    socketRef.current = socket;
-  
-    socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.message) {
-          const newMessage = {
-            ...data.message,
-            content: decryptMessage(data.message.content, encryptionKey),
-          };
-          setMessages((prev) => [...prev, newMessage]);
-          updateChatRoomsOrder(newMessage);
-        }
-      };
-  
-    return () => {
-      socket.close();
-    };
-  }, [conversationId, user, token]);
-
-  const room = selectedRoom || { users: [] };
-  const decryptedLastMessage = room.last_message?.content
-    ? decryptMessage(room.last_message.content, room.encryption_key)
-    : room.last_message?.content || 'No messages yet';
+  const otherUser = selectedRoom?.users?.find((u) => String(u?.id) !== String(user?.id));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
@@ -303,60 +464,83 @@ function Message() {
             </Suspense>
           </div>
           <div className="lg:col-span-10">
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden h-[85vh]">
-              <div className="grid grid-cols-1 md:grid-cols-3 h-full">
+            <div className="bg-white rounded-xl shadow-lg h-[85vh] flex">
+              <div className="grid grid-cols-1 md:grid-cols-3 w-full h-full">
                 <div className="md:col-span-1 border-r border-gray-200 overflow-y-auto bg-white">
                   <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
                     <h2 className="text-xl font-bold text-gray-800 mb-3">Messages</h2>
-                    <input
-                      type="text"
-                      placeholder="Enter username to chat..."
-                      className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                    <IoSearch className="absolute left-7 top-12 text-gray-500" size={18} />
-                    {searchResults.length > 0 && (
-                      <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
-                        {searchResults.map(u => (
-                          <div
-                            key={u.id}
-                            className="p-2 hover:bg-gray-100 cursor-pointer"
-                            onClick={() => { handleStartChat(u.username); setSearchResults([]); setSearchTerm(''); }}
-                          >
-                            {u.username}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Enter username to chat..."
+                        className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                        value={searchTerm}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value);
+                          handleSearchUsers(e.target.value);
+                        }}
+                      />
+                      <IoSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
+                      {searchResults.length > 0 && (
+                        <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
+                          {searchResults.map((u) => (
+                            <div
+                              key={u.id}
+                              className="p-2 hover:bg-gray-100 cursor-pointer"
+                              onClick={() => {
+                                handleStartChat(u.username);
+                                setSearchResults([]);
+                                setSearchTerm('');
+                              }}
+                            >
+                              {u.username}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="overflow-y-auto h-[calc(85vh-115px)]">
                     {isLoading ? (
                       <Loader />
                     ) : chatRooms.length ? (
-                      chatRooms.map(room => {
-                        const otherUser = room?.users?.find(u => String(u.id) !== String(user?.id));
+                      chatRooms.map((room) => {
+                        const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
+                        const lastMessage = room.last_message?.content || 'No messages yet';
+                        const unreadCount = room.unread_count || 0;
+
                         return (
                           <div
                             key={room.id}
-                            className={`p-4 border-b border-gray-100 hover:bg-orange-50 cursor-pointer ${selectedRoom?.id === room.id ? 'bg-orange-100' : ''}`}
-                            onClick={() => handleStartChat(otherUser.username)}
+                            className={`p-4 border-b border-gray-100 hover:bg-orange-50 cursor-pointer ${
+                              selectedRoom?.id === room.id ? 'bg-orange-100' : ''
+                            }`}
+                            onClick={() => navigate(`/messages/${room.id}`)}
                           >
                             <div className="flex items-center space-x-3">
                               <div className="relative">
                                 <img
-                                  src={otherUser.profile_picture ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}` : '/default-profile.png'}
+                                  src={
+                                    otherUser.profile_picture
+                                      ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}`
+                                      : '/default-profile.png'
+                                  }
                                   alt={otherUser.username}
                                   className="w-12 h-12 rounded-full object-cover border border-gray-200 shadow-sm"
                                   onError={(e) => (e.target.src = '/default-profile.png')}
                                 />
-                                <div className={`absolute bottom-0 right-0 w-3 h-3 ${otherUser.is_online ? 'bg-green-500' : 'bg-gray-500'} rounded-full border-2 border-white`}></div>
+                                <div
+                                  className={`absolute bottom-0 right-0 w-3 h-3 ${
+                                    otherUser.is_online ? 'bg-green-500' : 'bg-gray-500'
+                                  } rounded-full border-2 border-white`}
+                                ></div>
                               </div>
                               <div className="flex-1 min-w-0">
                                 <h3 className="text-sm font-semibold text-gray-800 truncate">{otherUser.username}</h3>
-                                <p className="text-sm text-gray-600 truncate">
-                                    {decryptedLastMessage}
-                                </p>
+                                <p className="text-sm text-gray-600 truncate">{lastMessage}</p>
+                                {unreadCount > 0 && (
+                                  <span className="text-xs bg-red-500 text-white rounded-full px-2 py-1">{unreadCount}</span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -367,26 +551,32 @@ function Message() {
                     )}
                   </div>
                 </div>
-                <div className="md:col-span-2 flex flex-col h-full overflow-y-scroll">
+                <div className="md:col-span-2 flex flex-col h-full">
                   {selectedRoom ? (
                     <>
-                      <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center sticky top-0 z-10 shadow-sm">
+                      <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center sticky top-0 z-10 shadow-sm shrink-0">
                         <div className="flex items-center space-x-3">
                           <div className="relative">
                             <img
-                              src={selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.profile_picture ? `${CLOUDINARY_ENDPOINT}/${selectedRoom.users.find(u => String(u.id) !== String(user?.id)).profile_picture}` : '/default-profile.png'}
-                              alt={selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.username || 'User'}
+                              src={
+                                otherUser?.profile_picture
+                                  ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}`
+                                  : '/default-profile.png'
+                              }
+                              alt={otherUser?.username || 'User'}
                               className="w-10 h-10 rounded-full object-cover border border-gray-200"
                               onError={(e) => (e.target.src = '/default-profile.png')}
                             />
-                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.is_online ? 'bg-green-500' : 'bg-gray-500'} rounded-full border-2 border-white`}></div>
+                            <div
+                              className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${
+                                otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
+                              } rounded-full border-2 border-white`}
+                            ></div>
                           </div>
                           <div>
-                            <h3 className="font-semibold text-gray-800">
-                              {selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.username || 'Unknown User'}
-                            </h3>
-                            <p className={`text-xs ${selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
-                              {selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.is_online ? 'Online' : `Last seen ${formatLastActive(selectedRoom.users.find(u => String(u.id) !== String(user?.id))?.last_seen)}`}
+                            <h3 className="font-semibold text-gray-800">{otherUser?.username || 'Unknown User'}</h3>
+                            <p className={`text-xs ${otherUser?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
+                              {otherUser?.is_online ? 'Online' : `Last seen ${formatLastActive(otherUser?.last_seen)}`}
                             </p>
                           </div>
                         </div>
@@ -402,66 +592,98 @@ function Message() {
                           </button>
                         </div>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-orange-50 to-white" style={{ height: 'calc(85vh - 137px)' }}>
+                      <div
+                        ref={messagesContainerRef}
+                        className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-orange-50 to-white"
+                        style={{ maxHeight: 'calc(85vh - 137px)' }}
+                      >
                         {isLoading ? (
                           <Loader />
                         ) : messages.length ? (
-                            messages.map((msg) => (
-                                <div key={msg.id} className={`flex ${msg.sender && String(msg.sender.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}>
-                                  {/* Message content */}
-                                  {msg.sender && String(msg.sender.id) !== String(user?.id) && (
-                                    <img
-                                      src={msg.sender.profile_picture ? `${CLOUDINARY_ENDPOINT}/${msg.sender.profile_picture}` : '/default-profile.png'}
-                                      alt={msg.sender.username}
-                                      className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
-                                      onError={(e) => (e.target.src = '/default-profile.png')}
-                                    />
+                          messages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
+                            >
+                              {String(msg?.sender?.id) !== String(user?.id) && (
+                                <img
+                                  src={
+                                    msg?.sender?.profile_picture
+                                      ? `${CLOUDINARY_ENDPOINT}/${msg.sender.profile_picture}`
+                                      : '/default-profile.png'
+                                  }
+                                  alt={msg?.sender?.username || 'Unknown'}
+                                  className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
+                                  onError={(e) => (e.target.src = '/default-profile.png')}
+                                />
+                              )}
+                              <div className="max-w-[75%] relative group">
+                                <div
+                                  className={`rounded-2xl p-3 shadow-sm ${
+                                    String(msg?.sender?.id) === String(user?.id)
+                                      ? 'bg-[#198754] text-white rounded-tr-none'
+                                      : 'bg-white text-gray-800 rounded-tl-none'
+                                  }`}
+                                >
+                                  {msg?.is_deleted ? (
+                                    <p className="italic text-gray-500">[Deleted]</p>
+                                  ) : msg?.file_url ? (
+                                    msg.file_url.includes('video') ? (
+                                      <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
+                                    ) : msg.file_url.includes('audio') ? (
+                                      <audio controls className="w-full h-10">
+                                        <source src={msg.file_url} type="audio/mpeg" />
+                                      </audio>
+                                    ) : (
+                                      <img src={msg.file_url} alt="Shared file" className="rounded-lg max-h-60 w-auto" />
+                                    )
+                                  ) : (
+                                    <p className="whitespace-pre-wrap break-words">{msg?.content || '[Empty]'}</p>
                                   )}
-                                  <div className="max-w-[75%] relative group">
-                                    <div
-                                      className={`rounded-2xl p-3 shadow-sm ${
-                                        msg.sender && String(msg.sender.id) === String(user?.id) ? 'bg-[#198754] text-white rounded-tr-none' : 'bg-white text-gray-800 rounded-tl-none'
-                                      }`}
-                                    >
-                                      {msg.is_deleted ? (
-                                        <p className="italic text-gray-500">[Deleted]</p>
-                                      ) : msg.file_url ? (
-                                        msg.file_url.includes('video') ? (
-                                          <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
-                                        ) : msg.file_url.includes('audio') ? (
-                                          <audio controls className="w-full h-10"><source src={msg.file_url} type="audio/mpeg" /></audio>
-                                        ) : (
-                                          <img src={msg.file_url} alt="Shared file" className="rounded-lg max-h-60 w-auto" />
-                                        )
-                                      ) : (
-                                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                                      )}
-                                      <div className={`text-xs mt-1 flex items-center ${msg.sender && String(msg.sender.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'}`}>
-                                        {formatMessageTime(msg.sent_at)}
-                                        {msg.sender && String(msg.sender.id) === String(user?.id) && (
-                                          <span className="ml-1">{msg.is_read ? '✓✓' : '✓'}</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {msg.sender && String(msg.sender.id) === String(user?.id) && !msg.is_deleted && (
-                                      <button
-                                        onClick={() => handleDeleteMessage(msg.id)}
-                                        className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                        title="Delete message"
-                                      >
-                                        <IoTrash size={16} />
-                                      </button>
+                                  <div
+                                    className={`text-xs mt-1 flex items-center ${
+                                      String(msg?.sender?.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'
+                                    }`}
+                                  >
+                                    {formatMessageTime(msg?.sent_at)}
+                                    {String(msg?.sender?.id) === String(user?.id) && (
+                                      <span className="ml-1">{msg?.is_read ? '✓✓' : '✓'}</span>
                                     )}
                                   </div>
                                 </div>
-                              ))
+                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && (
+                                  <button
+                                    onClick={() => handleDeleteMessage(msg?.id)}
+                                    className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                    title="Delete message"
+                                  >
+                                    <IoTrash size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))
                         ) : (
                           <p className="text-center text-gray-600 mt-4">No messages yet</p>
                         )}
                         <div ref={messagesEndRef} />
                       </div>
-                      <div className="p-4 border-t border-gray-200 bg-white">
+                      <div className="p-4 border-t border-gray-200 bg-white shrink-0">
                         {isSending && <div className="text-gray-500 text-sm mb-2">Sending...</div>}
+                        {filePreview && (
+                          <div className="mb-2">
+                            <img src={filePreview} alt="Selected file" className="max-h-20 w-auto rounded-lg" />
+                            <button
+                              onClick={() => {
+                                setSelectedFile(null);
+                                setFilePreview(null);
+                              }}
+                              className="text-red-500 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
                         {showEmojiPicker && (
                           <div ref={emojiPickerRef} className="absolute bottom-20 right-20 z-10 shadow-xl rounded-lg">
                             <Suspense fallback={<div>Loading emojis...</div>}>
@@ -470,10 +692,20 @@ function Message() {
                           </div>
                         )}
                         <div className="flex items-center space-x-3">
-                          <button onClick={() => fileInputRef.current.click()} className="text-gray-500 hover:text-[#198754] p-2 rounded-full hover:bg-gray-100" title="Send media">
+                          <button
+                            onClick={() => fileInputRef.current.click()}
+                            className="text-gray-500 hover:text-[#198754] p-2 rounded-full hover:bg-gray-100"
+                            title="Send media"
+                          >
                             <IoImage size={22} />
                           </button>
-                          <input type="file" ref={fileInputRef} className="hidden" accept="image/*,audio/mpeg,video/mp4" onChange={handleSendMessage} />
+                          <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept="image/*,audio/mpeg,video/mp4"
+                            onChange={handleFileSelected}
+                          />
                           <textarea
                             className="flex-1 border border-gray-300 rounded-full px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-[#198754] resize-none"
                             placeholder="Message..."
@@ -483,10 +715,18 @@ function Message() {
                             rows={1}
                             style={{ maxHeight: '100px' }}
                           />
-                          <button onClick={() => setShowEmojiPicker(prev => !prev)} className="text-gray-500 hover:text-[#198754] p-2" title="Emoji">
+                          <button
+                            onClick={() => setShowEmojiPicker((prev) => !prev)}
+                            className="text-gray-500 hover:text-[#198754] p-2"
+                            title="Emoji"
+                          >
                             <BsEmojiSmile size={20} />
                           </button>
-                          <button onClick={handleSendMessage} className="p-3 rounded-full bg-[#198754] text-white hover:bg-[#157a47]" title="Send">
+                          <button
+                            onClick={handleSendMessage}
+                            className="p-3 rounded-full bg-[#198754] text-white hover:bg-[#157a47]"
+                            title="Send"
+                          >
                             <IoSend size={20} />
                           </button>
                         </div>

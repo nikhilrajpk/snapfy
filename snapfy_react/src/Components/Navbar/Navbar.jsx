@@ -6,6 +6,7 @@ import { showToast } from '../../redux/slices/toastSlice';
 import { Home, Compass, Film, MessageCircle, Bell, PlusCircle, User, Moon, LogOut, Search } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
+import { userLogout } from '../../API/authAPI';
 
 const NavItem = ({ icon: Icon, label, to, onClick }) => {
   const { user } = useSelector((state) => state.user);
@@ -42,10 +43,15 @@ const Navbar = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.user);
 
-  const handleLogout = () => {
-    dispatch(logout());
-    dispatch(showToast({ message: 'Logged out.', type: 'success' }));
-    navigate('/');
+  const handleLogout = async () => {
+    try{
+      dispatch(logout());
+      dispatch(showToast({ message: 'Logged out.', type: 'success' }));
+      await userLogout()
+      navigate('/');
+    }catch(error){
+      console.log('error in logging out user', error)
+    }
   };
 
   return (

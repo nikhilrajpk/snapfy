@@ -3,6 +3,7 @@ from django.db import models
 import uuid
 from django.core.cache import cache
 from cloudinary.models import CloudinaryField
+from django.utils import timezone
 
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
@@ -25,6 +26,10 @@ class User(AbstractUser):
     def verify_otp(self, otp):
         stored_otp = cache.get(f'otp_{self.email}')
         return stored_otp == otp
+
+    def update_last_seen(self):
+        self.last_seen = timezone.now()
+        self.save()
 
     def __str__(self):
         return self.username

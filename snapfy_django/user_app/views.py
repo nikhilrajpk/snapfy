@@ -13,6 +13,9 @@ import requests, socket
 from django.http import HttpResponse
 from django.conf import settings
 from django.db.models import Q
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from django.utils import timezone
 
 from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer, UserProfileUpdateSerializer
 from .models import User, Report, BlockedUser
@@ -74,6 +77,28 @@ class UserAPIViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(user_to_unfollow)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
+
+@api_view(['POST'])
+def logout_view(request):
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"message": "Not logged in"}, status=401)
+    user.is_online = False
+    user.last_seen = timezone.now()
+    user.save()
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"user_{user.id}",
+        {
+            "type": "user_status_update",
+            "user_id": str(user.id),
+            "is_online": False,
+            "last_seen": user.last_seen.isoformat(),
+        }
+    )
+    return Response({"message": "Logged out"}, status=200)
+
+
 class BlockUserView(APIView):
     permission_classes = [IsAuthenticated]
 

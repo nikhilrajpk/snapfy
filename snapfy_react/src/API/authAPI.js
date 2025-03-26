@@ -37,6 +37,12 @@ export const userLogin = async (credential) =>{
     return response.data
 }
 
+export const userLogout = async () =>{
+    const response = await axiosInstance.post('logout-view/')
+
+    return response.data
+}
+
 export const resetPassword = async (data)=> {
     const response = await axiosInstance.put('reset-password/', data, {
         headers : {

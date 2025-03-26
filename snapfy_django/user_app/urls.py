@@ -7,6 +7,7 @@ urlpatterns = [
     path('verify-otp/', views.VerifyOTPView.as_view(), name='verify-otp'),
     path('resend-otp/', views.ResendOTPView.as_view(), name='resend-otp'),
     path('login/', views.LoginView.as_view(), name='login'),
+    path('logout-user/', views.logout_view, name='logout-user'),
     path('reset-password/', views.ResetPasswordView.as_view(), name='reset-password'),
     path("auth/google/signin/", views.GoogleLoginView.as_view(), name="google-signin"),
     path("profile/update/", views.UpdateUserProfileView.as_view(), name='update-profile'),
