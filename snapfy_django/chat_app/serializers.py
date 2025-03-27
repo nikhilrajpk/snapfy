@@ -10,21 +10,24 @@ class ChatRoomSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChatRoom
-        fields = ('id', 'users', 'created_at', 'last_message_at', 'last_message', 'unread_count', 'encryption_key')
+        fields = ['id', 'users', 'created_at', 'last_message_at', 'last_message', 
+                 'unread_count', 'encryption_key']
+        read_only_fields = ['id', 'created_at', 'last_message_at']
 
     def get_last_message(self, obj):
-        msg = obj.messages.filter(is_deleted=False).order_by('-sent_at').first()
-        return MessageSerializer(msg).data if msg else None
+        last_msg = obj.messages.filter(is_deleted=False).order_by('-sent_at').first()
+        if last_msg:
+            return MessageSerializer(last_msg, context=self.context).data
+        return None
 
     def get_unread_count(self, obj):
-        count = obj.messages.filter(is_read=False).exclude(sender=self.context['request'].user).count()
-        print(f"Unread count for room {obj.id}: {count}")
-        return count
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.messages.filter(is_read=False).exclude(sender=request.user).count()
+        return 0
 
     def get_encryption_key(self, obj):
-        key = obj.get_encryption_key()
-        print(f"Room {obj.id} encryption key: {key}")
-        return key
+        return obj.encryption_key
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -35,30 +38,32 @@ class ChatRoomSerializer(serializers.ModelSerializer):
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserSerializer(read_only=True)
     file_url = serializers.SerializerMethodField()
+    is_read = serializers.BooleanField(read_only=True)
+    is_deleted = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Message
-        fields = ['id', 'room', 'sender', 'content', 'file_url', 'sent_at', 'is_read', 'is_deleted']
-        read_only_fields = ['id', 'sender', 'sent_at', 'is_read']
+        fields = ['id', 'room', 'sender', 'content', 'file_url', 'sent_at', 'is_read', 'read_at', 'is_deleted']
+        read_only_fields = ['id', 'sender', 'sent_at', 'is_read', 'read_at']
 
     def get_file_url(self, obj):
-        print(f"File in obj: {obj.file}")  # Debug
-        return obj.file.url if obj.file else None
-
-    def create(self, validated_data):
-        file = validated_data.pop('file', None)
-        message = Message.objects.create(**validated_data)
-        if file:
-            message.file = file
-            message.save()
-        return message
+        if obj.file:
+            return obj.file.url
+        return None
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data['id'] = str(data['id'])
-        data['room'] = str(data['room'])
-        if data['sender']:
-            data['sender']['id'] = str(data['sender']['id'])
-        else:
-            data['sender'] = {'id': None, 'username': 'Unknown', 'profile_picture': None}
+        data['room'] = str(instance.room.id)
         return data
+    
+    
+class CallLogSerializer(serializers.ModelSerializer):
+    caller = UserSerializer(read_only=True)
+    receiver = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = CallLog
+        fields = ['id', 'caller', 'receiver', 'call_type', 'call_status', 
+                 'call_start_time', 'call_end_time', 'duration']
+        read_only_fields = ['id', 'call_start_time', 'duration']

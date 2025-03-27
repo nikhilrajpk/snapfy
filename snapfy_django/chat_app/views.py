@@ -115,13 +115,29 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
     def mark_as_read(self, request, pk=None):
         chat_room = self.get_object()
         messages = chat_room.messages.filter(is_read=False).exclude(sender=request.user)
-        count_before = messages.count()
-        messages.update(is_read=True)
-        print(f"Marked {count_before} messages as read for room {pk}")
-
+        updated_ids = list(messages.values_list('id', flat=True))
+        
+        # Mark messages as read and set read_at timestamp
+        messages.update(is_read=True, read_at=timezone.now())
+        
+        # Update room's unread count
+        chat_room.unread_count = 0
+        chat_room.save()
+        
+        # Notify all clients in the room
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"chat_{chat_room.id}",
-            {"type": "mark_as_read", "user_id": str(request.user.id)}
+            {
+                "type": "mark_as_read",
+                "room_id": str(chat_room.id),
+                "user_id": str(request.user.id),
+                "updated_ids": updated_ids
+            }
         )
-        return Response({"message": "Messages marked as read"}, status=status.HTTP_200_OK)
+        
+        return Response({
+            "message": "Messages marked as read",
+            "count": len(updated_ids),
+            "updated_ids": updated_ids
+        }, status=status.HTTP_200_OK)

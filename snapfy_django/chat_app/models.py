@@ -3,6 +3,7 @@ from django.utils.timezone import now
 from user_app.models import User
 from cloudinary.models import CloudinaryField
 import os
+from django.utils import timezone
 
 def generate_encryption_key():
     """Generate a random 32-byte (64-char hex) encryption key."""
@@ -13,33 +14,53 @@ class ChatRoom(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
     encryption_key = models.CharField(max_length=64, default=generate_encryption_key)
+    unread_count = models.PositiveIntegerField(default=0)
 
-    def update_last_message_at(self):
-        latest_message = self.messages.filter(is_deleted=False).order_by('-sent_at').first()
-        self.last_message_at = latest_message.sent_at if latest_message else self.created_at
+    def update_last_message(self, message):
+        self.last_message_at = message.sent_at
+        self.save()
+    
+    def update_unread_count(self):
+        self.unread_count = self.messages.filter(is_read=False).exclude(sender=self.request.user).count()
         self.save()
 
-    def get_encryption_key(self):
-        return self.encryption_key
-
     def __str__(self):
-        return f"ChatRoom {self.id} with users {', '.join(user.username for user in self.users.all())}"
+        return f"ChatRoom {self.id} with {self.users.count()} users"
 
 class Message(models.Model):
     room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, related_name="messages")
-    sender = models.ForeignKey(User, on_delete=models.CASCADE)
-    content = models.TextField(blank=True, null=True)  # Encrypted text
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
+    content = models.TextField(blank=True, null=True)
     file = CloudinaryField('file', resource_type='auto', blank=True, null=True)
     sent_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
-    is_deleted = models.BooleanField(default=False)  # Soft delete
+    read_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['sent_at']
+        indexes = [
+            models.Index(fields=['room', 'sent_at']),
+            models.Index(fields=['is_read']),
+            models.Index(fields=['is_deleted']),
+        ]
 
     def save(self, *args, **kwargs):
+        is_new = self.pk is None
         super().save(*args, **kwargs)
-        self.room.update_last_message_at()
+        if is_new:
+            self.room.update_last_message(self)
+
+    def mark_as_read(self):
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save()
+            self.room.update_unread_count()
 
     def __str__(self):
-        return f"Message from {self.sender.username} at {self.sent_at}"
+        return f"Message {self.id} in {self.room} from {self.sender}"
+
 
 class CallLog(models.Model):
     CALL_TYPES = [
