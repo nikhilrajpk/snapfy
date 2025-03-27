@@ -160,7 +160,11 @@ function Message() {
 
         if (data.type === 'chat_message') {
           const message = data.message;
-          const key = selectedRoom?.encryption_key || encryptionKey;
+          const key = selectedRoom?.encryption_key;
+          if (!key) {
+            console.error('Encryption key missing for decryption');
+            return;
+          }
           const decryptedContent = decryptMessage(message.content, key);
           const newMessage = {
             ...message,
@@ -177,7 +181,10 @@ function Message() {
           };
           setMessages((prev) => {
             const exists = prev.some((msg) => String(msg.id) === String(newMessage.id));
-            return exists ? prev : [...prev, newMessage];
+            if (exists) {
+              return prev.map((msg) => (String(msg.id) === String(newMessage.id) ? newMessage : msg));
+            }
+            return [...prev, newMessage];
           });
           updateChatRoomsOrder(newMessage);
         } else if (data.type === 'mark_as_read') {
@@ -206,7 +213,7 @@ function Message() {
     return () => {
       if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.close(1000, 'Component unmounted');
     };
-  }, [conversationId, user?.id, token, encryptionKey, selectedRoom?.encryption_key]);
+  }, [conversationId, user?.id, token, selectedRoom?.encryption_key]);
 
   // Status WebSocket
   useEffect(() => {
@@ -255,14 +262,16 @@ function Message() {
   }, [user?.id, token]);
 
   const encryptMessage = (text, key) => {
-    if (!text || !key || key.length !== 64) return text;
-    return CryptoJS.AES.encrypt(text, key).toString();
+    if (!text || !key) return text;
+    const derivedKey = CryptoJS.SHA256(key).toString();
+    return CryptoJS.AES.encrypt(text, derivedKey).toString();
   };
 
   const decryptMessage = (ciphertext, key) => {
-    if (!ciphertext || !key || key.length !== 64 || !ciphertext.startsWith('U2FsdGVkX1')) return ciphertext || '[No Content]';
+    if (!ciphertext || !key || !ciphertext.startsWith('U2FsdGVkX1')) return ciphertext || '[No Content]';
     try {
-      const bytes = CryptoJS.AES.decrypt(ciphertext, key);
+      const derivedKey = CryptoJS.SHA256(key).toString();
+      const bytes = CryptoJS.AES.decrypt(ciphertext, derivedKey);
       const decrypted = bytes.toString(CryptoJS.enc.Utf8);
       return decrypted || '[Decryption Failed]';
     } catch (e) {
@@ -287,7 +296,7 @@ function Message() {
             last_message_at: newMessage.sent_at,
             unread_count: String(newMessage.sender.id) !== String(user?.id) && !newMessage.is_read
               ? (room.unread_count || 0) + 1
-              : 0,
+              : room.unread_count,
           };
         }
         return room;

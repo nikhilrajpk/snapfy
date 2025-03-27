@@ -1,4 +1,3 @@
-# chat_app/consumers.py
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.contrib.auth import get_user_model
@@ -41,19 +40,30 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
-        data = json.loads(text_data)
-        message_type = data.get('type')
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
 
-        if message_type == 'chat_message':
-            message = data.get('message')
-            if message:
-                await self.save_message(message)
+            if message_type == 'chat_message':
+                message = data.get('message')
+                if message:
+                    saved_message = await self.save_message(message)
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {"type": "chat_message", "message": saved_message}
+                    )
+            elif message_type == 'mark_as_read':
+                user_id = await self.mark_messages_read()
                 await self.channel_layer.group_send(
                     self.room_group_name,
-                    {"type": "chat_message", "message": message}
+                    {"type": "mark_as_read", "user_id": user_id}
                 )
-        elif message_type == 'mark_as_read':
-            await self.mark_messages_read()
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON: {str(e)}")
+            await self.send(text_data=json.dumps({"error": "Invalid message format"}))
+        except Exception as e:
+            print(f"Error in receive: {str(e)}")
+            await self.close(code=1011, reason=f"Processing error: {str(e)}")
 
     async def chat_message(self, event):
         await self.send(text_data=json.dumps({
@@ -79,7 +89,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
         room.last_message = message
         room.last_message_at = message.sent_at
-        # Increment unread count for other users
         room.unread_count = room.messages.filter(is_read=False).exclude(sender=sender).count()
         room.save()
         return {
@@ -102,9 +111,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
         room = ChatRoom.objects.get(id=self.room_id)
         messages = room.messages.filter(is_read=False).exclude(sender=self.scope['user'])
         messages.update(is_read=True)
-        room.unread_count = 0  # Reset unread count
+        room.unread_count = 0
         room.save()
-        return self.scope['user'].id
+        return str(self.scope['user'].id)
 
 class StatusConsumer(AsyncWebsocketConsumer):
     async def connect(self):
