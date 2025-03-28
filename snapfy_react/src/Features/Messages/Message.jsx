@@ -486,8 +486,6 @@ function Message() {
         profile_picture: u.profile_picture || null,
         is_online: u.is_online,
         last_seen: u.last_seen,
- 
-   
       }));
       const newRoom = {
         id: response.data.id,
