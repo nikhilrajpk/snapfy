@@ -2,7 +2,7 @@
 
 Snapfy is a feature-rich social media platform built with **Django** and **React**, designed to connect users through posts, stories, reels, and real-time interactions. It combines a robust backend with asynchronous task processing, cloud-based media storage, and a dynamic frontend to deliver a scalable and engaging user experience.
 
-## 🚀 Features
+## Features
 
 ### ✅ **User Management & Authentication**
 - **User Registration:** Sign up via `/api/register/` with email verification using a 4-digit OTP.
