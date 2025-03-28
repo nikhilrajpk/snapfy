@@ -34,16 +34,16 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         data['id'] = str(data['id'])
         return data
     
-    
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserSerializer(read_only=True)
     file_url = serializers.SerializerMethodField()
     is_read = serializers.BooleanField(read_only=True)
     is_deleted = serializers.BooleanField(read_only=True)
+    tempId = serializers.CharField(required=False, write_only=True)  # Add tempId field
 
     class Meta:
         model = Message
-        fields = ['id', 'room', 'sender', 'content', 'file_url', 'sent_at', 'is_read', 'read_at', 'is_deleted']
+        fields = ['id', 'room', 'sender', 'content', 'file_url', 'sent_at', 'is_read', 'read_at', 'is_deleted', 'tempId']
         read_only_fields = ['id', 'sender', 'sent_at', 'is_read', 'read_at']
 
     def get_file_url(self, obj):
@@ -55,9 +55,11 @@ class MessageSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data['id'] = str(data['id'])
         data['room'] = str(instance.room.id)
+        # Include tempId if it was provided during creation
+        if hasattr(instance, 'tempId'):
+            data['tempId'] = instance.tempId
         return data
-    
-    
+
 class CallLogSerializer(serializers.ModelSerializer):
     caller = UserSerializer(read_only=True)
     receiver = UserSerializer(read_only=True)

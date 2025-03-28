@@ -8,6 +8,7 @@ from .models import *
 from .serializers import *
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.utils import timezone
 
 class ChatAPIViewSet(viewsets.ModelViewSet):
     queryset = ChatRoom.objects.all()
@@ -57,7 +58,10 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
 
         content = request.data.get('content', '')
         file = request.FILES.get('file')
-        print(f"Received: content={content}, file={file}")  # Debug
+        temp_id = request.data.get('tempId')  # Get tempId from the frontend
+        
+        print(f"Received: content={content}, file={file}, tempId={temp_id}")  # Debug
+        
         message = Message.objects.create(
             room=chat_room,
             sender=request.user,
@@ -71,12 +75,34 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         message_data['id'] = str(message_data['id'])
         message_data['room'] = str(message_data['room'])
         message_data['sender']['id'] = str(message_data['sender']['id'])
+        if temp_id:  # Include tempId in the response if provided
+            message_data['tempId'] = temp_id
 
+        # Update room metadata
+        chat_room.last_message = message
+        chat_room.last_message_at = message.sent_at
+        chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
+        chat_room.save()
+
+        # Send WebSocket message to all clients in the room
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"chat_{chat_room.id}",
             {"type": "chat_message", "message": message_data}
         )
+
+        # Notify all room users about the chat room update
+        for user in chat_room.users.all():
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user.id}",
+                {
+                    "type": "chat_room_update",
+                    "room_id": str(chat_room.id),
+                    "last_message": message_data,
+                    "unread_count": chat_room.messages.filter(is_read=False).exclude(sender=user).count()
+                }
+            )
+
         return Response(message_data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='delete-message')
@@ -132,7 +158,8 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                 "type": "mark_as_read",
                 "room_id": str(chat_room.id),
                 "user_id": str(request.user.id),
-                "updated_ids": updated_ids
+                "updated_ids": updated_ids,
+                "read_at": timezone.now().isoformat()
             }
         )
         

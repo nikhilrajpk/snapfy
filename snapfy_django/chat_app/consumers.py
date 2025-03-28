@@ -47,27 +47,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message_type = data.get('type')
 
             if message_type == 'chat_message':
+                # Only handle deletions or other WebSocket-specific actions, not new messages
                 message = data.get('message')
-                if message:
+                if message and message.get('is_deleted', False):
                     result = await self.save_message(message)
-                    
                     await self.channel_layer.group_send(
                         self.room_group_name,
                         {"type": "chat_message", "message": result["message_data"]}
                     )
-                    
-                    room_users = await self.get_room_users(result["room_id"])
-                    for user in room_users:
-                        await self.channel_layer.group_send(
-                            f"user_{user.id}",
-                            {
-                                "type": "chat_room_update",
-                                "room_id": str(result["room_id"]),
-                                "last_message": result["message_data"],
-                                "unread_count": result["unread_count"]
-                            }
-                        )
-                        print(f"Sent chat_room_update to user_{user.id}")
 
             elif message_type == 'mark_as_read':
                 result = await self.mark_messages_read()
@@ -138,10 +125,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
         room.unread_count = room.messages.filter(is_read=False).exclude(sender=sender).count()
         room.save()
 
-        message_data = {
+        message_data_response = {
             "id": str(message.id),
             "room": str(room.id),
-            "content": message.content,  # This is the encrypted content
+            "content": message.content,  #encrypted content
             "file_url": message.file_url,
             "sent_at": message.sent_at.isoformat(),
             "is_read": message.is_read,
@@ -153,9 +140,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }
         }
 
-        print(f"Saved message: {message_data}, Room encryption_key: {room.encryption_key}")
+        # Including tempId in the response
+        if 'tempId' in message_data:
+            message_data_response['tempId'] = message_data['tempId']
+
+        print(f"Saved message: {message_data_response}, Room encryption_key: {room.encryption_key}")
         return {
-            "message_data": message_data,
+            "message_data": message_data_response,
             "room_id": room.id,
             "unread_count": room.unread_count
         }

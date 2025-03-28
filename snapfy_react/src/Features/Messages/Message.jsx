@@ -39,8 +39,8 @@ function Message() {
   const [searchResults, setSearchResults] = useState([]);
   const [initialLoad, setInitialLoad] = useState(true);
   const lastMarkAsReadRef = useRef(0);
+  const pendingMessages = useRef(new Map()); // Track pending messages by tempId
 
-  // Scroll to bottom on new messages if at bottom
   useEffect(() => {
     const chatContainer = messagesContainerRef.current;
     if (chatContainer) {
@@ -51,7 +51,6 @@ function Message() {
     }
   }, [messages, initialLoad]);
 
-  // Fetch chat rooms
   useEffect(() => {
     if (!token || !user) {
       navigate('/');
@@ -68,9 +67,7 @@ function Message() {
           last_message: room.last_message
             ? {
                 ...room.last_message,
-                content: String(room.last_message.sender.id) === String(user.id)
-                  ? room.last_message.content
-                  : decryptMessage(room.last_message.content, room.encryption_key),
+                content: decryptMessage(room.last_message.content, room.encryption_key),
               }
             : null,
           unread_count: room.unread_count || 0,
@@ -87,7 +84,6 @@ function Message() {
     fetchChatRooms();
   }, [dispatch, user, token, navigate]);
 
-  // Fetch room and messages
   useEffect(() => {
     if (!conversationId || !user || !token) return;
 
@@ -114,18 +110,13 @@ function Message() {
         setSelectedRoom(room);
     
         const msgs = await getMessages(conversationId);
-        const decryptedMessages = msgs.map((msg) => {
-          const isFromCurrentUser = String(msg.sender.id) === String(user.id);
-          return {
-            ...msg,
-            original_content: isFromCurrentUser ? msg.content : undefined, // Always store original for sender
-            content: isFromCurrentUser 
-              ? msg.content  // Sender sees original content
-              : decryptMessage(msg.content, roomData.encryption_key), // Others see decrypted
-            sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
-          };
-        });
-        setMessages(decryptedMessages || []);
+        const processedMessages = msgs.map((msg) => ({
+          ...msg,
+          content: decryptMessage(msg.content, roomData.encryption_key),
+          sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
+          key: `${msg.id}-${msg.sent_at}`, // Unique key for initial load
+        }));
+        setMessages(processedMessages || []);
         setInitialLoad(true);
     
         if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -142,7 +133,6 @@ function Message() {
     fetchRoomAndMessages();
   }, [conversationId, dispatch, user, token, navigate]);
 
-  // Scroll on initial load
   useEffect(() => {
     if (initialLoad && messages.length) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -150,7 +140,6 @@ function Message() {
     }
   }, [initialLoad, messages]);
 
-  // Chat WebSocket (Updated)
   useEffect(() => {
     if (!conversationId || !user?.id || !token || !selectedRoom?.encryption_key) return;
   
@@ -186,12 +175,9 @@ function Message() {
             return;
           }
   
-          const isFromCurrentUser = String(message.sender.id) === String(user?.id);
-  
           const newMessage = {
             ...message,
-            original_content: isFromCurrentUser ? undefined : undefined, // Will be set from existing message
-            content: isFromCurrentUser ? message.content : decryptMessage(message.content, key),
+            content: decryptMessage(message.content, key),
             file_url: message.file_url || null,
             sent_at: message.sent_at || new Date().toISOString(),
             is_read: message.is_read || false,
@@ -201,47 +187,43 @@ function Message() {
               username: message.sender.username || 'Unknown',
               profile_picture: message.sender.profile_picture || null,
             },
+            key: `${message.id}-${message.sent_at}`, // Unique key
           };
   
           setMessages((prev) => {
-            const existingMessageIndex = prev.findIndex(
-              (msg) => String(msg.id) === String(newMessage.id) || (isFromCurrentUser && msg.tempId && msg.tempId === prev[prev.length - 1]?.tempId)
-            );
-            if (existingMessageIndex !== -1) {
-              return prev.map((msg, index) =>
-                index === existingMessageIndex
-                  ? {
-                      ...newMessage,
-                      original_content: isFromCurrentUser ? msg.original_content : undefined, // Preserve sender’s original
-                      content: isFromCurrentUser ? msg.original_content || message.content : decryptMessage(message.content, key),
-                    }
-                  : msg
+            // Check if this is a response to a pending message
+            if (pendingMessages.current.has(message.tempId)) {
+              const tempId = message.tempId;
+              pendingMessages.current.delete(tempId);
+              return prev.map((msg) =>
+                msg.tempId === tempId ? { ...newMessage, tempId } : msg
               );
+            }
+            // Prevent duplicates by checking if message already exists
+            if (prev.some((msg) => String(msg.id) === String(message.id))) {
+              return prev;
             }
             return [...prev, newMessage];
           });
   
-          setChatRooms((prev) => {
-            return prev.map((room) => {
-              if (String(room.id) === String(data.room_id)) {
-                return {
-                  ...room,
-                  last_message: {
-                    ...newMessage,
-                    content: isFromCurrentUser
-                      ? newMessage.content
-                      : decryptMessage(message.content, room.encryption_key),
-                  },
-                  last_message_at: newMessage.sent_at,
-                  unread_count:
-                    String(newMessage.sender.id) !== String(user?.id)
-                      ? (room.unread_count || 0) + 1
-                      : room.unread_count,
-                };
-              }
-              return room;
-            }).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
-          });
+          setChatRooms((prev) =>
+            prev.map((room) =>
+              String(room.id) === String(data.room_id)
+                ? {
+                    ...room,
+                    last_message: {
+                      ...newMessage,
+                      content: decryptMessage(message.content, room.encryption_key),
+                    },
+                    last_message_at: newMessage.sent_at,
+                    unread_count:
+                      String(newMessage.sender.id) !== String(user?.id)
+                        ? (room.unread_count || 0) + 1
+                        : room.unread_count,
+                  }
+                : room
+            ).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at))
+          );
   
           if (
             String(data.room_id) === String(conversationId) &&
@@ -279,14 +261,7 @@ function Message() {
                     ...room,
                     last_message: {
                       ...data.last_message,
-                      content: String(data.last_message.sender.id) === String(user?.id)
-                        ? data.last_message.content
-                        : decryptMessage(data.last_message.content, room.encryption_key),
-                      sender: {
-                        id: data.last_message.sender.id,
-                        username: data.last_message.sender.username,
-                        profile_picture: data.last_message.sender.profile_picture || null,
-                      },
+                      content: decryptMessage(data.last_message.content, room.encryption_key),
                     },
                     unread_count: data.unread_count,
                     last_message_at: data.last_message.sent_at,
@@ -307,7 +282,6 @@ function Message() {
       socket.onerror = (error) => console.error('Chat WebSocket error:', error);
   
       socket.onclose = (event) => {
-        console.log('Chat WebSocket closed:', event.code);
         if (event.code !== 1000 && !socketClosedIntentionally) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
           setTimeout(() => {
@@ -327,7 +301,6 @@ function Message() {
     };
   }, [conversationId, user?.id, token, selectedRoom?.encryption_key, dispatch]);
 
-  // Status WebSocket (Unchanged)
   useEffect(() => {
     if (!user?.id || !token) return;
   
@@ -347,7 +320,7 @@ function Message() {
   
       socket.onopen = () => {
         console.log('Status WebSocket connection established');
-        reconnectAttempts = 0; // Reset on successful connection
+        reconnectAttempts = 0;
         const pingInterval = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'ping' }));
@@ -367,9 +340,7 @@ function Message() {
                     ...room,
                     last_message: {
                       ...data.last_message,
-                      content: String(data.last_message.sender.id) === String(user?.id)
-                        ? data.last_message.content
-                        : decryptMessage(data.last_message.content, room.encryption_key),
+                      content: decryptMessage(data.last_message.content, room.encryption_key),
                     },
                     unread_count: data.unread_count,
                     last_message_at: data.last_message.sent_at,
@@ -402,14 +373,11 @@ function Message() {
         }
       };
   
-      socket.onerror = (error) => {
-        console.error('Status WebSocket error:', error);
-      };
+      socket.onerror = (error) => console.error('Status WebSocket error:', error);
   
       socket.onclose = (event) => {
-        console.log('Status WebSocket closed:', event.code, event.reason);
         if (event.code !== 1000 && !socketClosedIntentionally) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000); // Exponential backoff
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
           setTimeout(() => {
             reconnectAttempts++;
             connectStatusWebSocket();
@@ -435,22 +403,15 @@ function Message() {
 
   const decryptMessage = (ciphertext, key) => {
     if (!ciphertext || !key || !ciphertext.startsWith('U2FsdGVkX1')) {
-      console.warn('Skipping decryption:', { ciphertext, hasKey: !!key });
       return ciphertext || '[No Content]';
     }
     try {
       const derivedKey = CryptoJS.SHA256(key).toString();
-      console.log('Attempting decryption:', { ciphertext, derivedKey });
       const bytes = CryptoJS.AES.decrypt(ciphertext, derivedKey);
       const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-      if (!decrypted) {
-        console.error('Decryption resulted in empty string:', { ciphertext, key, derivedKey });
-        return '[Decryption Failed: Empty]';
-      }
-      console.log('Decrypted successfully:', decrypted);
-      return decrypted;
+      return decrypted || '[Decryption Failed: Empty]';
     } catch (e) {
-      console.error('Decryption error:', e.message, { ciphertext, key });
+      console.error('Decryption error:', e.message);
       return '[Decryption Failed]';
     }
   };
@@ -459,20 +420,14 @@ function Message() {
     setChatRooms((prev) => {
       const updatedRooms = prev.map((room) => {
         if (String(room.id) === String(newMessage.room)) {
-          const isFromCurrentUser = String(newMessage.sender.id) === String(user?.id);
-          const messageContent = isFromCurrentUser
-            ? newMessage.original_content || newMessage.content
-            : decryptMessage(newMessage.content, room.encryption_key);
-
           return {
             ...room,
             last_message: {
               ...newMessage,
-              content: newMessage.is_deleted ? '[Deleted]' : messageContent,
-              sender: { ...newMessage.sender, profile_picture: newMessage.sender.profile_picture || null },
+              content: newMessage.is_deleted ? '[Deleted]' : decryptMessage(newMessage.content, room.encryption_key),
             },
             last_message_at: newMessage.sent_at,
-            unread_count: !isFromCurrentUser && !newMessage.is_read
+            unread_count: String(newMessage.sender.id) !== String(user?.id) && !newMessage.is_read
               ? (room.unread_count || 0) + 1
               : room.unread_count,
           };
@@ -485,21 +440,23 @@ function Message() {
 
   const handleSendMessage = async () => {
     if (!message.trim() && !selectedFile) return;
-    if (!selectedRoom?.id || !selectedRoom.encryption_key) {
-      console.error('Missing room or key:', selectedRoom);
-      return;
-    }
+    if (!selectedRoom?.id || !selectedRoom.encryption_key) return;
   
     setIsSending(true);
     try {
       const formData = new FormData();
-      const originalContent = message.trim();
-      if (originalContent) {
-        const encrypted = encryptMessage(originalContent, selectedRoom.encryption_key);
-        formData.append('content', encrypted);
-      }
+      const plainContent = message.trim();
+      const encryptedContent = encryptMessage(plainContent, selectedRoom.encryption_key);
+      const tempId = `${user.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      if (plainContent) formData.append('content', encryptedContent);
       if (selectedFile) formData.append('file', selectedFile);
       formData.append('room', selectedRoom.id);
+      formData.append('tempId', tempId);
+  
+      // Don't add locally; wait for WebSocket update
+      // pendingMessages.current.set(tempId, { tempId, content: plainContent, sent_at: new Date().toISOString() });
+      // setMessages((prev) => [...prev, { tempId, content: plainContent, sender: user, key: tempId, sent_at: new Date().toISOString() }]);
   
       const response = await axiosInstance.post(
         `/chatrooms/${selectedRoom.id}/send-message/`,
@@ -507,20 +464,6 @@ function Message() {
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
   
-      const newMessage = {
-        ...response.data,
-        original_content: originalContent, // Store plain text for sender
-        content: originalContent, // Display plain text for sender immediately
-        file_url: response.data.file_url || null,
-        sender: { id: user.id, username: user.username, profile_picture: user.profile_picture || null },
-        is_read: false,
-        is_deleted: false,
-        sent_at: response.data.sent_at || new Date().toISOString(),
-        tempId: Date.now().toString(), // Temporary ID to match before WebSocket confirmation
-      };
-  
-      setMessages((prev) => [...prev, newMessage]); // Add immediately with tempId
-      updateChatRoomsOrder(newMessage);
       setMessage('');
       setSelectedFile(null);
       setFilePreview(null);
@@ -543,6 +486,8 @@ function Message() {
         profile_picture: u.profile_picture || null,
         is_online: u.is_online,
         last_seen: u.last_seen,
+ 
+   
       }));
       const newRoom = {
         id: response.data.id,
@@ -553,7 +498,7 @@ function Message() {
       };
       setSelectedRoom(newRoom);
       setChatRooms((prev) => {
-        if (!prev.some((r) => String(r.id) === String(newRoom.id))) return [newRoom, ...prev];
+        if (!prev.some((r) => String(r.id) === String  (newRoom.id))) return [newRoom, ...prev];
         return prev;
       });
       navigate(`/messages/${newRoom.id}`);
@@ -561,11 +506,9 @@ function Message() {
       setMessages(
         msgs.map((msg) => ({
           ...msg,
-          original_content: String(msg.sender.id) === String(user.id) ? msg.content : undefined,
-          content: String(msg.sender.id) === String(user.id)
-            ? msg.content
-            : decryptMessage(msg.content, newRoom.encryption_key),
+          content: decryptMessage(msg.content, newRoom.encryption_key),
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
+          key: `${msg.id}-${msg.sent_at}`,
         })) || []
       );
     } catch (error) {
@@ -794,7 +737,7 @@ function Message() {
                         ) : messages.length ? (
                           messages.map((msg) => (
                             <div
-                              key={msg.id}
+                              key={msg.key} // Use the unique key
                               className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
                             >
                               {String(msg?.sender?.id) !== String(user?.id) && (
@@ -850,9 +793,9 @@ function Message() {
                                     )}
                                   </div>
                                 </div>
-                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && (
+                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && msg.id && (
                                   <button
-                                    onClick={() => handleDeleteMessage(msg?.id)}
+                                    onClick={() => handleDeleteMessage(msg.id)}
                                     className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
                                     title="Delete message"
                                   >
