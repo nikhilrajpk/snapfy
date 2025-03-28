@@ -23,7 +23,7 @@ const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted,
     if (isLoggedInUser && user && (!userData.followers || !userData.following)) {
       const fetchFullUserData = async () => {
         try {
-          const fullUserData = await getUser(user.username);
+          const fullUserData = await getUser(user?.username);
           setUserData(fullUserData);
           dispatch(setUser(fullUserData));
         } catch (error) {
@@ -42,8 +42,8 @@ const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted,
       userList = (type === 'followers' ? userData?.followers : userData?.following) || [];
     }
     const formattedList = userList.map(user => ({
-      id: user.username,
-      username: user.username,
+      id: user?.username,
+      username: user?.username,
       profile_picture: user.profile_picture ? `${CLOUDINARY_ENDPOINT}${user.profile_picture}` : '/default-profile.png'
     }));
     setFollowList(formattedList);
@@ -170,16 +170,16 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   
     const syncFollowStatus = async () => {
       if (user && userData && isMounted) {
-        const updatedLoggedInUser = await getUser(user.username);
+        const updatedLoggedInUser = await getUser(user?.username);
         dispatch(setUser(updatedLoggedInUser));
   
         console.log(`${updatedLoggedInUser?.username} following:`, updatedLoggedInUser.following);
-        console.log(`${userData?.username} username:`, userData.username);
-        const isUserFollowing = updatedLoggedInUser.following?.some(f => f.username === userData?.username) || false;
+        console.log(`${userData?.username} username:`, userData?.username);
+        const isUserFollowing = updatedLoggedInUser.following?.some(f => f?.username === userData?.username) || false;
         console.log('isUserFollowing:', isUserFollowing);
   
         const isUserBlocked = updatedLoggedInUser.blocked_users?.includes(userData?.username) || false;
-        const isBlockedByProfileOwner = userData?.blocked_users?.includes(user.username) || false;
+        const isBlockedByProfileOwner = userData?.blocked_users?.includes(user?.username) || false;
   
         if (isMounted) {
           setIsFollowing(isUserFollowing);
@@ -188,17 +188,17 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
           setFollowerCount(userData?.followerCount || userData?.follower_count);
         }
   
-        const isFollowedBack = userData?.following?.some(f => f.username === user.username) || false;
+        const isFollowedBack = userData?.following?.some(f => f?.username === user?.username) || false;
         if (isMounted) setFollowsBack(isFollowedBack);
   
-        const loggedInFollowing = (updatedLoggedInUser.following || []).map(f => f.username);
-        const profileFollowers = (userData.followers || []).map(f => f.username);
+        const loggedInFollowing = (updatedLoggedInUser.following || []).map(f => f?.username);
+        const profileFollowers = (userData.followers || []).map(f => f?.username);
         const mutuals = userData?.followers
           ?.filter(follower => 
-            loggedInFollowing.includes(follower.username) && follower.username !== user.username // Exclude self
+            loggedInFollowing.includes(follower?.username) && follower?.username !== user?.username // Exclude self
           )
           .map(follower => ({
-            username: follower.username,
+            username: follower?.username,
             profile_picture: follower.profile_picture
               ? `${follower.profile_picture}`
               : '/default-profile.png'
@@ -228,27 +228,27 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const handleFollowToggle = async () => {
     try {
       if (isFollowing) {
-        const updatedProfileUser = await unfollowUser(userData.username);
+        const updatedProfileUser = await unfollowUser(userData?.username);
         setIsFollowing(false);
         setFollowerCount(updatedProfileUser.follower_count);
         onUserUpdate(updatedProfileUser);
-        dispatch(showToast({ message: `Unfollowed ${userData.username}`, type: 'success' }));
-        const updatedLoggedInUser = await getUser(user.username);
+        dispatch(showToast({ message: `Unfollowed ${userData?.username}`, type: 'success' }));
+        const updatedLoggedInUser = await getUser(user?.username);
         dispatch(setUser(updatedLoggedInUser));
-        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
-        setMutualFollowers(prev => prev.filter(f => f.username !== user.username));
+        setFollowsBack(updatedProfileUser.following?.some(f => f?.username === user?.username) || false);
+        setMutualFollowers(prev => prev.filter(f => f?.username !== user?.username));
       } else {
-        const updatedProfileUser = await followUser(userData.username);
+        const updatedProfileUser = await followUser(userData?.username);
         setIsFollowing(true);
         setFollowerCount(updatedProfileUser.follower_count);
         onUserUpdate(updatedProfileUser);
         dispatch(showToast({ message: `Now following ${userData?.username}`, type: 'success' }));
-        const updatedLoggedInUser = await getUser(user.username);
+        const updatedLoggedInUser = await getUser(user?.username);
         dispatch(setUser(updatedLoggedInUser));
-        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
-        if (updatedProfileUser.following?.some(f => f.username === user.username)) {
+        setFollowsBack(updatedProfileUser.following?.some(f => f?.username === user?.username) || false);
+        if (updatedProfileUser.following?.some(f => f?.username === user?.username)) {
           const newMutual = {
-            username: user.username,
+            username: user?.username,
             profile_picture: updatedLoggedInUser.profile_picture
               ? `${CLOUDINARY_ENDPOINT}${updatedLoggedInUser.profile_picture}`
               : '/default-profile.png'
@@ -265,27 +265,27 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const handleBlockToggle = async () => {
     try {
       if (isBlocked) {
-        const response = await unblockUser(userData.username);
+        const response = await unblockUser(userData?.username);
         setIsBlocked(false);
-        dispatch(showToast({ message: `Unblocked ${userData.username}`, type: 'success' }));
+        dispatch(showToast({ message: `Unblocked ${userData?.username}`, type: 'success' }));
         dispatch(setUser(response.user));
-        const updatedProfileUser = await getUser(userData.username);
+        const updatedProfileUser = await getUser(userData?.username);
         onUserUpdate(updatedProfileUser);
         setFollowerCount(updatedProfileUser.follower_count);
-        setFollowsBack(updatedProfileUser.following?.some(f => f.username === user.username) || false);
+        setFollowsBack(updatedProfileUser.following?.some(f => f?.username === user?.username) || false);
       } else {
-        const response = await blockUser(userData.username);
+        const response = await blockUser(userData?.username);
         setIsBlocked(true);
         setIsFollowing(false); // Reset local state
         setFollowsBack(false);
-        dispatch(showToast({ message: `Blocked ${userData.username}`, type: 'success' }));
+        dispatch(showToast({ message: `Blocked ${userData?.username}`, type: 'success' }));
         dispatch(setUser(response.user)); // Update Sanji’s state
   
         // Update the blocked user’s state (Naruto)
-        const updatedLoggedInUser = await getUser(user.username);
+        const updatedLoggedInUser = await getUser(user?.username);
         dispatch(setUser(updatedLoggedInUser));
   
-        const updatedProfileUser = await getUser(userData.username);
+        const updatedProfileUser = await getUser(userData?.username);
         onUserUpdate(updatedProfileUser);
         setFollowerCount(updatedProfileUser.follower_count);
         setMutualFollowers([]);
@@ -308,15 +308,15 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
       <p className="text-sm text-gray-600 mt-1 flex items-center">
         Followed by &nbsp;
         {firstTwo.map((mutual, index) => (
-          <span key={mutual.username} className="flex items-center">
+          <span key={mutual?.username} className="flex items-center">
             <img
               src={`${CLOUDINARY_ENDPOINT}${mutual.profile_picture}`}
-              alt={mutual.username}
+              alt={mutual?.username}
               className="w-5 h-5 rounded-full mr-1"
               onError={(e) => (e.target.src = '/default-profile.png')}
             />
-            <Link to={`/user/${mutual.username}`} className="font-medium text-gray-800 hover:text-[#198754]">
-              {mutual.username}
+            <Link to={`/user/${mutual?.username}`} className="font-medium text-gray-800 hover:text-[#198754]">
+              {mutual?.username}
             </Link>
             {index < firstTwo.length - 1 ? ', ' : ''}
           </span>
@@ -440,7 +440,7 @@ const FollowModal = ({ type, list, onClose }) => {
   const filteredList = useMemo(() => {
     if (!searchQuery) return list;
     return list.filter(user => 
-      user.username.toLowerCase().includes(searchQuery.toLowerCase())
+      user?.username.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [list, searchQuery]);
 
@@ -477,18 +477,18 @@ const FollowModal = ({ type, list, onClose }) => {
                 <li key={user.id} className="py-3 flex items-center hover:bg-gray-50 rounded-lg px-2 transition-colors">
                   <div className="relative flex-shrink-0">
                     <img
-                      src={imageErrors[user.username] ? '/default-profile.png' : user.profile_picture}
-                      alt={user.username}
+                      src={imageErrors[user?.username] ? '/default-profile.png' : user.profile_picture}
+                      alt={user?.username}
                       className="w-10 h-10 rounded-full object-cover border border-gray-200"
-                      onError={() => handleImageError(user.username)}
+                      onError={() => handleImageError(user?.username)}
                     />
                   </div>
                   <div className="ml-3 flex-1">
                     <Link 
-                      to={`/user/${user.username}`} 
+                      to={`/user/${user?.username}`} 
                       className="text-gray-800 font-medium hover:text-[#198754] transition-colors"
                     >
-                      {user.username}
+                      {user?.username}
                     </Link>
                   </div>
                 </li>
