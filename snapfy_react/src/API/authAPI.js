@@ -159,8 +159,14 @@ export const createStory = async (formData) => {
     return response.data;
   };
   
-  export const getStories = async () => {
-    const response = await axiosInstance.get('/stories/');
+  export const getStories = async ({ page = 1, pageSize = 10 } = {}) => {
+    const response = await axiosInstance.get('/stories/', {
+      params: {
+        page,
+        page_size: pageSize,
+      },
+    });
+    // Since the backend uses Django pagination, response.data will likely have results, next, previous, etc.
     return response.data;
   };
   

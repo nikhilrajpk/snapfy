@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useQueryClient } from '@tanstack/react-query';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
   X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors,
   Music, Play, Pause, Search
@@ -10,6 +12,7 @@ import {
   createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks
 } from '../../API/authAPI';
 import { useNavigate } from 'react-router-dom';
+import { useStoriesQuery } from '../../API/useStoriesQuery';
 
 const StoryCircle = ({ user, onClick, hasNewStory }) => {
   const userImage = user?.userImage?.includes("http://res.cloudinary.com/dk5georkh/image/upload/") 
@@ -61,29 +64,56 @@ const StoryViewerModal = ({
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const audioRef = useRef(null);
+  const [audioReady, setAudioReady] = useState(false);
 
+  // In StoryViewerModal component
   useEffect(() => {
-    if (currentStory.music && currentStory.music.file) {
-      const fullAudioUrl = `${CLOUDINARY_ENDPOINT}${currentStory.music.file}`;
-      console.log('Setting audio src:', fullAudioUrl);
-      if (audioRef.current) {
-        audioRef.current.src = fullAudioUrl;
-        if (!paused) {
-          audioRef.current.play().catch(error => {
-            console.error('Error playing audio:', error);
-            dispatch(showToast({ message: 'Failed to play story music', type: 'error' }));
-          });
-        } else {
-          audioRef.current.pause();
-        }
-      }
+    if (!currentStory?.music?.file) {
+      setAudioReady(true); // No audio to wait for
+      return;
     }
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
+  
+    const audio = new Audio();
+    audioRef.current = audio;
+    
+    let fullAudioUrl = currentStory.music.file;
+    
+    // Fix the URL if it's missing /video/upload/
+    if (fullAudioUrl.includes('res.cloudinary.com') && !fullAudioUrl.includes('video/upload')) {
+      const parts = fullAudioUrl.split('/');
+      const cloudName = parts[2];
+      const publicId = parts.slice(3).join('/');
+      fullAudioUrl = `https://res.cloudinary.com/${cloudName}/video/upload/${publicId}`;
+    }
+  
+    console.log('Setting audio src:', fullAudioUrl);
+    audio.src = fullAudioUrl;
+    
+    const handleCanPlay = () => {
+      setAudioReady(true);
+      if (!paused) {
+        audio.play().catch(error => {
+          console.error('Error playing audio:', error);
+          dispatch(showToast({ message: 'Failed to play story music', type: 'error' }));
+        });
       }
     };
-  }, [paused, currentStory.music, dispatch]);
+  
+    const handleError = () => {
+      console.error('Audio loading failed');
+      setAudioReady(true); // Continue without audio
+    };
+  
+    audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('error', handleError);
+    
+    return () => {
+      audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('error', handleError);
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [currentStory?.music, dispatch, paused]);
 
   useEffect(() => {
     if (paused) return;
@@ -108,7 +138,8 @@ const StoryViewerModal = ({
   
   useEffect(() => {
     setTimeLeft(10);
-    setLiked(currentStory.has_liked || false);
+    setLiked(currentStory?.has_liked || false);
+    setAudioReady(false);
     if (isUserStory) {
       fetchViewers();
     }
@@ -141,6 +172,7 @@ const StoryViewerModal = ({
   };
   
   const getTimeAgo = (timestamp) => {
+    if (!timestamp) return '';
     const now = new Date();
     const storyTime = new Date(timestamp);
     const diffMs = now - storyTime;
@@ -154,11 +186,21 @@ const StoryViewerModal = ({
 
   const handleMediaClick = () => {
     setPaused(!paused);
+    if (audioRef.current) {
+      if (paused) {
+        audioRef.current.play().catch(error => {
+          console.error('Error resuming audio:', error);
+        });
+      } else {
+        audioRef.current.pause();
+      }
+    }
   };
+  
+  if (!currentStory) return null;
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
-      {currentStory.music && <audio ref={audioRef} />}
       <div className="w-full flex space-x-1 px-2 mt-2">
         {userStories.map((story, idx) => (
           <div key={story?.id} className="h-1 bg-gray-700 flex-1">
@@ -177,13 +219,18 @@ const StoryViewerModal = ({
       <div className="flex items-center justify-between p-4">
         <div className="flex items-center space-x-3">
           <img 
-            src={currentStory.user.profile_picture || "/default-profile.png"} 
-            alt={currentStory.user.username} 
+            src={currentStory.user?.profile_picture || "/default-profile.png"} 
+            alt={currentStory.user?.username} 
             className="w-8 h-8 rounded-full object-cover" 
             onError={(e) => (e.target.src = '/default-profile.png')}
           />
           <div>
-            <p onClick={() => navigate(`/user/${currentStory?.user.username}`)} className="text-white font-medium cursor-pointer">{currentStory.user.username}</p>
+            <p 
+              onClick={() => navigate(`/user/${currentStory?.user?.username}`)} 
+              className="text-white font-medium cursor-pointer"
+            >
+              {currentStory.user?.username}
+            </p>
             <p className="text-white/60 text-xs">{getTimeAgo(currentStory.created_at)}</p>
           </div>
         </div>
@@ -196,7 +243,7 @@ const StoryViewerModal = ({
                 onClick={() => setViewersModalOpen(true)}
               >
                 <Eye size={18} className="text-white/80" />
-                <span className="text-white/80 text-sm">{currentStory.viewer_count}</span>
+                <span className="text-white/80 text-sm">{currentStory.viewer_count || 0}</span>
               </div>
               <Trash2 
                 size={18} 
@@ -227,14 +274,14 @@ const StoryViewerModal = ({
         </button>
         
         <div className="max-w-md max-h-[70vh] relative flex flex-col items-center">
-          {currentStory.file.includes('video') ? (
+          {currentStory.file?.includes('video') ? (
             <video 
               src={currentStory.file} 
               autoPlay={!paused}
+              muted={!!currentStory.music} // Only mute if there's music
+              playsInline
               className="max-w-full max-h-[60vh] rounded-lg cursor-pointer" 
               controls={false}
-              muted={currentStory.music ? true : false}
-              playsInline
               onClick={handleMediaClick}
               onEnded={() => {
                 if (storyIndex < userStories.length - 1) {
@@ -257,6 +304,9 @@ const StoryViewerModal = ({
             <div className="absolute top-4 left-4 bg-black/50 text-white px-2 py-1 rounded-full text-sm flex items-center gap-1">
               <Music size={14} />
               {currentStory.music.title}
+              {!audioReady && (
+                <span className="text-xs text-yellow-300 ml-1">(loading...)</span>
+              )}
             </div>
           )}
           {currentStory?.caption && (
@@ -281,7 +331,7 @@ const StoryViewerModal = ({
             onClick={toggleLike}
           >
             <Heart size={18} fill={liked ? 'white' : 'none'} />
-            <span>{currentStory.like_count} {liked ? 'Liked' : 'Like'}</span>
+            <span>{currentStory.like_count || 0} {liked ? 'Liked' : 'Like'}</span>
           </button>
         </div>
       )}
@@ -359,13 +409,19 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
     const fetchMusic = async () => {
       try {
         const tracks = await getMusicTracks();
-        const updatedTracks = tracks.map(track => ({
-          ...track,
-          file: `${CLOUDINARY_ENDPOINT}${track.file}`
-        }));
-        console.log('Fetched and updated music tracks:', updatedTracks);
+        const updatedTracks = tracks.map(track => {
+          let file = track.file;
+          // Ensure proper URL format
+          if (file.includes('res.cloudinary.com') && !file.includes('video/upload')) {
+            const parts = file.split('/');
+            const cloudName = parts[2];
+            const publicId = parts.slice(3).join('/');
+            file = `https://res.cloudinary.com/${cloudName}/video/upload/${publicId}`;
+          }
+          return { ...track, file };
+        });
         setMusicTracks(updatedTracks);
-        setFilteredMusicTracks(updatedTracks); // Initialize filtered tracks
+        setFilteredMusicTracks(updatedTracks);
       } catch (error) {
         console.error('Error fetching music tracks:', error);
         dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
@@ -375,7 +431,6 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   }, [dispatch]);
 
   useEffect(() => {
-    // Filter music tracks based on search query
     const filtered = musicTracks.filter(track =>
       track.title.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -384,8 +439,18 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
 
   const playPreview = (track) => {
     if (audioPreviewRef.current) {
-      const fullAudioUrl = track.file;
+      let fullAudioUrl = track.file;
+      
+      // Fix the URL if needed
+      if (fullAudioUrl.includes('res.cloudinary.com') && !fullAudioUrl.includes('video/upload')) {
+        const parts = fullAudioUrl.split('/');
+        const cloudName = parts[2];
+        const publicId = parts.slice(3).join('/');
+        fullAudioUrl = `https://res.cloudinary.com/${cloudName}/video/upload/${publicId}`;
+      }
+      
       console.log('Playing preview for:', track.title, 'URL:', fullAudioUrl);
+      
       if (previewPlaying === track.id) {
         audioPreviewRef.current.pause();
         setPreviewPlaying(null);
@@ -795,88 +860,113 @@ const UserStories = () => {
   const [viewingStoryIndex, setViewingStoryIndex] = useState(0);
   const [creatingStory, setCreatingStory] = useState(false);
   const [usersWithStories, setUsersWithStories] = useState([]);
+  const [page, setPage] = useState(1);
   const scrollRef = useRef(null);
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { user } = useSelector((state) => state.user);
+  const queryClient = useQueryClient();
+  
+  const { 
+    stories, 
+    totalCount, 
+    next, 
+    previous, 
+    isLoading, 
+    error, 
+    invalidateStories 
+  } = useStoriesQuery({ page, pageSize: 10 });
 
-  const fetchStories = useCallback(async () => {
-    try {
-      const stories = await getStories();
-      console.log("stories ::", stories);
-      const groupedStories = {};
-      
-      stories.forEach(story => {
-        const userId = story?.user?.id;
-        if (!groupedStories[userId]) {
-          groupedStories[userId] = {
-            userId,
-            username: story.user.username,
-            userImage: story.user.profile_picture,
-            isCurrentUser: story?.user?.id === user?.id,
-            stories: [],
-            allStoriesSeen: true,
-            hasNewStory: false
-          };
-        }
-        groupedStories[userId].stories.push(story);
-        if (!story.is_seen && story?.user?.id !== user?.id) {
-          groupedStories[userId].allStoriesSeen = false;
-          groupedStories[userId].hasNewStory = true;
-        }
-      });
+  const virtualizer = useVirtualizer({
+    count: usersWithStories.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 100,
+    overscan: 5,
+    horizontal: true,
+  });
 
-      Object.values(groupedStories).forEach(user => {
-        user.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      });
+  useEffect(() => {
+    if (isLoading || error) return;
 
-      let usersArray = Object.values(groupedStories);
-      if (!usersArray.some(u => u.isCurrentUser)) {
-        usersArray.unshift({
-          userId: user?.id,
-          username: user?.username,
-          userImage: user?.profile_picture,
-          isCurrentUser: true,
+    const groupedStories = {};
+    stories.forEach(story => {
+      const userId = story?.user?.id;
+      if (!groupedStories[userId]) {
+        groupedStories[userId] = {
+          userId,
+          username: story.user.username,
+          userImage: story.user.profile_picture,
+          isCurrentUser: story?.user?.id === user?.id,
           stories: [],
           allStoriesSeen: true,
           hasNewStory: false
-        });
-      } else {
-        const currentUserIndex = usersArray.findIndex(u => u.isCurrentUser);
-        const [currentUser] = usersArray.splice(currentUserIndex, 1);
-        usersArray.unshift(currentUser);
+        };
       }
-      setUsersWithStories(usersArray);
-    } catch (error) {
-      console.error('Error fetching stories:', error);
-      dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
+      groupedStories[userId].stories.push(story);
+      if (!story.is_seen && story?.user?.id !== user?.id) {
+        groupedStories[userId].allStoriesSeen = false;
+        groupedStories[userId].hasNewStory = true;
+      }
+    });
+
+    Object.values(groupedStories).forEach(user => {
+      user.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    });
+
+    let usersArray = Object.values(groupedStories);
+    const currentUserExists = usersArray.some(u => u.isCurrentUser);
+    
+    if (!currentUserExists) {
+      usersArray.unshift({
+        userId: user?.id,
+        username: user?.username,
+        userImage: user?.profile_picture,
+        isCurrentUser: true,
+        stories: [],
+        allStoriesSeen: true,
+        hasNewStory: false
+      });
+    } else {
+      const currentUserIndex = usersArray.findIndex(u => u.isCurrentUser);
+      const [currentUser] = usersArray.splice(currentUserIndex, 1);
+      usersArray.unshift(currentUser);
     }
-  }, [user?.id, user?.username, user?.profile_picture, dispatch]);
+
+    setUsersWithStories(prev => {
+      if (JSON.stringify(prev) !== JSON.stringify(usersArray)) {
+        return usersArray;
+      }
+      return prev;
+    });
+  }, [stories, user?.id, user?.username, user?.profile_picture, isLoading, error]);
 
   useEffect(() => {
-    fetchStories();
-    const intervalId = setInterval(() => {
-      fetchStories();
-    }, 30000);
-    return () => clearInterval(intervalId);
-  }, [fetchStories]);
+    if (error) {
+      dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
+      if (error.response?.status === 401) {
+        dispatch({ type: 'user/logout' });
+        navigate('/');
+      }
+    }
+  }, [error, dispatch, navigate]);
 
   const handleScroll = (direction) => {
     if (scrollRef.current) {
       const scrollAmount = 300;
       scrollRef.current.scrollLeft += direction === 'right' ? scrollAmount : -scrollAmount;
+      if (direction === 'right' && 
+          scrollRef.current.scrollLeft + scrollRef.current.clientWidth >= scrollRef.current.scrollWidth - 100 && 
+          next) {
+        setPage(prev => prev + 1);
+      }
     }
   };
-  
+
   const handleUserStoryClick = async (userIndex) => {
     const userStories = usersWithStories[userIndex];
     
-    if (userStories.isCurrentUser) {
-      if (userStories.stories.length === 0) {
-        setCreatingStory(true);
-      } else {
-        setViewingUserIndex(userIndex);
-        setViewingStoryIndex(0);
-      }
+    if (userStories.isCurrentUser && userStories.stories.length === 0) {
+      setCreatingStory(true);
       return;
     }
     
@@ -884,10 +974,14 @@ const UserStories = () => {
     const updatedUser = { ...userStories };
     
     for (const story of updatedUser.stories) {
-      if (!story.is_seen) {
-        const updatedStory = await getStory(story.id);
-        story.is_seen = true;
-        story.viewer_count = updatedStory.viewer_count;
+      if (!story.is_seen && !updatedUser.isCurrentUser) {
+        try {
+          const updatedStory = await getStory(story.id);
+          story.is_seen = true;
+          story.viewer_count = updatedStory.viewer_count;
+        } catch (error) {
+          console.error('Error marking story as seen:', error);
+        }
       }
     }
     
@@ -895,24 +989,27 @@ const UserStories = () => {
     updatedUser.hasNewStory = !updatedUser.allStoriesSeen;
     updatedUsers[userIndex] = updatedUser;
     setUsersWithStories(updatedUsers);
+    invalidateStories();
     
     setViewingUserIndex(userIndex);
     setViewingStoryIndex(0);
   };
-  
+
   const handleNextStory = () => {
-    if (viewingStoryIndex < usersWithStories[viewingUserIndex].stories.length - 1) {
+    if (viewingStoryIndex < usersWithStories[viewingUserIndex]?.stories?.length - 1) {
       setViewingStoryIndex(viewingStoryIndex + 1);
     }
   };
-  
+
   const handlePreviousStory = () => {
     if (viewingStoryIndex > 0) {
       setViewingStoryIndex(viewingStoryIndex - 1);
     }
   };
-  
+
   const handleNextUser = () => {
+    if (viewingUserIndex === null || !usersWithStories[viewingUserIndex]) return;
+
     const updatedUsers = [...usersWithStories];
     const currentUser = updatedUsers[viewingUserIndex];
     
@@ -928,14 +1025,14 @@ const UserStories = () => {
       setViewingUserIndex(null);
     }
   };
-  
+
   const handlePreviousUser = () => {
     if (viewingUserIndex > 0) {
       setViewingUserIndex(viewingUserIndex - 1);
       setViewingStoryIndex(usersWithStories[viewingUserIndex - 1].stories.length - 1);
     }
   };
-  
+
   const handleDeleteStory = async (storyId) => {
     try {
       await deleteStory(storyId);
@@ -951,13 +1048,13 @@ const UserStories = () => {
       }
       
       setUsersWithStories(updatedUsers);
+      invalidateStories();
       dispatch(showToast({ message: 'Story deleted successfully', type: 'success' }));
     } catch (error) {
-      console.error('Error deleting story:', error);
       dispatch(showToast({ message: 'Failed to delete story', type: 'error' }));
     }
   };
-  
+
   const handleStoryCreated = (newStory) => {
     const updatedUsers = [...usersWithStories];
     const currentUserIndex = updatedUsers.findIndex(u => u.isCurrentUser);
@@ -977,14 +1074,17 @@ const UserStories = () => {
       });
     }
     setUsersWithStories(updatedUsers);
+    invalidateStories();
     setCreatingStory(false);
+    setViewingUserIndex(0);
+    setViewingStoryIndex(updatedUsers[0].stories.length - 1);
   };
 
   const handleAddNewStory = () => {
     setViewingUserIndex(null);
     setCreatingStory(true);
   };
-  
+
   return (
     <div className="my-4">
       <div className="relative flex items-center">
@@ -999,16 +1099,45 @@ const UserStories = () => {
         
         <div 
           ref={scrollRef}
-          className="flex overflow-x-auto scrollbar-hide py-2 px-2 space-x-4 w-full scroll-smooth"
+          className="flex overflow-x-auto scrollbar-hide py-2 px-2 w-full scroll-smooth"
+          style={{ height: '120px' }}
         >
-          {usersWithStories.map((user, index) => (
-            <StoryCircle 
-              key={user.userId}
-              user={user}
-              onClick={() => handleUserStoryClick(index)}
-              hasNewStory={user.hasNewStory}
-            />
-          ))}
+          {isLoading ? (
+            <div className="flex justify-center items-center w-full">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
+            </div>
+          ) : error ? (
+            <div className="text-center text-red-500 p-4 w-full">
+              Failed to load stories
+            </div>
+          ) : usersWithStories.length > 0 ? (
+            <div style={{ width: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const user = usersWithStories[virtualItem.index];
+                return (
+                  <div
+                    key={virtualItem.key}
+                    className="absolute top-0 left-0"
+                    style={{
+                      transform: `translateX(${virtualItem.start}px)`,
+                      width: '100px',
+                      height: '100%',
+                    }}
+                  >
+                    <StoryCircle 
+                      user={user}
+                      onClick={() => handleUserStoryClick(virtualItem.index)}
+                      hasNewStory={user.hasNewStory}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 p-4 w-full">
+              No stories available
+            </div>
+          )}
         </div>
         
         {usersWithStories.length > 4 && (
@@ -1021,7 +1150,8 @@ const UserStories = () => {
         )}
       </div>
       
-      {viewingUserIndex !== null && (
+      {viewingUserIndex !== null && 
+       usersWithStories[viewingUserIndex]?.stories?.[viewingStoryIndex] && (
         <StoryViewerModal
           currentStory={usersWithStories[viewingUserIndex].stories[viewingStoryIndex]}
           userStories={usersWithStories[viewingUserIndex].stories}

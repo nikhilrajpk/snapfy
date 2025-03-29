@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
 from .models import Story, MusicTrack
 from moviepy.editor import VideoFileClip
 import cloudinary.uploader
@@ -15,6 +16,11 @@ from .serializers import StorySerializer, StoryViewerSerializer, MusicTrackSeria
 from django.db.models import Q
 
 logger = logging.getLogger(__name__)
+
+class StoryPagination(PageNumberPagination):
+    page_size = 10  # Number of stories per page
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 class MusicTrackListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -26,23 +32,23 @@ class MusicTrackListView(APIView):
 
 class StoryListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    pagination_class = StoryPagination
 
     def get(self, request):
-        # Get users the requesting user follows
         following = request.user.following.all()
         
-        # Filter stories:
-        # 1. Stories from users the requester follows or their own stories
-        # 2. Exclude stories from users who have blocked the requester
         stories = Story.objects.filter(
-            Q(user__in=following) | Q(user=request.user),  # Followed users or self
-            expires_at__gt=now()  # Active stories only
+            Q(user__in=following) | Q(user=request.user),
+            expires_at__gt=now()
         ).exclude(
             user__in=BlockedUser.objects.filter(blocked=request.user).values('blocker')
         ).order_by('created_at')
 
-        serializer = StorySerializer(stories, many=True, context={'request': request})
-        return Response(serializer.data)
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(stories, request)
+        serializer = StorySerializer(page, many=True, context={'request': request})
+        
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         file = request.FILES.get('file')

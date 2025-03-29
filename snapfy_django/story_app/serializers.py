@@ -19,10 +19,14 @@ class MusicTrackSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'file', 'duration', 'is_trending']
 
     def get_file(self, obj):
-        # Dynamically construct the full Cloudinary URL using the CLOUD_NAME from settings
-        full_url = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/{obj.file}"
-        logger.debug(f"Generated Cloudinary URL for music track {obj.id}: {full_url}")
-        return full_url
+        if obj.file:
+            # Convert CloudinaryResource to string first
+            file_url = str(obj.file)
+            # Ensure the URL includes /video/upload/
+            if 'video/upload' not in file_url:
+                return f"https://res.cloudinary.com/{settings.CLOUDINARY_STORAGE['CLOUD_NAME']}/video/upload/{file_url}"
+            return file_url
+        return None
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
