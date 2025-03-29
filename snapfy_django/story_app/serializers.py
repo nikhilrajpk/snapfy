@@ -1,10 +1,28 @@
 from rest_framework import serializers
-from .models import Story
+from .models import Story, MusicTrack
 from user_app.models import User
 import cloudinary
 import logging
+from django.conf import settings
+
 
 logger = logging.getLogger(__name__)
+
+# CLOUD_NAME from settings
+CLOUDINARY_CLOUD_NAME = settings.CLOUDINARY_STORAGE['CLOUD_NAME']
+
+class MusicTrackSerializer(serializers.ModelSerializer):
+    file = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MusicTrack
+        fields = ['id', 'title', 'file', 'duration', 'is_trending']
+
+    def get_file(self, obj):
+        # Dynamically construct the full Cloudinary URL using the CLOUD_NAME from settings
+        full_url = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/{obj.file}"
+        logger.debug(f"Generated Cloudinary URL for music track {obj.id}: {full_url}")
+        return full_url
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
@@ -28,10 +46,11 @@ class StorySerializer(serializers.ModelSerializer):
     has_liked = serializers.SerializerMethodField()
     videoStartTime = serializers.FloatField(required=False, default=0)
     videoEndTime = serializers.FloatField(required=False, default=30)
+    music = MusicTrackSerializer(read_only=True)
 
     class Meta:
         model = Story
-        fields = ['id', 'user', 'file', 'caption', 'created_at', 'expires_at', 'viewer_count', 'like_count', 'has_liked', 'videoStartTime', 'videoEndTime']
+        fields = ['id', 'user', 'file', 'caption', 'created_at', 'expires_at', 'viewer_count', 'like_count', 'has_liked', 'videoStartTime', 'videoEndTime', 'music']
 
     def get_file(self, obj):
         if obj.file:

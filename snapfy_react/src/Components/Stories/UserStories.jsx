@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
-  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors
+  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors,
+  Music, Play, Pause, Search
 } from 'lucide-react';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { showToast } from '../../redux/slices/toastSlice';
 import { 
-  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers 
+  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks
 } from '../../API/authAPI';
 import { useNavigate } from 'react-router-dom';
 
@@ -25,7 +26,7 @@ const StoryCircle = ({ user, onClick, hasNewStory }) => {
           src={`${CLOUDINARY_ENDPOINT}${userImage}`}
           alt={user?.username} 
           className="w-full h-full object-cover rounded-full border-2 border-white" 
-          // onError={(e) => (e.target.src = '/default-profile.png')}
+          onError={(e) => (e.target.src = '/default-profile.png')}
         />
         {user?.isCurrentUser && (
           <div className="absolute bottom-0 right-0 w-6 h-6 bg-[#198754] rounded-full flex items-center justify-center border-2 border-white">
@@ -58,7 +59,31 @@ const StoryViewerModal = ({
   const [paused, setPaused] = useState(false);
   const [viewers, setViewers] = useState([]);
   const dispatch = useDispatch();
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    if (currentStory.music && currentStory.music.file) {
+      const fullAudioUrl = `${CLOUDINARY_ENDPOINT}${currentStory.music.file}`;
+      console.log('Setting audio src:', fullAudioUrl);
+      if (audioRef.current) {
+        audioRef.current.src = fullAudioUrl;
+        if (!paused) {
+          audioRef.current.play().catch(error => {
+            console.error('Error playing audio:', error);
+            dispatch(showToast({ message: 'Failed to play story music', type: 'error' }));
+          });
+        } else {
+          audioRef.current.pause();
+        }
+      }
+    }
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, [paused, currentStory.music, dispatch]);
 
   useEffect(() => {
     if (paused) return;
@@ -83,7 +108,7 @@ const StoryViewerModal = ({
   
   useEffect(() => {
     setTimeLeft(10);
-    setLiked(currentStory.has_liked);
+    setLiked(currentStory.has_liked || false);
     if (isUserStory) {
       fetchViewers();
     }
@@ -133,6 +158,7 @@ const StoryViewerModal = ({
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
+      {currentStory.music && <audio ref={audioRef} />}
       <div className="w-full flex space-x-1 px-2 mt-2">
         {userStories.map((story, idx) => (
           <div key={story?.id} className="h-1 bg-gray-700 flex-1">
@@ -157,7 +183,7 @@ const StoryViewerModal = ({
             onError={(e) => (e.target.src = '/default-profile.png')}
           />
           <div>
-            <p onClick={()=>navigate(`/user/${currentStory?.user.username}`) } className="text-white font-medium cursor-pointer">{currentStory.user.username}</p>
+            <p onClick={() => navigate(`/user/${currentStory?.user.username}`)} className="text-white font-medium cursor-pointer">{currentStory.user.username}</p>
             <p className="text-white/60 text-xs">{getTimeAgo(currentStory.created_at)}</p>
           </div>
         </div>
@@ -207,7 +233,7 @@ const StoryViewerModal = ({
               autoPlay={!paused}
               className="max-w-full max-h-[60vh] rounded-lg cursor-pointer" 
               controls={false}
-              muted={false}
+              muted={currentStory.music ? true : false}
               playsInline
               onClick={handleMediaClick}
               onEnded={() => {
@@ -227,8 +253,14 @@ const StoryViewerModal = ({
               onClick={handleMediaClick}
             />
           )}
-          {currentStory.caption && (
-            <p className="text-white text-center mt-4 max-w-md px-4">{currentStory.caption}</p>
+          {currentStory.music && (
+            <div className="absolute top-4 left-4 bg-black/50 text-white px-2 py-1 rounded-full text-sm flex items-center gap-1">
+              <Music size={14} />
+              {currentStory.music.title}
+            </div>
+          )}
+          {currentStory?.caption && (
+            <p className="text-white text-center mt-4 max-w-md px-4">{currentStory?.caption}</p>
           )}
         </div>
         
@@ -312,9 +344,69 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoStartTime, setVideoStartTime] = useState(0);
   const [videoEndTime, setVideoEndTime] = useState(30);
+  const [musicTracks, setMusicTracks] = useState([]);
+  const [filteredMusicTracks, setFilteredMusicTracks] = useState([]);
+  const [selectedMusic, setSelectedMusic] = useState(null);
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
+  const audioPreviewRef = useRef(null);
   const dispatch = useDispatch();
+
+  useEffect(() => {
+    const fetchMusic = async () => {
+      try {
+        const tracks = await getMusicTracks();
+        const updatedTracks = tracks.map(track => ({
+          ...track,
+          file: `${CLOUDINARY_ENDPOINT}${track.file}`
+        }));
+        console.log('Fetched and updated music tracks:', updatedTracks);
+        setMusicTracks(updatedTracks);
+        setFilteredMusicTracks(updatedTracks); // Initialize filtered tracks
+      } catch (error) {
+        console.error('Error fetching music tracks:', error);
+        dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
+      }
+    };
+    fetchMusic();
+  }, [dispatch]);
+
+  useEffect(() => {
+    // Filter music tracks based on search query
+    const filtered = musicTracks.filter(track =>
+      track.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredMusicTracks(filtered);
+  }, [searchQuery, musicTracks]);
+
+  const playPreview = (track) => {
+    if (audioPreviewRef.current) {
+      const fullAudioUrl = track.file;
+      console.log('Playing preview for:', track.title, 'URL:', fullAudioUrl);
+      if (previewPlaying === track.id) {
+        audioPreviewRef.current.pause();
+        setPreviewPlaying(null);
+      } else {
+        audioPreviewRef.current.src = fullAudioUrl;
+        audioPreviewRef.current.play().catch(error => {
+          console.error('Error playing preview:', error);
+          dispatch(showToast({ message: 'Failed to play preview', type: 'error' }));
+        });
+        setPreviewPlaying(track.id);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+      }
+    };
+  }, []);
 
   const validateFile = (file) => {
     if (!file) return false;
@@ -354,9 +446,9 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   const onVideoLoad = (e) => {
     const duration = e.target.duration;
     setVideoDuration(duration);
-    const initialEndTime = Math.min(duration, 30); // Max 30s
+    const initialEndTime = Math.min(duration, 30);
     setVideoEndTime(initialEndTime);
-    if (duration < 3) { // Minimum 3s for stories
+    if (duration < 3) {
       setValidationError('Video must be at least 3 seconds long.');
     } else if (duration > 30) {
       dispatch(showToast({ 
@@ -405,13 +497,17 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
         formData.append('videoStartTime', videoStartTime);
         formData.append('videoEndTime', videoEndTime);
       }
+      if (selectedMusic) {
+        formData.append('music_id', selectedMusic.id);
+      }
       const response = await createStory(formData);
+      console.log('Story created:', response);
       dispatch(showToast({ message: 'Story created successfully', type: 'success' }));
       onSuccess(response);
     } catch (error) {
       const errorMessage = error.response?.data?.error || 'Error creating story. Please try again.';
-      setValidationError(errorMessage);
       console.error('Error creating story:', error);
+      setValidationError(errorMessage);
       dispatch(showToast({ message: errorMessage, type: 'error' }));
     } finally {
       setLoading(false);
@@ -491,7 +587,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                             <input 
                               type="range" 
                               min="0" 
-                              max={videoDuration - 3} // Ensure at least 3s
+                              max={videoDuration - 3}
                               step="0.1"
                               value={videoStartTime}
                               onChange={(e) => {
@@ -508,8 +604,8 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                             <label className="text-gray-600 text-xs mb-1 block">End: {videoEndTime.toFixed(1)}s</label>
                             <input 
                               type="range" 
-                              min={videoStartTime + 3} // Min 3s duration
-                              max={Math.min(videoDuration, videoStartTime + 30)} // Max 30s
+                              min={videoStartTime + 3}
+                              max={Math.min(videoDuration, videoStartTime + 30)}
                               step="0.1"
                               value={videoEndTime}
                               onChange={(e) => setVideoEndTime(parseFloat(e.target.value))}
@@ -529,6 +625,20 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                   </div>
                 )}
                 
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowMusicPicker(true)}
+                    className="w-full flex items-center justify-between p-2 bg-gray-100 rounded-lg"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Music size={16} />
+                      {selectedMusic ? selectedMusic.title : 'Add Music'}
+                    </span>
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+
                 <textarea
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
@@ -555,6 +665,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                       setCaption(''); 
                       setValidationError(''); 
                       setVideoDuration(0);
+                      setSelectedMusic(null);
                     }}
                     className="bg-red-100 text-red-600 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2"
                   >
@@ -572,6 +683,88 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
               accept={mediaType === 'image' ? '.jpeg, .jpg, .png' : '.mp4, .mov, .webm'}
               onChange={handleMediaChange}
             />
+            {showMusicPicker && (
+              <div className="absolute inset-0 bg-white z-20 p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Select Music</h3>
+                  <X size={20} className="cursor-pointer" onClick={() => {
+                    setShowMusicPicker(false);
+                    setPreviewPlaying(null);
+                    setSearchQuery('');
+                    if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                  }} />
+                </div>
+                <div className="mb-4 relative">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search music..."
+                    className="w-full p-2 pl-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                  />
+                  <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                </div>
+                <div className="max-h-[40vh] overflow-y-auto">
+                  {filteredMusicTracks.length > 0 ? (
+                    filteredMusicTracks.map(track => (
+                      <div
+                        key={track.id}
+                        className={`p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 ${
+                          selectedMusic?.id === track.id ? 'bg-gray-200' : ''
+                        }`}
+                      >
+                        <div 
+                          className="flex items-center gap-2 flex-1"
+                          onClick={() => {
+                            setSelectedMusic(track);
+                            setShowMusicPicker(false);
+                            setPreviewPlaying(null);
+                            setSearchQuery('');
+                            if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                          }}
+                        >
+                          <Music size={16} />
+                          <span>{track.title}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playPreview(track);
+                          }}
+                          className="ml-2 p-1 rounded-full hover:bg-gray-200"
+                        >
+                          {previewPlaying === track.id ? (
+                            <Pause size={16} />
+                          ) : (
+                            <Play size={16} />
+                          )}
+                        </button>
+                        {track.is_trending && (
+                          <span className="text-xs text-[#198754] ml-2">Trending</span>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-center text-gray-500 py-4">No music tracks found</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedMusic(null);
+                    setShowMusicPicker(false);
+                    setPreviewPlaying(null);
+                    setSearchQuery('');
+                    if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                  }}
+                  className="w-full mt-4 p-2 bg-red-100 text-red-600 rounded-lg"
+                >
+                  Remove Music
+                </button>
+              </div>
+            )}
+            <audio ref={audioPreviewRef} />
           </div>
           
           <div className="p-4 border-t sticky bottom-0 bg-white z-10">
@@ -609,6 +802,7 @@ const UserStories = () => {
   const fetchStories = useCallback(async () => {
     try {
       const stories = await getStories();
+      console.log("stories ::", stories);
       const groupedStories = {};
       
       stories.forEach(story => {
@@ -662,7 +856,7 @@ const UserStories = () => {
     fetchStories();
     const intervalId = setInterval(() => {
       fetchStories();
-    }, 30000); // Poll every 30 seconds
+    }, 30000);
     return () => clearInterval(intervalId);
   }, [fetchStories]);
 
@@ -689,7 +883,6 @@ const UserStories = () => {
     const updatedUsers = [...usersWithStories];
     const updatedUser = { ...userStories };
     
-    // Mark all unseen stories as seen
     for (const story of updatedUser.stories) {
       if (!story.is_seen) {
         const updatedStory = await getStory(story.id);
@@ -698,7 +891,6 @@ const UserStories = () => {
       }
     }
     
-    // Recalculate allStoriesSeen and hasNewStory
     updatedUser.allStoriesSeen = updatedUser.stories.every(story => story.is_seen);
     updatedUser.hasNewStory = !updatedUser.allStoriesSeen;
     updatedUsers[userIndex] = updatedUser;
@@ -724,7 +916,6 @@ const UserStories = () => {
     const updatedUsers = [...usersWithStories];
     const currentUser = updatedUsers[viewingUserIndex];
     
-    // Ensure all stories for the current user are marked as seen
     currentUser.allStoriesSeen = currentUser.stories.every(story => story.is_seen);
     currentUser.hasNewStory = !currentUser.allStoriesSeen;
     updatedUsers[viewingUserIndex] = currentUser;

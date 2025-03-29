@@ -146,6 +146,12 @@ export const unblockUser = async (username) => {
 };
 
 // Stories
+export const getMusicTracks = async () => {
+  const response = await axiosInstance.get('music-tracks/');
+  console.log('Raw music tracks response:', response.data); // Debug log
+  return response.data;
+};
+
 export const createStory = async (formData) => {
     const response = await axiosInstance.post('/stories/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

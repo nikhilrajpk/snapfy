@@ -7,15 +7,22 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .models import Story
-from .serializers import StorySerializer
+from .models import Story, MusicTrack
 from moviepy.editor import VideoFileClip
 import cloudinary.uploader
 from user_app.models import User, BlockedUser
-from .serializers import StorySerializer, StoryViewerSerializer
+from .serializers import StorySerializer, StoryViewerSerializer, MusicTrackSerializer
 from django.db.models import Q
 
 logger = logging.getLogger(__name__)
+
+class MusicTrackListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        tracks = MusicTrack.objects.all()
+        serializer = MusicTrackSerializer(tracks, many=True)
+        return Response(serializer.data)
 
 class StoryListCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -40,6 +47,7 @@ class StoryListCreateView(APIView):
     def post(self, request):
         file = request.FILES.get('file')
         caption = request.data.get('caption', '')
+        music_id = request.data.get('music_id')
         start_time = float(request.data.get('videoStartTime', 0))
         end_time = float(request.data.get('videoEndTime', 30))
 
@@ -86,11 +94,15 @@ class StoryListCreateView(APIView):
                 upload_result = cloudinary.uploader.upload(file, resource_type="image")
                 file_url = upload_result['secure_url']
 
-            # Create the story
-            story = Story(user=request.user, file=file_url, caption=caption)
+            # Create the story with music
+            music = MusicTrack.objects.get(id=music_id) if music_id else None
+            story = Story(user=request.user, file=file_url, music=music, caption=caption)
             story.save()
             serializer = StorySerializer(story, context={'request': request})
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        except MusicTrack.DoesNotExist:
+            return Response({"error": "Selected music track not found"}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             logger.error(f"Error trimming video: {e}")
