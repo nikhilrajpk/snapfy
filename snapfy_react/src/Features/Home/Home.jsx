@@ -7,8 +7,7 @@ import { logout } from '../../redux/slices/userSlice';
 import { useNavigate } from 'react-router-dom';
 import Loader from '../../utils/Loader/Loader';
 import { userLogout } from '../../API/authAPI';
-import axiosInstance from '../../axiosInstance';
-import { useAuth } from '../../API/userAuth';
+import { useAuth } from '../../API/useAuth';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const UserStories = React.lazy(() => import('../../Components/Stories/UserStories'));
@@ -17,7 +16,7 @@ const Suggestions = React.lazy(() => import('../../Components/Suggestions/Sugges
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 
 function Home() {
-  const { posts, isLoading, error } = usePostsQuery(false); // Home mode
+  const { posts, isLoading, error } = usePostsQuery(false);
   const containerRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -33,28 +32,18 @@ function Home() {
     virtualizer.measure();
   }, [posts.length, virtualizer]);
 
-  useAuth()
+  useAuth();
 
   useEffect(() => {
     if (error) {
       if (error.response?.status === 401) {
-        const handleLogout = async () => {
-          try {
-            await userLogout(); // Notify backend
-            dispatch(logout()); // Clear state
-            dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-            navigate('/');
-          } catch (logoutError) {
-            console.error('Logout error:', logoutError);
-            navigate('/'); // Force redirect
-          }
-        };
-        handleLogout();
+        console.log('401 detected, waiting for token refresh');
+        // Rely on axios interceptor instead of immediate logout
       } else {
         dispatch(showToast({ message: `Failed to load posts: ${error.message}`, type: 'error' }));
       }
     }
-  }, [error, dispatch, navigate]);
+  }, [error, dispatch]);
 
   const normalizeUrl = (url) => {
     return url.replace(/^(auto\/upload\/)+/, '');

@@ -28,23 +28,12 @@ export const resendOTP = async (data)=>{
 }
 
 export const userLogin = async (credential) => {
-  try {
-    const response = await axiosInstance.post('login/', credential, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      withCredentials: true
-    });
-    
-    return response.data;
-  } catch (error) {
-    console.error('Login error:', error);
-    throw error;
-  }
+  const response = await axiosInstance.post('login/', credential);
+  return response.data;
 };
 
 export const userLogout = async () => {
-  const response = await axiosInstance.post('logout/', {}, { withCredentials: true });
+  const response = await axiosInstance.post('logout/', {});
   return response.data;
 };
 
@@ -58,14 +47,10 @@ export const resetPassword = async (data)=> {
     return response.data
 }
 
-export const googleSignIn = async (token) =>{
-    const response = await axiosInstance.post('auth/google/signin/',{"token":token},{
-        headers : {
-            "Content-Type" : "application/json"
-        }
-    })
-    return response.data
-}
+export const googleSignIn = async (token) => {
+  const response = await axiosInstance.post('auth/google/signin/', { token });
+  return response.data;
+};
 
 export const updateProfile = async (formData) =>{
     try {
@@ -83,13 +68,13 @@ export const updateProfile = async (formData) =>{
 }
 
 export const getAllUser = async (searchTerm = '') => {
-    try {
-      const response = await axiosInstance.get(`users/${searchTerm ? `?username=${searchTerm}` : ''}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error on retrieving users data: ', error.response?.data || error);
-      throw error;
-    }
+  try {
+    const response = await axiosInstance.get(`users/${searchTerm ? `?username=${searchTerm}` : ''}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error retrieving users:', error);
+    throw error;
+  }
 };
 
 export const getUser = async (username) => {

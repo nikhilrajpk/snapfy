@@ -21,7 +21,7 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
             alt={username}
             className="w-14 h-14 rounded-full object-cover shadow-sm"
             loading="lazy"
-            // onError={(e) => (e.target.src = '/default-profile.png')}
+            onError={(e) => (e.target.src = '/default-profile.png')}
           />
         </div>
         <div className="flex-1">
@@ -59,7 +59,6 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
           </div>
         </div>
       </div>
-      
       <div className="mt-3 ml-16">
         <button
           onClick={onFollow}
@@ -105,7 +104,7 @@ const Suggestions = () => {
   const [followedUsers, setFollowedUsers] = useState([]);
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
-  const navigate = useNavigate()
+  const navigate = useNavigate();
 
   const shuffleArray = (array) => {
     const shuffled = [...array];
@@ -122,16 +121,13 @@ const Suggestions = () => {
         const response = await getAllUser();
         const followingUsernames = (user?.following || []).map(f => f.username);
         const blockedUsernames = user?.blocked_users || [];
-
         const filteredUsers = response
           .filter((s) => s.username !== user?.username)
           .filter((s) => !followingUsernames.includes(s.username))
           .filter((s) => !followedUsers.includes(s.username))
           .filter((s) => !blockedUsernames.includes(s.username));
-
         const shuffledUsers = shuffleArray(filteredUsers);
         const randomSuggestions = shuffledUsers.slice(0, 7);
-
         setSuggestions(randomSuggestions);
       } catch (error) {
         console.error('Error retrieving users in suggestions:', error);
@@ -155,7 +151,6 @@ const Suggestions = () => {
     try {
       await followUser(username);
       dispatch(showToast({ message: `Now following ${username}`, type: 'success' }));
-
       const updatedUser = { 
         ...user, 
         following: [...(user.following || []), { username, profile_picture: null }] 
@@ -182,7 +177,6 @@ const Suggestions = () => {
     ).length;
     const isFollowingMe = (suggestion.following || []).some(f => f.username === user?.username);
     const isAlreadyFollowing = userFollowing.includes(suggestion.username);
-    // console.log(`Suggestion: ${suggestion.username}, Mutual followers: ${mutualFollowers}, Follows me: ${isFollowingMe}, Already following: ${isAlreadyFollowing}`);
     return { mutualFollowers, isFollowingMe, isAlreadyFollowing };
   };
 

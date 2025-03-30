@@ -24,21 +24,17 @@ const Login = () => {
     formState: { errors }
   } = useForm();
 
-  const onSubmit = async(data) => {
-    
-    
+  const onSubmit = async (data) => {
     try {
-      setLoading(true)
-      const response = await userLogin(data)
-      
-      // Dispatching toast actions.
-      dispatch(showToast({message:response?.message||"User logged in", type:"success"}))
-
-      // state management for logged in user.
+      setLoading(true);
+      const response = await userLogin(data);
+      console.log('Login response:', response);
       dispatch(login({ user: response.user }));
-
-      navigate('/home')
-
+      // Manually set cookies if needed (as backup)
+      document.cookie = `access_token=${response.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
+      document.cookie = `refresh_token=${response.refresh}; path=/; max-age=${3600 * 24 * 7}; SameSite=Lax`;
+      dispatch(showToast({ message: "User logged in", type: "success" }));
+      navigate('/home');
     } catch (error) {
       const errorResponse = error.response?.data;
 
@@ -69,16 +65,20 @@ const Login = () => {
       } else {
           dispatch(showToast({message: "An unexpected error occurred", type:"error"}))
       }
-    }finally{
-      setLoading(false)
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGoogleSuccess = async (response) => {
     try {
-      const res = await googleSignIn(response.credential); // Send ID token to backend
+      const res = await googleSignIn(response.credential);
+      console.log('Google sign-in response:', res);
       dispatch(login({ user: res.user }));
-      dispatch(showToast({ message: res?.message || "User Logged In", type: "success" }));
+      // Manually set cookies if needed (as backup)
+      document.cookie = `access_token=${res.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
+      document.cookie = `refresh_token=${res.refresh}; path=/; max-age=${3600 * 24 * 7}; SameSite=Lax`;
+      dispatch(showToast({ message: "User Logged In", type: "success" }));
       navigate('/home');
     } catch (error) {
       const errorResponse = error.response?.data;

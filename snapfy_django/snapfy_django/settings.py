@@ -75,6 +75,7 @@ CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 # CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
@@ -198,28 +199,31 @@ REST_FRAMEWORK = {
 import datetime 
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_COOKIE': 'access_token',
-    'AUTH_COOKIE_SECURE': False,  # True in production with HTTPS
+    'AUTH_COOKIE_DOMAIN': None,
+    'AUTH_COOKIE_SECURE': not DEBUG,
     'AUTH_COOKIE_HTTP_ONLY': True,
-    'AUTH_COOKIE_SAMESITE': 'Lax',  # Important for cross-site requests
+    'AUTH_COOKIE_PATH': '/',
+    'AUTH_COOKIE_SAMESITE': 'Lax',
+    
     'REFRESH_COOKIE': 'refresh_token',
-    'REFRESH_COOKIE_SECURE': False,
+    'REFRESH_COOKIE_DOMAIN': None,
+    'REFRESH_COOKIE_SECURE': not DEBUG,
     'REFRESH_COOKIE_HTTP_ONLY': True,
+    'REFRESH_COOKIE_PATH': '/',
     'REFRESH_COOKIE_SAMESITE': 'Lax',
 }
 
-
-# Cookie settings
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = False  # Needed for JS to access
+CSRF_COOKIE_HTTPONLY = False
 
 
 CACHES = {

@@ -7,44 +7,59 @@ const axiosInstance = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor to ensure credentials are sent
+// Request interceptor
 axiosInstance.interceptors.request.use(
   (config) => {
-    // You can add headers here if needed
+    const accessToken = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('access_token='))
+      ?.split('=')[1];
+    
+    if (accessToken) {
+      config.headers['Authorization'] = `Bearer ${accessToken}`;
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle token refresh
+// Response interceptor
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
     
-    // If error is 401 and we haven't already retried
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       
       try {
-        // Attempt to refresh tokens
-        await axios.post(
+        // Get refresh token from cookies
+        const refreshToken = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('refresh_token='))
+          ?.split('=')[1];
+        
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+        
+        // Refresh the token
+        const response = await axios.post(
           'http://127.0.0.1:8000/api/token/refresh/',
-          {},  // Empty body since we're using cookies
-          { 
-            withCredentials: true,
-            headers: {
-              'Content-Type': 'application/json',
-            }
-          }
+          { refresh: refreshToken },
+          { withCredentials: true }
         );
         
-        // Retry the original request
+        // Update access token in cookies
+        document.cookie = `access_token=${response.data.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
+        
+        // Retry original request with new token
+        originalRequest.headers['Authorization'] = `Bearer ${response.data.access}`;
         return axiosInstance(originalRequest);
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError);
         store.dispatch(logout());
-        window.location.href = '/login';
+        window.location.href = '/';
         return Promise.reject(refreshError);
       }
     }
