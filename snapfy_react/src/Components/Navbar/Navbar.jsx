@@ -44,13 +44,14 @@ const Navbar = () => {
   const { user } = useSelector((state) => state.user);
 
   const handleLogout = async () => {
-    try{
+    try {
+      await userLogout();
       dispatch(logout());
-      dispatch(showToast({ message: 'Logged out.', type: 'success' }));
-      await userLogout()
+      dispatch(showToast({ message: 'Logged out successfully', type: 'success' }));
       navigate('/');
-    }catch(error){
-      console.log('error in logging out user', error)
+    } catch (error) {
+      console.error('Logout error:', error);
+      dispatch(showToast({ message: 'Logout failed', type: 'error' }));
     }
   };
 

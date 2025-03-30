@@ -35,7 +35,7 @@ const Login = () => {
       dispatch(showToast({message:response?.message||"User logged in", type:"success"}))
 
       // state management for logged in user.
-      dispatch(login({user:response.user, token:response.access, refreshToken: response.refresh}))
+      dispatch(login({ user: response.user }));
 
       navigate('/home')
 
@@ -77,7 +77,7 @@ const Login = () => {
   const handleGoogleSuccess = async (response) => {
     try {
       const res = await googleSignIn(response.credential); // Send ID token to backend
-      dispatch(login({ user: res.user, token: res.access, refreshToken: res.refresh }));
+      dispatch(login({ user: res.user }));
       dispatch(showToast({ message: res?.message || "User Logged In", type: "success" }));
       navigate('/home');
     } catch (error) {

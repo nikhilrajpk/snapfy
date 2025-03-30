@@ -8,6 +8,8 @@ import PostPopup from './PostPopUp';
 import { createPortal } from 'react-dom';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { getRelativeTime } from '../../utils/timeUtils/getRelativeTime';
+import { userLogout } from '../../API/authAPI';
+import { logout } from '../../redux/slices/userSlice';
 
 const Post = ({
   id,
@@ -49,11 +51,18 @@ const Post = ({
         const countResponse = await getLikeCount(id);
         setLikes(countResponse.likes);
       } catch (error) {
-        console.error('Error checking initial status:', error);
-        setSaved(false);
-        setSavedPostId(null);
-        setIsLiked(false);
-        setLikes(initialLikes);
+        if (error.response?.status === 401) {
+          await userLogout();
+          dispatch(logout());
+          navigate('/');
+          dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        } else {
+          console.error('Error checking initial status:', error);
+          setSaved(false);
+          setSavedPostId(null);
+          setIsLiked(false);
+          setLikes(initialLikes);
+        }
       }
     };
 
@@ -68,8 +77,14 @@ const Post = ({
       setLikes(response.likes);
       dispatch(showToast({ message: response.is_liked ? 'Post liked' : 'Post unliked', type: 'success' }));
     } catch (error) {
-      console.error('Error liking post:', id, error);
-      dispatch(showToast({ message: 'Failed to like post', type: 'error' }));
+      if (error.response?.status === 401) {
+        await userLogout();
+        dispatch(logout());
+        navigate('/');
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      } else {
+        dispatch(showToast({ message: 'Failed to like post', type: 'error' }));
+      }
     }
   };
 
@@ -87,9 +102,16 @@ const Post = ({
         dispatch(showToast({ message: 'Post removed from saved list', type: 'success' }));
       }
     } catch (error) {
-      console.error('Error saving/removing post:', error);
-      setSaved(saved); // Revert on error
-      dispatch(showToast({ message: 'Error saving/removing post', type: 'error' }));
+      if (error.response?.status === 401) {
+        await userLogout();
+        dispatch(logout());
+        navigate('/');
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      } else {
+        console.error('Error saving/removing post:', error);
+        setSaved(saved); // Revert on error
+        dispatch(showToast({ message: 'Error saving/removing post', type: 'error' }));
+      }
     }
   };
 

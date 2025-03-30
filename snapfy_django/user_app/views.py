@@ -6,6 +6,8 @@ from rest_framework.decorators import action, api_view
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.parsers import MultiPartParser, FormParser
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -80,23 +82,42 @@ class UserAPIViewSet(viewsets.ModelViewSet):
 
 @api_view(['POST'])
 def logout_view(request):
-    user = request.user
-    if not user.is_authenticated:
-        return Response({"message": "Not logged in"}, status=401)
-    user.is_online = False
-    user.last_seen = timezone.now()
-    user.save()
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"user_{user.id}",
-        {
-            "type": "user_status_update",
-            "user_id": str(user.id),
-            "is_online": False,
-            "last_seen": user.last_seen.isoformat(),
-        }
-    )
-    return Response({"message": "Logged out"}, status=200)
+    try:
+        refresh_token = request.COOKIES.get('refresh_token')
+        if not refresh_token:
+            return Response({"message": "No refresh token provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Blacklist the refresh token
+        token = RefreshToken(refresh_token)
+        token.blacklist()
+
+        # Update user status
+        user = request.user
+        if user.is_authenticated:
+            user.is_online = False
+            user.last_seen = timezone.now()
+            user.save()
+            
+            # Broadcast status update via channels
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user.id}",
+                {
+                    "type": "user_status_update",
+                    "user_id": str(user.id),
+                    "is_online": False,
+                    "last_seen": user.last_seen.isoformat(),
+                }
+            )
+
+        # Create response and clear cookies
+        response = Response({"message": "Successfully logged out"}, status=status.HTTP_200_OK)
+        response.delete_cookie('access_token')
+        response.delete_cookie('refresh_token')
+        return response
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class BlockUserView(APIView):
@@ -212,11 +233,51 @@ class LoginView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data['user']
             refresh = RefreshToken.for_user(user)
-            return Response({
-                "refresh": str(refresh),
+            
+            # Update user status
+            user.is_online = True
+            user.last_seen = timezone.now()
+            user.save()
+            
+            # Broadcast status update
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user.id}",
+                {
+                    "type": "user_status_update",
+                    "user_id": str(user.id),
+                    "is_online": True,
+                    "last_seen": user.last_seen.isoformat(),
+                }
+            )
+
+            response = Response({
+                "user": UserSerializer(user).data,
                 "access": str(refresh.access_token),
-                "user": UserSerializer(user).data
+                "refresh": str(refresh)
             }, status=status.HTTP_200_OK)
+            
+            # Set cookies
+            response.set_cookie(
+                key='access_token',
+                value=str(refresh.access_token),
+                httponly=True,
+                secure=settings.DEBUG == False,  # True in production
+                samesite='Lax',
+                max_age=3600 * 24,  # 1 day
+                path='/'
+            )
+            response.set_cookie(
+                key='refresh_token',
+                value=str(refresh),
+                httponly=True,
+                secure=settings.DEBUG == False,  # True in production
+                samesite='Lax',
+                max_age=3600 * 24 * 7,  # 7 days
+                path='/'
+            )
+            
+            return response
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -243,51 +304,135 @@ class GoogleLoginView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request):
-        token = request.data.get('token') # ID token from React
+        token = request.data.get('token')
         if not token:
             return Response({"message": "Token is not provided!"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # Verify the ID token
             idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_CLIENT_ID, clock_skew_in_seconds=5)
             email = idinfo.get("email")
-            google_id = idinfo.get("sub")  # Unique Google ID
+            google_id = idinfo.get("sub")
             first_name = idinfo.get("given_name", "")
             last_name = idinfo.get("family_name", "")
             picture = idinfo.get("picture", None)
 
+            try:
+                user = User.objects.get(email=email)
+                if not user.is_google_signIn:
+                    return Response({"error": "This email is already registered."}, status=status.HTTP_400_BAD_REQUEST)
+                user.first_name = first_name
+                user.last_name = last_name
+                user.profile_picture = picture
+                user.save()
+            except User.DoesNotExist:
+                user = User.objects.create_user(
+                    username=email.split('@')[0],
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    profile_picture=picture,
+                    is_google_signIn=True
+                )
+            
+            # Generate tokens and set cookies
+            refresh = RefreshToken.for_user(user)
+            
+            # Update user status
+            user.is_online = True
+            user.last_seen = timezone.now()
+            user.save()
+            
+            # Broadcast status update
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user.id}",
+                {
+                    "type": "user_status_update",
+                    "user_id": str(user.id),
+                    "is_online": True,
+                    "last_seen": user.last_seen.isoformat(),
+                }
+            )
+
+            response = Response({
+                "user": UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+            
+            response.set_cookie(
+                key='access_token',
+                value=str(refresh.access_token),
+                httponly=True,
+                secure=False,  # True in production
+                samesite='Lax',
+                max_age=3600
+            )
+            response.set_cookie(
+                key='refresh_token',
+                value=str(refresh),
+                httponly=True,
+                secure=False,  # True in production
+                samesite='Lax',
+                max_age=86400
+            )
+            
+            return response
+            
         except ValueError as e:
             return Response({"error": "Invalid token", "detail": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
         
-        # Create or update user
-        try:
-            user = User.objects.get(email=email)
-            if not user.is_google_signIn:
-                return Response({"error": "This email is already registered."}, status=status.HTTP_400_BAD_REQUEST)
-            # update if changed
-            user.first_name = first_name
-            user.last_name = last_name
-            user.profile_picture = picture
-            user.save()
-        except User.DoesNotExist:
-            user = User.objects.create_user(
-                username=email.split('@')[0],
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                profile_picture=picture,
-                is_google_signIn=True
+@api_view(['GET'])
+def verify_auth(request):
+    if request.user.is_authenticated:
+        return Response({"message": "Authenticated"}, status=status.HTTP_200_OK)
+    return Response({"error": "Not authenticated"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+class CustomTokenRefreshView(TokenRefreshView):
+    def post(self, request, *args, **kwargs):
+        # Get refresh token from cookie if not in body
+        refresh_token = request.data.get('refresh') or request.COOKIES.get('refresh_token')
+        
+        if not refresh_token:
+            return Response(
+                {"error": "Refresh token is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
             )
+
+        serializer = self.get_serializer(data={'refresh': refresh_token})
         
-        # Generate JWT token
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
-            "user": UserSerializer(user).data
-        }, status=status.HTTP_200_OK)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            return Response(
+                {"error": "Invalid refresh token"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        response = Response(serializer.validated_data, status=status.HTTP_200_OK)
         
+        # Set new access token cookie
+        response.set_cookie(
+            key='access_token',
+            value=serializer.validated_data['access'],
+            httponly=True,
+            secure=settings.DEBUG == False,
+            samesite='Lax',
+            max_age=60 * 60 * 24,  # 1 day
+            path='/'
+        )
         
+        # Optionally rotate refresh token
+        if 'refresh' in serializer.validated_data:
+            response.set_cookie(
+                key='refresh_token',
+                value=serializer.validated_data['refresh'],
+                httponly=True,
+                secure=settings.DEBUG == False,
+                samesite='Lax',
+                max_age=60 * 60 * 24 * 7,  # 7 days
+                path='/'
+            )
+            
+        return response
         
 class UpdateUserProfileView(APIView):
     parser_classes = [MultiPartParser, FormParser]

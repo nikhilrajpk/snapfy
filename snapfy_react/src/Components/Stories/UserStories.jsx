@@ -9,10 +9,12 @@ import {
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { showToast } from '../../redux/slices/toastSlice';
 import { 
-  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks
+  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks,
+  userLogout
 } from '../../API/authAPI';
 import { useNavigate } from 'react-router-dom';
 import { useStoriesQuery } from '../../API/useStoriesQuery';
+import { logout } from '../../redux/slices/userSlice';
 
 const StoryCircle = ({ user, onClick, hasNewStory }) => {
   const userImage = user?.userImage?.includes("http://res.cloudinary.com/dk5georkh/image/upload/") 
@@ -942,10 +944,21 @@ const UserStories = () => {
 
   useEffect(() => {
     if (error) {
-      dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
       if (error.response?.status === 401) {
-        dispatch({ type: 'user/logout' });
-        navigate('/');
+        const handleLogout = async () => {
+          try {
+            await userLogout();
+            dispatch(logout());
+            navigate('/');
+            dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+          } catch (logoutError) {
+            console.error('Logout error:', logoutError);
+            navigate('/');
+          }
+        };
+        handleLogout();
+      } else {
+        dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
       }
     }
   }, [error, dispatch, navigate]);

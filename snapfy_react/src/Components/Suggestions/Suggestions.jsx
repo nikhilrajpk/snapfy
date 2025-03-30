@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { getAllUser, followUser } from '../../API/authAPI';
+import { Link, useNavigate } from 'react-router-dom';
+import { getAllUser, followUser, userLogout } from '../../API/authAPI';
 import { useSelector, useDispatch } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
-import { setUser } from '../../redux/slices/userSlice';
+import { logout, setUser } from '../../redux/slices/userSlice';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 
 const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowingMe, onFollow, followedUsers, isAlreadyFollowing }) => {
@@ -105,6 +105,7 @@ const Suggestions = () => {
   const [followedUsers, setFollowedUsers] = useState([]);
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
+  const navigate = useNavigate()
 
   const shuffleArray = (array) => {
     const shuffled = [...array];
@@ -119,8 +120,6 @@ const Suggestions = () => {
     const retrieveUsers = async () => {
       try {
         const response = await getAllUser();
-        // console.log('Fetching users for suggestions:', response);
-
         const followingUsernames = (user?.following || []).map(f => f.username);
         const blockedUsernames = user?.blocked_users || [];
 
@@ -128,7 +127,7 @@ const Suggestions = () => {
           .filter((s) => s.username !== user?.username)
           .filter((s) => !followingUsernames.includes(s.username))
           .filter((s) => !followedUsers.includes(s.username))
-          .filter((s) => !blockedUsernames.includes(s.username)); // Exclude blocked users
+          .filter((s) => !blockedUsernames.includes(s.username));
 
         const shuffledUsers = shuffleArray(filteredUsers);
         const randomSuggestions = shuffledUsers.slice(0, 7);
@@ -136,14 +135,21 @@ const Suggestions = () => {
         setSuggestions(randomSuggestions);
       } catch (error) {
         console.error('Error retrieving users in suggestions:', error);
-        dispatch(showToast({ message: 'Failed to load suggestions', type: 'error' }));
+        if (error.response?.status === 401) {
+          await userLogout();
+          dispatch(logout());
+          navigate('/');
+          dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        } else {
+          dispatch(showToast({ message: 'Failed to load suggestions', type: 'error' }));
+        }
       }
     };
 
     if (user) {
       retrieveUsers();
     }
-  }, [dispatch]);
+  }, [user, dispatch, navigate, followedUsers]);
 
   const handleFollow = async (username) => {
     try {
@@ -157,8 +163,14 @@ const Suggestions = () => {
       dispatch(setUser(updatedUser));
       setFollowedUsers((prev) => [...prev, username]);
     } catch (error) {
-      console.error('Error following user:', error);
-      dispatch(showToast({ message: 'Failed to follow user', type: 'error' }));
+      if (error.response?.status === 401) {
+        await userLogout();
+        dispatch(logout());
+        navigate('/');
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      } else {
+        dispatch(showToast({ message: 'Failed to follow user', type: 'error' }));
+      }
     }
   };
 

@@ -27,21 +27,26 @@ export const resendOTP = async (data)=>{
     return response.data
 }
 
-export const userLogin = async (credential) =>{
+export const userLogin = async (credential) => {
+  try {
     const response = await axiosInstance.post('login/', credential, {
-        headers: {
-            'Content-Type': 'application/json',
-          },
-    })
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      withCredentials: true
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
+  }
+};
 
-    return response.data
-}
-
-export const userLogout = async () =>{
-    const response = await axiosInstance.post('logout-view/')
-
-    return response.data
-}
+export const userLogout = async () => {
+  const response = await axiosInstance.post('logout/', {}, { withCredentials: true });
+  return response.data;
+};
 
 export const resetPassword = async (data)=> {
     const response = await axiosInstance.put('reset-password/', data, {

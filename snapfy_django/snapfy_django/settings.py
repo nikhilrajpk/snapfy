@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'chat_app',
     # Rest framework
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'rest_framework_simplejwt',
     'django_redis',
     'celery',
@@ -70,7 +71,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_EXPOSE_HEADERS = ['Authorization']
+CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -195,10 +196,31 @@ REST_FRAMEWORK = {
 }
 
 import datetime 
+from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME' : datetime.timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME' : datetime.timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_COOKIE': 'access_token',
+    'AUTH_COOKIE_SECURE': False,  # True in production with HTTPS
+    'AUTH_COOKIE_HTTP_ONLY': True,
+    'AUTH_COOKIE_SAMESITE': 'Lax',  # Important for cross-site requests
+    'REFRESH_COOKIE': 'refresh_token',
+    'REFRESH_COOKIE_SECURE': False,
+    'REFRESH_COOKIE_HTTP_ONLY': True,
+    'REFRESH_COOKIE_SAMESITE': 'Lax',
 }
+
+
+# Cookie settings
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False  # Needed for JS to access
+
 
 CACHES = {
     "default": {

@@ -6,6 +6,9 @@ import { showToast } from '../../redux/slices/toastSlice';
 import { logout } from '../../redux/slices/userSlice';
 import { useNavigate } from 'react-router-dom';
 import Loader from '../../utils/Loader/Loader';
+import { userLogout } from '../../API/authAPI';
+import axiosInstance from '../../axiosInstance';
+import { useAuth } from '../../API/userAuth';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const UserStories = React.lazy(() => import('../../Components/Stories/UserStories'));
@@ -30,14 +33,25 @@ function Home() {
     virtualizer.measure();
   }, [posts.length, virtualizer]);
 
+  useAuth()
+
   useEffect(() => {
     if (error) {
       if (error.response?.status === 401) {
-        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-        dispatch(logout());
-        navigate('/');
+        const handleLogout = async () => {
+          try {
+            await userLogout(); // Notify backend
+            dispatch(logout()); // Clear state
+            dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+            navigate('/');
+          } catch (logoutError) {
+            console.error('Logout error:', logoutError);
+            navigate('/'); // Force redirect
+          }
+        };
+        handleLogout();
       } else {
-        dispatch(showToast({ message: `Failed to load posts: ${error.message}. Please try again.`, type: 'error' }));
+        dispatch(showToast({ message: `Failed to load posts: ${error.message}`, type: 'error' }));
       }
     }
   }, [error, dispatch, navigate]);
