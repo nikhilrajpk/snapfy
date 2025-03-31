@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getAllUser, followUser, userLogout } from '../../API/authAPI';
 import { useSelector, useDispatch } from 'react-redux';
@@ -102,6 +102,7 @@ const SuggestionItem = ({ username, profile_picture, mutualFollowers, isFollowin
 const Suggestions = () => {
   const [suggestions, setSuggestions] = useState([]);
   const [followedUsers, setFollowedUsers] = useState([]);
+  const hasFetched = useRef(false);
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -129,6 +130,7 @@ const Suggestions = () => {
         const shuffledUsers = shuffleArray(filteredUsers);
         const randomSuggestions = shuffledUsers.slice(0, 7);
         setSuggestions(randomSuggestions);
+        hasFetched.current = true;
       } catch (error) {
         console.error('Error retrieving users in suggestions:', error);
         if (error.response?.status === 401) {
@@ -145,7 +147,7 @@ const Suggestions = () => {
     if (user) {
       retrieveUsers();
     }
-  }, [user, dispatch, navigate, followedUsers]);
+  }, [user, dispatch, navigate]);
 
   const handleFollow = async (username) => {
     try {

@@ -9,8 +9,10 @@ import { deletePost, savePost, isSavedPost, removeSavedPost, archivePost, remove
 import axiosInstance from '../../axiosInstance';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useQueryClient } from '@tanstack/react-query';
+import { userLogout } from '../../API/authAPI';
+import { logout } from '../../redux/slices/userSlice';
 
-const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null, onLikeChange = null }) => {
+const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null, onLikeChange = null, onCommentCountChange = null, }) => {
   const [liked, setLiked] = useState(post?.is_liked || false);
   const [likeCount, setLikeCount] = useState(post?.likes || 0);
   const [comment, setComment] = useState('');
@@ -327,27 +329,38 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     if (!comment.trim()) return;
 
     try {
+      let newComment;
       if (replyTo) {
         const replyData = { post: post.id, comment: replyTo.id, text: comment };
-        const newReply = await addCommentReply(replyData);
+        newComment = await addCommentReply(replyData);
         setComments(prev =>
           prev.map(c =>
-            c.id === replyTo.id ? { ...c, replies: [...(c.replies || []), newReply] } : c
+            c.id === replyTo.id ? { ...c, replies: [...(c.replies || []), newComment] } : c
           )
         );
         dispatch(showToast({ message: 'Reply added', type: 'success' }));
       } else {
         const commentData = { post: post.id, text: comment };
-        const newComment = await addComment(commentData);
+        newComment = await addComment(commentData);
         setComments(prev => [...prev, newComment]);
         dispatch(showToast({ message: 'Comment added', type: 'success' }));
       }
+      const newCommentCount = (post.comment_count || 0) + 1;
+      if (onCommentCountChange) {
+        onCommentCountChange(newCommentCount); // Notify parent
+      }
       setComment('');
       setReplyTo(null);
-      queryClient.invalidateQueries(['posts', post.id]);
     } catch (error) {
       console.error('Error adding comment/reply:', error);
-      dispatch(showToast({ message: 'Error adding comment/reply', type: 'error' }));
+      if (error.response?.status === 401) {
+        await userLogout();
+        dispatch(logout());
+        navigate('/');
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      } else {
+        dispatch(showToast({ message: 'Error adding comment/reply', type: 'error' }));
+      }
     }
   };
 

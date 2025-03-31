@@ -123,6 +123,10 @@ const Post = ({
     setIsPopupOpen(false);
   };
 
+  const handleCommentCountChange = (newCommentCount) => {
+    setCommentCount(newCommentCount); // Update comment count from popup
+  };
+
   // Callback to update like status from PostPopup
   const handleLikeChange = (newLikes, newIsLiked) => {
     setLikes(newLikes);
@@ -260,7 +264,8 @@ const Post = ({
               }}
               isOpen={isPopupOpen}
               onClose={closePostPopup}
-              onLikeChange={handleLikeChange} // Pass callback to update like status
+              onLikeChange={handleLikeChange}
+              onCommentCountChange={handleCommentCountChange}
             />
           </div>,
           document.body
