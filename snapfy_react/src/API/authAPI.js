@@ -33,7 +33,10 @@ export const userLogin = async (credential) => {
 };
 
 export const userLogout = async () => {
-  const response = await axiosInstance.post('logout/', {});
+  // Make sure cookies are being sent with the request
+  const response = await axiosInstance.post('logout/', {}, {
+    withCredentials: true  // Explicitly ensure credentials are sent
+  });
   return response.data;
 };
 

@@ -75,9 +75,11 @@ const Login = () => {
       const res = await googleSignIn(response.credential);
       console.log('Google sign-in response:', res);
       dispatch(login({ user: res.user }));
-      // Manually set cookies if needed (as backup)
-      document.cookie = `access_token=${res.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
-      document.cookie = `refresh_token=${res.refresh}; path=/; max-age=${3600 * 24 * 7}; SameSite=Lax`;
+      if (res.access && res.refresh) {
+        // Manually set cookies if tokens are in response body
+        document.cookie = `access_token=${res.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
+        document.cookie = `refresh_token=${res.refresh}; path=/; max-age=${3600 * 24 * 7}; SameSite=Lax`;
+      }
       dispatch(showToast({ message: "User Logged In", type: "success" }));
       navigate('/home');
     } catch (error) {

@@ -1,4 +1,4 @@
-import { createSlice } from "@reduxjs/toolkit";
+import { createSlice } from '@reduxjs/toolkit';
 
 export const initialState = {
   user: null,
@@ -16,9 +16,11 @@ const userSlice = createSlice({
     logout: (state) => {
       state.user = null;
       state.isAuthenticated = false;
+      localStorage.removeItem('reduxState'); // Clear persisted state on logout
     },
     setUser: (state, action) => {
       state.user = action.payload;
+      state.isAuthenticated = true;
     },
   },
 });

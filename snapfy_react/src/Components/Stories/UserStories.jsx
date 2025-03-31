@@ -9,12 +9,10 @@ import {
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { showToast } from '../../redux/slices/toastSlice';
 import { 
-  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks,
-  userLogout
+  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks
 } from '../../API/authAPI';
 import { useNavigate } from 'react-router-dom';
 import { useStoriesQuery } from '../../API/useStoriesQuery';
-import { logout } from '../../redux/slices/userSlice';
 
 const StoryCircle = ({ user, onClick, hasNewStory }) => {
   const userImage = user?.userImage?.includes("http://res.cloudinary.com/dk5georkh/image/upload/") 
@@ -860,6 +858,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
 const UserStories = () => {
   const [viewingUserIndex, setViewingUserIndex] = useState(null);
   const [viewingStoryIndex, setViewingStoryIndex] = useState(0);
+  const [creatingStory, setCreatingStory] = useState(false);
   const [usersWithStories, setUsersWithStories] = useState([]);
   const [page, setPage] = useState(1);
   const scrollRef = useRef(null);
@@ -868,7 +867,15 @@ const UserStories = () => {
   const { user } = useSelector((state) => state.user);
   const queryClient = useQueryClient();
   
-  const { stories, totalCount, next, isLoading, error, invalidateStories } = useStoriesQuery({ page, pageSize: 10 });
+  const { 
+    stories, 
+    totalCount, 
+    next, 
+    previous, 
+    isLoading, 
+    error, 
+    invalidateStories 
+  } = useStoriesQuery({ page, pageSize: 10 });
 
   const virtualizer = useVirtualizer({
     count: usersWithStories.length,
@@ -907,41 +914,61 @@ const UserStories = () => {
     });
 
     let usersArray = Object.values(groupedStories);
-    const currentUserIndex = usersArray.findIndex(u => u.isCurrentUser);
-    if (currentUserIndex !== -1) {
+    const currentUserExists = usersArray.some(u => u.isCurrentUser);
+    
+    if (!currentUserExists) {
+      usersArray.unshift({
+        userId: user?.id,
+        username: user?.username,
+        userImage: user?.profile_picture,
+        isCurrentUser: true,
+        stories: [],
+        allStoriesSeen: true,
+        hasNewStory: false
+      });
+    } else {
+      const currentUserIndex = usersArray.findIndex(u => u.isCurrentUser);
       const [currentUser] = usersArray.splice(currentUserIndex, 1);
       usersArray.unshift(currentUser);
     }
 
-    setUsersWithStories(usersArray);
+    setUsersWithStories(prev => {
+      if (JSON.stringify(prev) !== JSON.stringify(usersArray)) {
+        return usersArray;
+      }
+      return prev;
+    });
   }, [stories, user?.id, user?.username, user?.profile_picture, isLoading, error]);
 
-  useEffect(() => {
-    if (error) {
-      if (error.response?.status === 401) {
-        const handleLogout = async () => {
-          try {
-            await userLogout();
-            dispatch(logout());
-            navigate('/');
-            dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-          } catch (logoutError) {
-            console.error('Logout error:', logoutError);
-            navigate('/');
-          }
-        };
-        handleLogout();
-      } else {
-        dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
-      }
+  
+useEffect(() => {
+  if (error) {
+    if (error.response?.status === 401) {
+      const handleLogout = async () => {
+        try {
+          // await userLogout();
+          dispatch(logout());
+          navigate('/');
+          dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        } catch (logoutError) {
+          console.error('Logout error:', logoutError);
+          navigate('/');
+        }
+      };
+      handleLogout();
+    } else {
+      dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
     }
-  }, [error, dispatch, navigate]);
+  }
+}, [error, dispatch, navigate]);
 
   const handleScroll = (direction) => {
     if (scrollRef.current) {
       const scrollAmount = 300;
       scrollRef.current.scrollLeft += direction === 'right' ? scrollAmount : -scrollAmount;
-      if (direction === 'right' && scrollRef.current.scrollLeft + scrollRef.current.clientWidth >= scrollRef.current.scrollWidth - 100 && next) {
+      if (direction === 'right' && 
+          scrollRef.current.scrollLeft + scrollRef.current.clientWidth >= scrollRef.current.scrollWidth - 100 && 
+          next) {
         setPage(prev => prev + 1);
       }
     }
@@ -949,6 +976,12 @@ const UserStories = () => {
 
   const handleUserStoryClick = async (userIndex) => {
     const userStories = usersWithStories[userIndex];
+    
+    if (userStories.isCurrentUser && userStories.stories.length === 0) {
+      setCreatingStory(true);
+      return;
+    }
+    
     const updatedUsers = [...usersWithStories];
     const updatedUser = { ...userStories };
     
@@ -988,8 +1021,10 @@ const UserStories = () => {
 
   const handleNextUser = () => {
     if (viewingUserIndex === null || !usersWithStories[viewingUserIndex]) return;
+
     const updatedUsers = [...usersWithStories];
     const currentUser = updatedUsers[viewingUserIndex];
+    
     currentUser.allStoriesSeen = currentUser.stories.every(story => story.is_seen);
     currentUser.hasNewStory = !currentUser.allStoriesSeen;
     updatedUsers[viewingUserIndex] = currentUser;
@@ -1032,21 +1067,61 @@ const UserStories = () => {
     }
   };
 
+  const handleStoryCreated = (newStory) => {
+    const updatedUsers = [...usersWithStories];
+    const currentUserIndex = updatedUsers.findIndex(u => u.isCurrentUser);
+    
+    if (currentUserIndex !== -1) {
+      updatedUsers[currentUserIndex].stories.push(newStory);
+      updatedUsers[currentUserIndex].hasNewStory = true;
+    } else {
+      updatedUsers.unshift({
+        userId: user?.id,
+        username: user?.username,
+        userImage: user?.profile_picture,
+        isCurrentUser: true,
+        stories: [newStory],
+        allStoriesSeen: false,
+        hasNewStory: true
+      });
+    }
+    setUsersWithStories(updatedUsers);
+    invalidateStories();
+    setCreatingStory(false);
+    setViewingUserIndex(0);
+    setViewingStoryIndex(updatedUsers[0].stories.length - 1);
+  };
+
+  const handleAddNewStory = () => {
+    setViewingUserIndex(null);
+    setCreatingStory(true);
+  };
+
   return (
     <div className="my-4">
       <div className="relative flex items-center">
         {usersWithStories.length > 4 && (
-          <button className="absolute left-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center" onClick={() => handleScroll('left')}>
+          <button 
+            className="absolute left-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center"
+            onClick={() => handleScroll('left')}
+          >
             <ChevronLeft size={18} />
           </button>
         )}
-        <div ref={scrollRef} className="flex overflow-x-auto scrollbar-hide py-2 px-2 w-full scroll-smooth" style={{ height: '120px' }}>
+        
+        <div 
+          ref={scrollRef}
+          className="flex overflow-x-auto scrollbar-hide py-2 px-2 w-full scroll-smooth"
+          style={{ height: '120px' }}
+        >
           {isLoading ? (
             <div className="flex justify-center items-center w-full">
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
             </div>
           ) : error ? (
-            <div className="text-center text-red-500 p-4 w-full">Failed to load stories</div>
+            <div className="text-center text-red-500 p-4 w-full">
+              Failed to load stories
+            </div>
           ) : usersWithStories.length > 0 ? (
             <div style={{ width: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
               {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -1071,16 +1146,24 @@ const UserStories = () => {
               })}
             </div>
           ) : (
-            <div className="text-center text-gray-500 p-4 w-full">No stories available</div>
+            <div className="text-center text-gray-500 p-4 w-full">
+              No stories available
+            </div>
           )}
         </div>
+        
         {usersWithStories.length > 4 && (
-          <button className="absolute right-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center" onClick={() => handleScroll('right')}>
+          <button 
+            className="absolute right-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center"
+            onClick={() => handleScroll('right')}
+          >
             <ChevronRight size={18} />
           </button>
         )}
       </div>
-      {viewingUserIndex !== null && usersWithStories[viewingUserIndex]?.stories?.[viewingStoryIndex] && (
+      
+      {viewingUserIndex !== null && 
+       usersWithStories[viewingUserIndex]?.stories?.[viewingStoryIndex] && (
         <StoryViewerModal
           currentStory={usersWithStories[viewingUserIndex].stories[viewingStoryIndex]}
           userStories={usersWithStories[viewingUserIndex].stories}
@@ -1093,6 +1176,14 @@ const UserStories = () => {
           onPreviousUser={handlePreviousUser}
           onDelete={handleDeleteStory}
           isUserStory={usersWithStories[viewingUserIndex].isCurrentUser}
+          onAddNewStory={handleAddNewStory}
+        />
+      )}
+      
+      {creatingStory && (
+        <CreateStoryModal
+          onClose={() => setCreatingStory(false)}
+          onSuccess={handleStoryCreated}
         />
       )}
     </div>

@@ -82,33 +82,61 @@ class UserAPIViewSet(viewsets.ModelViewSet):
 
 @api_view(['POST'])
 def logout_view(request):
+    """More resilient logout view that handles missing tokens gracefully"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Log incoming request details
+    logger.info(f"Logout request received. Cookies: {request.COOKIES}, Headers: {request.headers}")
+    
+    response = Response({"message": "Successfully logged out"}, status=status.HTTP_200_OK)
+    
+    # Always delete cookies, regardless of what happens next
+    response.delete_cookie('access_token', path='/')
+    response.delete_cookie('refresh_token', path='/')
+    
     try:
+        # Try to get refresh token from cookies
         refresh_token = request.COOKIES.get('refresh_token')
-        if not refresh_token:
-            return Response({"message": "No refresh token provided"}, status=status.HTTP_400_BAD_REQUEST)
-        token = RefreshToken(refresh_token)
-        token.blacklist()
+        logger.info(f"Refresh token: {refresh_token}")
+        
+        # If we have a valid token, blacklist it
+        if refresh_token:
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                logger.info("Refresh token blacklisted successfully")
+            except Exception as e:
+                logger.error(f"Token blacklisting failed: {str(e)}")
+        
+        # Update user status if authenticated
         user = request.user
         if user.is_authenticated:
             user.is_online = False
             user.last_seen = timezone.now()
             user.save()
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"user_{user.id}",
-                {
-                    "type": "user_status_update",
-                    "user_id": str(user.id),
-                    "is_online": False,
-                    "last_seen": user.last_seen.isoformat(),
-                }
-            )
-        response = Response({"message": "Successfully logged out"}, status=status.HTTP_200_OK)
-        response.delete_cookie('access_token')
-        response.delete_cookie('refresh_token')
+            logger.info(f"User {user.username} marked offline")
+            
+            # Update channels if needed
+            try:
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{user.id}",
+                    {
+                        "type": "user_status_update",
+                        "user_id": str(user.id),
+                        "is_online": False,
+                        "last_seen": user.last_seen.isoformat(),
+                    }
+                )
+                logger.info("Channel update sent")
+            except Exception as channel_error:
+                logger.error(f"Channel update failed: {str(channel_error)}")
+        
         return response
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.error(f"Unexpected logout error: {str(e)}")
+        return response  # Still return 200 OK with cookies deleted
 
 
 class BlockUserView(APIView):
@@ -324,7 +352,12 @@ class GoogleLoginView(APIView):
                     "last_seen": user.last_seen.isoformat(),
                 }
             )
-            response = Response({"user": UserSerializer(user).data}, status=status.HTTP_200_OK)
+            response = Response({
+                "user": UserSerializer(user).data,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh)
+            }, status=status.HTTP_200_OK)
+            
             response.set_cookie(
                 key='access_token',
                 value=str(refresh.access_token),

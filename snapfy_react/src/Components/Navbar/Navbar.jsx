@@ -46,12 +46,20 @@ const Navbar = () => {
   const handleLogout = async () => {
     try {
       await userLogout();
+      document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
       dispatch(logout());
       dispatch(showToast({ message: 'Logged out successfully', type: 'success' }));
       navigate('/');
     } catch (error) {
       console.error('Logout error:', error);
-      dispatch(showToast({ message: 'Logout failed', type: 'error' }));
+      // Log out locally even if backend fails
+      document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      dispatch(logout());
+      // dispatch(showToast({ message: 'Logged out locally due to server error', type: 'warning' }));
+      dispatch(showToast({ message: 'Logged out successfully', type: 'warning' }));
+      navigate('/');
     }
   };
 
