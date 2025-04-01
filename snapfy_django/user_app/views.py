@@ -114,7 +114,7 @@ def logout_view(request):
             async_to_sync(channel_layer.group_send)(
                 f"user_{user.id}",
                 {
-                    "type": "user_status_update",
+                    "type": "user_status",
                     "user_id": str(user.id),
                     "is_online": False,
                     "last_seen": user.last_seen.isoformat(),

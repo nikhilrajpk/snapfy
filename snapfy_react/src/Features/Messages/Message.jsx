@@ -81,13 +81,12 @@ function Message() {
         setSelectedRoom(roomData);
 
         const msgs = await getMessages(conversationId);
-        const processedMessages = msgs.map((msg) => ({
+        setMessages(msgs.map((msg) => ({
           ...msg,
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
           key: `${msg.id}-${msg.sent_at}`,
           file_url: msg.file_url || null,
-        }));
-        setMessages(processedMessages || []);
+        })) || []);
         setInitialLoad(true);
 
         if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -115,26 +114,15 @@ function Message() {
     if (!user?.id) return;
 
     let socketClosedIntentionally = false;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 5;
 
     const connectWebSocket = () => {
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        console.error('Max WebSocket reconnect attempts reached');
-        dispatch(showToast({ message: 'Lost connection to chat server', type: 'error' }));
-        return;
-      }
-
-      const accessToken = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('access_token='))
-        ?.split('=')[1];
+      const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
       const socket = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
       socketRef.current = socket;
 
       socket.onopen = () => {
         console.log('User WebSocket connection established');
-        reconnectAttempts = 0;
+        socket.send(JSON.stringify({ type: 'join_all_users' }));
         if (conversationId) {
           socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
         }
@@ -165,7 +153,6 @@ function Message() {
               key: `${message.id}-${message.sent_at}`,
             };
 
-            // Update chatRooms for all messages
             setChatRooms((prev) => {
               const updatedRooms = prev.map((room) => {
                 if (String(room.id) === String(data.room_id)) {
@@ -178,9 +165,7 @@ function Message() {
                       is_deleted: newMessage.is_deleted,
                     },
                     last_message_at: newMessage.sent_at,
-                    unread_count: isOwnMessage || String(data.room_id) === String(conversationId)
-                      ? 0
-                      : (room.unread_count || 0) + 1,
+                    unread_count: data.unread_count ?? (isOwnMessage || String(data.room_id) === String(conversationId) ? 0 : (room.unread_count || 0) + 1),
                   };
                 }
                 return room;
@@ -188,33 +173,20 @@ function Message() {
               return updatedRooms.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
             });
 
-            // Only append to current conversation
-            if (String(data.room_id) !== String(conversationId)) {
-              console.log(`Message for room ${data.room_id} ignored (current: ${conversationId})`);
-              return;
-            }
+            if (String(data.room_id) === String(conversationId)) {
+              setMessages((prev) => {
+                const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);
+                if (tempIdMatch) {
+                  return prev.map((msg) => (msg.tempId === message.tempId ? newMessage : msg));
+                }
+                const existingIndex = prev.findIndex((msg) => String(msg.id) === String(message.id));
+                if (existingIndex !== -1) {
+                  return prev.map((msg, index) => (index === existingIndex ? newMessage : msg));
+                }
+                return [...prev, newMessage];
+              });
 
-            setMessages((prev) => {
-              if (message.tempId && pendingMessages.current.has(message.tempId)) {
-                const tempId = message.tempId;
-                pendingMessages.current.delete(tempId);
-                return prev.map((msg) =>
-                  msg.tempId === tempId ? { ...newMessage, tempId } : msg
-                );
-              }
-              if (prev.some((msg) => String(msg.id) === String(message.id))) {
-                return prev;
-              }
-              return [...prev, newMessage];
-            });
-
-            if (
-              String(data.room_id) === String(conversationId) &&
-              String(newMessage.sender.id) !== String(user?.id)
-            ) {
-              const now = Date.now();
-              if (now - lastMarkAsReadRef.current > 1000) {
-                lastMarkAsReadRef.current = now;
+              if (String(newMessage.sender.id) !== String(user?.id)) {
                 socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
               }
             }
@@ -225,9 +197,7 @@ function Message() {
             if (String(data.room_id) === String(conversationId)) {
               setMessages((prev) =>
                 prev.map((msg) =>
-                  data.updated_ids.includes(String(msg.id))
-                    ? { ...msg, is_read: true, read_at: data.read_at || new Date().toISOString() }
-                    : msg
+                  data.updated_ids.includes(String(msg.id)) ? { ...msg, is_read: true, read_at: data.read_at } : msg
                 )
               );
             }
@@ -245,7 +215,7 @@ function Message() {
             setChatRooms((prev) =>
               prev.map((room) => {
                 const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
-                if (String(otherUser.id) === String(data.user_id)) {
+                if (String(otherUser?.id) === String(data.user_id)) {
                   return {
                     ...room,
                     users: room.users.map((u) =>
@@ -274,19 +244,11 @@ function Message() {
         }
       };
 
-      socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
-
+      socket.onerror = (error) => console.error('WebSocket error:', error);
       socket.onclose = (event) => {
         console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
         if (event.code !== 1000 && !socketClosedIntentionally) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          setTimeout(() => {
-            reconnectAttempts++;
-            console.log(`Reconnecting WebSocket, attempt ${reconnectAttempts}`);
-            connectWebSocket();
-          }, delay);
+          setTimeout(connectWebSocket, 1000);
         }
       };
     };
@@ -308,32 +270,28 @@ function Message() {
     setIsSending(true);
     const tempId = `${user.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    const optimisticMessage = {
+      tempId,
+      content: message.trim(),
+      sender: user,
+      sent_at: new Date().toISOString(),
+      key: tempId,
+      is_read: false,
+      is_deleted: false,
+      file_url: selectedFile ? URL.createObjectURL(selectedFile) : null,
+    };
+
+    setMessages((prev) => [...prev.filter((msg) => msg.tempId !== tempId), optimisticMessage]);
+
     try {
       const formData = new FormData();
-      const plainContent = message.trim();
-
-      if (plainContent) formData.append('content', plainContent);
+      if (message.trim()) formData.append('content', message.trim());
       if (selectedFile) formData.append('file', selectedFile);
       formData.append('tempId', tempId);
 
-      const optimisticMessage = {
-        tempId,
-        content: plainContent,
-        sender: user,
-        sent_at: new Date().toISOString(),
-        key: tempId,
-        is_read: false,
-        is_deleted: false,
-        file_url: selectedFile ? URL.createObjectURL(selectedFile) : null,
-      };
-      pendingMessages.current.set(tempId, optimisticMessage);
-      setMessages((prev) => [...prev, optimisticMessage]);
-
-      const response = await axiosInstance.post(
-        `/chatrooms/${selectedRoom.id}/send-message/`,
-        formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      );
+      await axiosInstance.post(`/chatrooms/${selectedRoom.id}/send-message/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
 
       setMessage('');
       setSelectedFile(null);
@@ -343,8 +301,7 @@ function Message() {
     } catch (error) {
       console.error('Error sending message:', error);
       dispatch(showToast({ message: 'Failed to send message', type: 'error' }));
-      setMessages((prev) => prev.filter((msg) => !msg.tempId || msg.tempId !== tempId));
-      pendingMessages.current.delete(tempId);
+      setMessages((prev) => prev.filter((msg) => msg.tempId !== tempId));
     } finally {
       setIsSending(false);
     }
@@ -507,23 +464,19 @@ function Message() {
                             <div className="flex items-center space-x-3">
                               <div className="relative">
                                 <img
-                                  src={
-                                    otherUser.profile_picture
-                                      ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}`
-                                      : '/default-profile.png'
-                                  }
-                                  alt={otherUser.username}
+                                  src={otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png'}
+                                  alt={otherUser?.username || 'Unknown'}
                                   className="w-12 h-12 rounded-full object-cover border border-gray-200 shadow-sm"
                                   onError={(e) => (e.target.src = '/default-profile.png')}
                                 />
                                 <div
                                   className={`absolute bottom-0 right-0 w-3 h-3 ${
-                                    otherUser.is_online ? 'bg-green-500' : 'bg-gray-500'
+                                    otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
                                   } rounded-full border-2 border-white`}
                                 ></div>
                               </div>
                               <div className="flex-1 min-w-0">
-                                <h3 className="text-sm font-semibold text-gray-800 truncate">{otherUser.username}</h3>
+                                <h3 className="text-sm font-semibold text-gray-800 truncate">{otherUser?.username || 'Unknown'}</h3>
                                 <p className="text-sm text-gray-600 truncate">{lastMessage}</p>
                                 {unreadCount > 0 && (
                                   <span className="text-xs bg-red-500 text-white rounded-full px-2 py-1">{unreadCount}</span>
@@ -596,7 +549,7 @@ function Message() {
                                 <img
                                   src={
                                     msg?.sender?.profile_picture
-                                      ? `${CLOUDINARY_ENDPOINT}/${msg.sender.profile_picture}`
+                                      ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}`
                                       : '/default-profile.png'
                                   }
                                   alt={msg?.sender?.username || 'Unknown'}
@@ -613,7 +566,7 @@ function Message() {
                                   }`}
                                 >
                                   {msg?.is_deleted ? (
-                                    <p className="italic text-gray-500">[Deleted]</p>
+                                    <p className="italic text-gray-300">[Deleted]</p>
                                   ) : msg?.file_url ? (
                                     msg.file_url.match(/\.(mp4|webm)$/) ? (
                                       <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />

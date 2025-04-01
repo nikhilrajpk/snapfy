@@ -26,7 +26,6 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(chat_rooms, many=True, context={'request': request})
         data = serializer.data
 
-        # Decrypt last_message.content for each room
         for room_data in data:
             if room_data['last_message'] and not room_data['last_message']['is_deleted']:
                 try:
@@ -87,11 +86,8 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         file = request.FILES.get('file')
         temp_id = request.data.get('tempId')
 
-        try:
-            fernet = Fernet(chat_room.encryption_key.encode())
-            encrypted_content = fernet.encrypt(content.encode()).decode() if content else ''
-        except Exception as e:
-            return Response({"error": f"Invalid encryption key: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        fernet = Fernet(chat_room.encryption_key.encode())
+        encrypted_content = fernet.encrypt(content.encode()).decode() if content else ''
 
         message = Message.objects.create(
             room=chat_room,
@@ -119,24 +115,23 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         chat_room.last_message_at = message.sent_at
         chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
         chat_room.save()
+        message_data['unread_count'] = chat_room.unread_count
 
         channel_layer = get_channel_layer()
         if channel_layer:
-            print(f"Broadcasting message to users: {list(chat_room.users.values_list('id', flat=True))}")
             for user in chat_room.users.all():
                 async_to_sync(channel_layer.group_send)(
                     f"user_{user.id}",
                     {
                         "type": "chat_message",
                         "message": message_data,
-                        "room_id": str(chat_room.id)
+                        "room_id": str(chat_room.id),
+                        "unread_count": chat_room.unread_count
                     }
                 )
-        else:
-            print("Channel layer not available - message not broadcasted")
-
         return Response(message_data, status=status.HTTP_201_CREATED)
-
+    
+    
     @action(detail=True, methods=['post'], url_path='delete-message')
     def delete_message(self, request, pk=None):
         message_id = request.data.get('message_id')
@@ -144,6 +139,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             message = Message.objects.get(id=message_id, room__id=pk, sender=request.user)
             message.is_deleted = True
             message.content = "[Deleted]"
+            message.file = None  # Clear file if present
             message.save()
 
             message_data = MessageSerializer(message, context={'request': request}).data
@@ -154,18 +150,30 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                 'username': message.sender.username,
                 'profile_picture': message.sender.profile_picture.url if message.sender.profile_picture else None
             }
+            message_data['file_url'] = None
+
+            chat_room = message.room
+            chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
+            chat_room.save()
+            message_data['unread_count'] = chat_room.unread_count
 
             channel_layer = get_channel_layer()
             if channel_layer:
-                for user in message.room.users.all():
+                for user in chat_room.users.all():
                     async_to_sync(channel_layer.group_send)(
                         f"user_{user.id}",
-                        {"type": "chat_message", "message": message_data, "room_id": str(pk)}
+                        {
+                            "type": "chat_message",
+                            "message": message_data,
+                            "room_id": str(pk),
+                            "unread_count": chat_room.unread_count
+                        }
                     )
             return Response({"message": "Message deleted"}, status=status.HTTP_200_OK)
         except Message.DoesNotExist:
             return Response({"error": "Message not found or not yours"}, status=status.HTTP_404_NOT_FOUND)
-
+    
+    
     @action(detail=False, methods=['get'], url_path='search-users')
     def search_users(self, request):
         query = request.query_params.get('q', '').strip()

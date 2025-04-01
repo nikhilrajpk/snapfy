@@ -13,39 +13,22 @@ class UserChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = None
         try:
-            headers = dict(self.scope['headers'])
-            print("WebSocket Headers:", headers)
-
             token = self.scope['query_string'].decode().split('token=')[1] if b'token=' in self.scope['query_string'] else None
             if not token:
-                cookie_header = headers.get(b'cookie', b'').decode('utf-8')
-                if not cookie_header:
-                    print("No cookies or token provided")
-                    await self.close(code=4003, reason="No cookies or token provided")
-                    return
-                for cookie in cookie_header.split('; '):
-                    if cookie.startswith('access_token='):
-                        token = cookie.split('=')[1]
-                        break
-                if not token:
-                    print("No access token found in cookies:", cookie_header)
-                    await self.close(code=4003, reason="No access token found")
-                    return
+                await self.close(code=4003, reason="No token provided")
+                return
 
-            print("Access Token:", token)
             self.user = await self.get_user_from_token(token)
             if not self.user:
-                print("Invalid token or user not found")
                 await self.close(code=4003, reason="Invalid token")
                 return
 
             self.user_id = str(self.user.id)
             self.group_name = f"user_{self.user_id}"
             await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.channel_layer.group_add("all_users", self.channel_name)
             await self.accept()
             await self.send(text_data=json.dumps({"type": "connection_established", "user_id": self.user_id}))
-
-            # Broadcast user online status
             await self.broadcast_user_status(True)
             print(f"User {self.user.username} connected to WebSocket")
         except Exception as e:
@@ -60,15 +43,14 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             user.is_online = True
             user.last_seen = timezone.now()
             user.save()
-            print(f"User authenticated: {user.username}")
             return user
-        except Exception as e:
-            print(f"Token validation error: {str(e)}")
+        except Exception:
             return None
 
     async def disconnect(self, close_code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            await self.channel_layer.group_discard("all_users", self.channel_name)
             await self.broadcast_user_status(False)
         print(f"User disconnected with code {close_code}")
 
@@ -81,10 +63,10 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 await self.handle_chat_message(data)
             elif message_type == 'mark_as_read':
                 await self.handle_mark_as_read(data)
-        except json.JSONDecodeError as e:
+            elif message_type == 'join_all_users':
+                await self.channel_layer.group_add("all_users", self.channel_name)
+        except json.JSONDecodeError:
             await self.send(text_data=json.dumps({"error": "Invalid message format"}))
-        except Exception as e:
-            await self.send(text_data=json.dumps({"error": f"Processing error: {str(e)}"}))
 
     async def handle_chat_message(self, data):
         room_id = data.get('room_id')
@@ -107,7 +89,8 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 {
                     "type": "chat_message",
                     "message": message_data,
-                    "room_id": str(room_id)
+                    "room_id": str(room_id),
+                    "unread_count": message_data.get('unread_count', 0)
                 }
             )
 
@@ -178,7 +161,8 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 "id": str(self.user.id),
                 "username": self.user.username,
                 "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None
-            }
+            },
+            "unread_count": room.unread_count
         }
         if temp_id:
             message_data['tempId'] = temp_id
@@ -203,11 +187,13 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         }
 
     async def chat_message(self, event):
-        await self.send(text_data=json.dumps({
+        message_data = {
             "type": "chat_message",
             "message": event["message"],
-            "room_id": event["room_id"]
-        }))
+            "room_id": event["room_id"],
+            "unread_count": event.get("unread_count", 0)  # Default to 0 if missing
+        }
+        await self.send(text_data=json.dumps(message_data))
 
     async def mark_as_read(self, event):
         await self.send(text_data=json.dumps({
