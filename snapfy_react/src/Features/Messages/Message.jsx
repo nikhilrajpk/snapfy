@@ -157,6 +157,7 @@ function Message() {
               const updatedRooms = prev.map((room) => {
                 if (String(room.id) === String(data.room_id)) {
                   const isOwnMessage = String(newMessage.sender.id) === String(user?.id);
+                  const isCurrentRoom = String(data.room_id) === String(conversationId);
                   return {
                     ...room,
                     last_message: {
@@ -165,7 +166,7 @@ function Message() {
                       is_deleted: newMessage.is_deleted,
                     },
                     last_message_at: newMessage.sent_at,
-                    unread_count: data.unread_count ?? (isOwnMessage || String(data.room_id) === String(conversationId) ? 0 : (room.unread_count || 0) + 1),
+                    unread_count: isOwnMessage || isCurrentRoom ? 0 : data.unread_count, // Use backend count unless in room or own message
                   };
                 }
                 return room;
@@ -173,6 +174,7 @@ function Message() {
               return updatedRooms.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
             });
 
+            // Only update messages if the message belongs to the current conversation
             if (String(data.room_id) === String(conversationId)) {
               setMessages((prev) => {
                 const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);

@@ -113,6 +113,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             message_data['file_url'] = message.file.url if message.file else None
 
         chat_room.last_message_at = message.sent_at
+        # Calculate unread count for recipients only
         chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
         chat_room.save()
         message_data['unread_count'] = chat_room.unread_count
@@ -120,13 +121,18 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         channel_layer = get_channel_layer()
         if channel_layer:
             for user in chat_room.users.all():
+                # Send the correct unread count based on user's perspective
+                user_specific_unread_count = (
+                    0 if user == request.user
+                    else chat_room.messages.filter(is_read=False).exclude(sender=user).count()
+                )
                 async_to_sync(channel_layer.group_send)(
                     f"user_{user.id}",
                     {
                         "type": "chat_message",
                         "message": message_data,
                         "room_id": str(chat_room.id),
-                        "unread_count": chat_room.unread_count
+                        "unread_count": user_specific_unread_count
                     }
                 )
         return Response(message_data, status=status.HTTP_201_CREATED)
