@@ -38,7 +38,9 @@ function Message() {
   const [searchResults, setSearchResults] = useState([]);
   const [initialLoad, setInitialLoad] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0); // Timer state
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [showImageModal, setShowImageModal] = useState(false); // Modal state
+  const [selectedImage, setSelectedImage] = useState(null); // Image to display in modal
   const lastMarkAsReadRef = useRef(0);
   const pendingMessages = useRef(new Map());
 
@@ -307,7 +309,7 @@ function Message() {
         setSelectedFile(audioFile);
         setFilePreview(URL.createObjectURL(audioFile));
         stream.getTracks().forEach((track) => track.stop());
-        setRecordingTime(0); // Reset timer after stopping
+        setRecordingTime(0);
       };
 
       mediaRecorderRef.current.start();
@@ -454,6 +456,16 @@ function Message() {
     if (diffInHours < 24) return format(time, 'h:mm a');
     if (diffInHours < 48) return 'Yesterday';
     return format(time, 'MMM d');
+  };
+
+  const handleImageClick = (imageUrl) => {
+    setSelectedImage(imageUrl);
+    setShowImageModal(true);
+  };
+
+  const closeImageModal = () => {
+    setShowImageModal(false);
+    setSelectedImage(null);
   };
 
   const otherUser = selectedRoom?.users?.find((u) => String(u?.id) !== String(user?.id));
@@ -640,7 +652,12 @@ function Message() {
                                     ) : msg.file_url.match(/\.(mp4|webm)$/) ? (
                                       <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
                                     ) : (
-                                      <img src={msg.file_url} alt="Shared file" className="rounded-lg max-h-60 w-auto" />
+                                      <img
+                                        src={msg.file_url}
+                                        alt="Shared file"
+                                        className="rounded-lg max-h-60 w-auto cursor-pointer"
+                                        onClick={() => handleImageClick(msg.file_url)}
+                                      />
                                     )
                                   ) : (
                                     <p className="whitespace-pre-wrap break-words">{msg?.content || '[Empty]'}</p>
@@ -787,6 +804,21 @@ function Message() {
           </div>
         </div>
       </div>
+
+      {/* Image Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 bg-transparent bg-opacity-75 flex items-center justify-center z-50" onClick={closeImageModal}>
+          <div className="relative max-w-4xl w-full p-4 bg-white rounded-lg shadow-lg border-2 border-[#198754]">
+            <img src={selectedImage} alt="Full view" className="w-full max-h-screen object-contain rounded-lg" />
+            <button
+              onClick={closeImageModal}
+              className="absolute top-2 right-2 text-white bg-red-500 hover:bg-red-600 p-2 rounded-full"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
