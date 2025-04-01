@@ -3,9 +3,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from cryptography.fernet import Fernet
-from .models import *
-from .serializers import *
+from cryptography.fernet import Fernet, InvalidToken
+import base64
+import binascii
+from .models import ChatRoom, Message, User
+from .serializers import ChatRoomSerializer, MessageSerializer, UserSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
@@ -22,7 +24,19 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
     def my_chats(self, request):
         chat_rooms = self.get_queryset().prefetch_related('users', 'messages').order_by('-last_message_at')
         serializer = self.get_serializer(chat_rooms, many=True, context={'request': request})
-        return Response(serializer.data)
+        data = serializer.data
+
+        # Decrypt last_message.content for each room
+        for room_data in data:
+            if room_data['last_message'] and not room_data['last_message']['is_deleted']:
+                try:
+                    fernet = Fernet(room_data['encryption_key'].encode())
+                    room_data['last_message']['content'] = fernet.decrypt(
+                        room_data['last_message']['content'].encode()
+                    ).decode()
+                except (InvalidToken, ValueError, binascii.Error):
+                    room_data['last_message']['content'] = '[Decryption Error]'
+        return Response(data)
 
     @action(detail=False, methods=['post'], url_path='start-chat')
     def start_chat(self, request):
@@ -46,9 +60,22 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='messages')
     def get_messages(self, request, pk=None):
         chat_room = self.get_object()
-        messages = chat_room.messages.filter(is_deleted=False).order_by('sent_at')
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data)
+        messages = chat_room.messages.all().order_by('sent_at')
+        serializer = MessageSerializer(messages, many=True, context={'request': request})
+        data = serializer.data
+
+        try:
+            fernet = Fernet(chat_room.encryption_key.encode())
+            for msg in data:
+                if not msg['is_deleted'] and msg['content']:
+                    try:
+                        msg['content'] = fernet.decrypt(msg['content'].encode()).decode()
+                    except (InvalidToken, ValueError):
+                        msg['content'] = '[Decryption Error]'
+        except (ValueError, binascii.Error) as e:
+            return Response({"error": f"Invalid encryption key: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(data)
 
     @action(detail=True, methods=['post'], url_path='send-message')
     def send_message(self, request, pk=None):
@@ -58,50 +85,55 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
 
         content = request.data.get('content', '')
         file = request.FILES.get('file')
-        temp_id = request.data.get('tempId')  # Get tempId from the frontend
-        
-        print(f"Received: content={content}, file={file}, tempId={temp_id}")  # Debug
-        
+        temp_id = request.data.get('tempId')
+
+        try:
+            fernet = Fernet(chat_room.encryption_key.encode())
+            encrypted_content = fernet.encrypt(content.encode()).decode() if content else ''
+        except Exception as e:
+            return Response({"error": f"Invalid encryption key: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         message = Message.objects.create(
             room=chat_room,
             sender=request.user,
-            content=content,
+            content=encrypted_content,
             file=file if file else None
         )
-        print(f"Message created: id={message.id}, file={message.file}")  # Debug
-        
+
         serializer = MessageSerializer(message, context={'request': request})
         message_data = serializer.data
-        message_data['id'] = str(message_data['id'])
-        message_data['room'] = str(message_data['room'])
-        message_data['sender']['id'] = str(message_data['sender']['id'])
-        if temp_id:  # Include tempId in the response if provided
+        message_data['content'] = content
+        message_data['encrypted_content'] = encrypted_content
+        message_data['id'] = str(message.id)
+        message_data['room'] = str(chat_room.id)
+        message_data['sender'] = {
+            'id': str(request.user.id),
+            'username': request.user.username,
+            'profile_picture': request.user.profile_picture.url if request.user.profile_picture else None
+        }
+        if temp_id:
             message_data['tempId'] = temp_id
+        if file:
+            message_data['file_url'] = message.file.url if message.file else None
 
-        # Update room metadata
-        chat_room.last_message = message
         chat_room.last_message_at = message.sent_at
         chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
         chat_room.save()
 
-        # Send WebSocket message to all clients in the room
         channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"chat_{chat_room.id}",
-            {"type": "chat_message", "message": message_data}
-        )
-
-        # Notify all room users about the chat room update
-        for user in chat_room.users.all():
-            async_to_sync(channel_layer.group_send)(
-                f"user_{user.id}",
-                {
-                    "type": "chat_room_update",
-                    "room_id": str(chat_room.id),
-                    "last_message": message_data,
-                    "unread_count": chat_room.messages.filter(is_read=False).exclude(sender=user).count()
-                }
-            )
+        if channel_layer:
+            print(f"Broadcasting message to users: {list(chat_room.users.values_list('id', flat=True))}")
+            for user in chat_room.users.all():
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{user.id}",
+                    {
+                        "type": "chat_message",
+                        "message": message_data,
+                        "room_id": str(chat_room.id)
+                    }
+                )
+        else:
+            print("Channel layer not available - message not broadcasted")
 
         return Response(message_data, status=status.HTTP_201_CREATED)
 
@@ -114,20 +146,26 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             message.content = "[Deleted]"
             message.save()
 
-            message_data = MessageSerializer(message).data
-            message_data['id'] = str(message_data['id'])
-            message_data['room'] = str(message_data['room'])
-            message_data['sender']['id'] = str(message_data['sender']['id'])
+            message_data = MessageSerializer(message, context={'request': request}).data
+            message_data['id'] = str(message.id)
+            message_data['room'] = str(message.room.id)
+            message_data['sender'] = {
+                'id': str(message.sender.id),
+                'username': message.sender.username,
+                'profile_picture': message.sender.profile_picture.url if message.sender.profile_picture else None
+            }
 
             channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"chat_{pk}",
-                {"type": "chat_message", "message": message_data}
-            )
+            if channel_layer:
+                for user in message.room.users.all():
+                    async_to_sync(channel_layer.group_send)(
+                        f"user_{user.id}",
+                        {"type": "chat_message", "message": message_data, "room_id": str(pk)}
+                    )
             return Response({"message": "Message deleted"}, status=status.HTTP_200_OK)
         except Message.DoesNotExist:
             return Response({"error": "Message not found or not yours"}, status=status.HTTP_404_NOT_FOUND)
-        
+
     @action(detail=False, methods=['get'], url_path='search-users')
     def search_users(self, request):
         query = request.query_params.get('q', '').strip()
@@ -136,35 +174,39 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         users = User.objects.filter(username__icontains=query).exclude(id=request.user.id)
         serializer = UserSerializer(users, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
-    
+
     @action(detail=True, methods=['post'], url_path='mark-as-read')
     def mark_as_read(self, request, pk=None):
         chat_room = self.get_object()
+        if request.user not in chat_room.users.all():
+            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
         messages = chat_room.messages.filter(is_read=False).exclude(sender=request.user)
         updated_ids = list(messages.values_list('id', flat=True))
-        
-        # Mark messages as read and set read_at timestamp
-        messages.update(is_read=True, read_at=timezone.now())
-        
-        # Update room's unread count
-        chat_room.unread_count = 0
-        chat_room.save()
-        
-        # Notify all clients in the room
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"chat_{chat_room.id}",
-            {
-                "type": "mark_as_read",
-                "room_id": str(chat_room.id),
-                "user_id": str(request.user.id),
-                "updated_ids": updated_ids,
-                "read_at": timezone.now().isoformat()
-            }
-        )
-        
+
+        if updated_ids:
+            messages.update(is_read=True, read_at=timezone.now())
+            chat_room.unread_count = 0
+            chat_room.save()
+
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                for user in chat_room.users.all():
+                    async_to_sync(channel_layer.group_send)(
+                        f"user_{user.id}",
+                        {
+                            "type": "mark_as_read",
+                            "room_id": str(chat_room.id),
+                            "user_id": str(request.user.id),
+                            "updated_ids": [str(id) for id in updated_ids],
+                            "read_at": timezone.now().isoformat()
+                        }
+                    )
+            else:
+                print("Channel layer not available")
+
         return Response({
             "message": "Messages marked as read",
             "count": len(updated_ids),
-            "updated_ids": updated_ids
+            "updated_ids": [str(id) for id in updated_ids]
         }, status=status.HTTP_200_OK)

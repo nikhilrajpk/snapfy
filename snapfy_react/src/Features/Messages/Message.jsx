@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
 import { format } from 'date-fns';
-import CryptoJS from 'crypto-js';
 import Loader from '../../utils/Loader/Loader';
 import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash } from 'react-icons/io5';
 import { BsEmojiSmile } from 'react-icons/bs';
@@ -19,13 +18,12 @@ function Message() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { user, token } = useSelector((state) => state.user);
+  const { user } = useSelector((state) => state.user);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const fileInputRef = useRef(null);
-  const socketRef = useRef(null);
-  const statusSocketRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const socketRef = useRef(null);
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
@@ -39,20 +37,20 @@ function Message() {
   const [searchResults, setSearchResults] = useState([]);
   const [initialLoad, setInitialLoad] = useState(true);
   const lastMarkAsReadRef = useRef(0);
-  const pendingMessages = useRef(new Map()); // Track pending messages by tempId
+  const pendingMessages = useRef(new Map());
 
   useEffect(() => {
     const chatContainer = messagesContainerRef.current;
-    if (chatContainer) {
+    if (chatContainer && !initialLoad) {
       const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop <= chatContainer.clientHeight + 50;
-      if (isAtBottom && !initialLoad) {
+      if (isAtBottom) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
     }
   }, [messages, initialLoad]);
 
   useEffect(() => {
-    if (!token || !user) {
+    if (!user) {
       navigate('/');
       return;
     }
@@ -61,18 +59,7 @@ function Message() {
       setIsLoading(true);
       try {
         const response = await axiosInstance.get('/chatrooms/my-chats/');
-        const rooms = response.data.map((room) => ({
-          ...room,
-          encryption_key: room.encryption_key,
-          last_message: room.last_message
-            ? {
-                ...room.last_message,
-                content: decryptMessage(room.last_message.content, room.encryption_key),
-              }
-            : null,
-          unread_count: room.unread_count || 0,
-        }));
-        setChatRooms(rooms);
+        setChatRooms(response.data);
       } catch (error) {
         console.error('Error fetching chat rooms:', error);
         dispatch(showToast({ message: 'Failed to load chats', type: 'error' }));
@@ -82,43 +69,27 @@ function Message() {
     };
 
     fetchChatRooms();
-  }, [dispatch, user, token, navigate]);
+  }, [dispatch, user, navigate]);
 
   useEffect(() => {
-    if (!conversationId || !user || !token) return;
+    if (!conversationId || !user) return;
 
     const fetchRoomAndMessages = async () => {
       setIsLoading(true);
       try {
         const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then((res) => res.data);
-        if (!roomData.encryption_key) {
-          throw new Error('Encryption key not provided by server');
-        }
-        const roomUsers = roomData.users.map((u) => ({
-          id: u.id,
-          username: u.username,
-          profile_picture: u.profile_picture || null,
-          is_online: u.is_online,
-          last_seen: u.last_seen,
-        }));
-        const room = {
-          id: roomData.id,
-          users: roomUsers,
-          encryption_key: roomData.encryption_key,
-          unread_count: roomData.unread_count || 0,
-        };
-        setSelectedRoom(room);
-    
+        setSelectedRoom(roomData);
+
         const msgs = await getMessages(conversationId);
         const processedMessages = msgs.map((msg) => ({
           ...msg,
-          content: decryptMessage(msg.content, roomData.encryption_key),
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
-          key: `${msg.id}-${msg.sent_at}`, // Unique key for initial load
+          key: `${msg.id}-${msg.sent_at}`,
+          file_url: msg.file_url || null,
         }));
         setMessages(processedMessages || []);
         setInitialLoad(true);
-    
+
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
         }
@@ -131,7 +102,7 @@ function Message() {
     };
 
     fetchRoomAndMessages();
-  }, [conversationId, dispatch, user, token, navigate]);
+  }, [conversationId, dispatch, user, navigate]);
 
   useEffect(() => {
     if (initialLoad && messages.length) {
@@ -141,329 +112,229 @@ function Message() {
   }, [initialLoad, messages]);
 
   useEffect(() => {
-    if (!conversationId || !user?.id || !token || !selectedRoom?.encryption_key) return;
-  
+    if (!user?.id) return;
+
     let socketClosedIntentionally = false;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
-  
+
     const connectWebSocket = () => {
       if (reconnectAttempts >= maxReconnectAttempts) {
         console.error('Max WebSocket reconnect attempts reached');
         dispatch(showToast({ message: 'Lost connection to chat server', type: 'error' }));
         return;
       }
-  
-      const socket = new WebSocket(`ws://localhost:8000/ws/chat/${conversationId}/?token=${token}`);
+
+      const accessToken = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('access_token='))
+        ?.split('=')[1];
+      const socket = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
       socketRef.current = socket;
-  
+
       socket.onopen = () => {
-        console.log('Chat WebSocket connection established');
-        socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+        console.log('User WebSocket connection established');
         reconnectAttempts = 0;
+        if (conversationId) {
+          socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+        }
       };
-  
+
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('WebSocket data:', data);
-  
-        if (data.type === 'chat_message') {
-          const message = data.message;
-          const key = selectedRoom?.encryption_key;
-          if (!key) {
-            console.error('Encryption key missing for decryption');
-            return;
-          }
-  
-          const newMessage = {
-            ...message,
-            content: decryptMessage(message.content, key),
-            file_url: message.file_url || null,
-            sent_at: message.sent_at || new Date().toISOString(),
-            is_read: message.is_read || false,
-            is_deleted: message.is_deleted || false,
-            sender: {
-              id: message.sender.id,
-              username: message.sender.username || 'Unknown',
-              profile_picture: message.sender.profile_picture || null,
-            },
-            key: `${message.id}-${message.sent_at}`, // Unique key
-          };
-  
-          setMessages((prev) => {
-            // Check if this is a response to a pending message
-            if (pendingMessages.current.has(message.tempId)) {
-              const tempId = message.tempId;
-              pendingMessages.current.delete(tempId);
-              return prev.map((msg) =>
-                msg.tempId === tempId ? { ...newMessage, tempId } : msg
-              );
-            }
-            // Prevent duplicates by checking if message already exists
-            if (prev.some((msg) => String(msg.id) === String(message.id))) {
-              return prev;
-            }
-            return [...prev, newMessage];
-          });
-  
-          setChatRooms((prev) =>
-            prev.map((room) =>
-              String(room.id) === String(data.room_id)
-                ? {
+
+        switch (data.type) {
+          case 'connection_established':
+            console.log('Connection established:', data.user_id);
+            break;
+
+          case 'chat_message': {
+            const message = data.message;
+            const newMessage = {
+              ...message,
+              file_url: message.file_url || null,
+              sent_at: message.sent_at || new Date().toISOString(),
+              is_read: message.is_read || false,
+              is_deleted: message.is_deleted || false,
+              sender: {
+                id: message.sender.id,
+                username: message.sender.username || 'Unknown',
+                profile_picture: message.sender.profile_picture || null,
+              },
+              key: `${message.id}-${message.sent_at}`,
+            };
+
+            // Update chatRooms for all messages
+            setChatRooms((prev) => {
+              const updatedRooms = prev.map((room) => {
+                if (String(room.id) === String(data.room_id)) {
+                  const isOwnMessage = String(newMessage.sender.id) === String(user?.id);
+                  return {
                     ...room,
                     last_message: {
-                      ...newMessage,
-                      content: decryptMessage(message.content, room.encryption_key),
+                      content: newMessage.is_deleted ? '[Deleted]' : newMessage.content,
+                      file_url: newMessage.file_url,
+                      is_deleted: newMessage.is_deleted,
                     },
                     last_message_at: newMessage.sent_at,
-                    unread_count:
-                      String(newMessage.sender.id) !== String(user?.id)
-                        ? (room.unread_count || 0) + 1
-                        : room.unread_count,
-                  }
-                : room
-            ).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at))
-          );
-  
-          if (
-            String(data.room_id) === String(conversationId) &&
-            String(newMessage.sender.id) !== String(user?.id)
-          ) {
-            const now = Date.now();
-            if (now - lastMarkAsReadRef.current > 1000) {
-              lastMarkAsReadRef.current = now;
-              socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+                    unread_count: isOwnMessage || String(data.room_id) === String(conversationId)
+                      ? 0
+                      : (room.unread_count || 0) + 1,
+                  };
+                }
+                return room;
+              });
+              return updatedRooms.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
+            });
+
+            // Only append to current conversation
+            if (String(data.room_id) !== String(conversationId)) {
+              console.log(`Message for room ${data.room_id} ignored (current: ${conversationId})`);
+              return;
             }
+
+            setMessages((prev) => {
+              if (message.tempId && pendingMessages.current.has(message.tempId)) {
+                const tempId = message.tempId;
+                pendingMessages.current.delete(tempId);
+                return prev.map((msg) =>
+                  msg.tempId === tempId ? { ...newMessage, tempId } : msg
+                );
+              }
+              if (prev.some((msg) => String(msg.id) === String(message.id))) {
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
+
+            if (
+              String(data.room_id) === String(conversationId) &&
+              String(newMessage.sender.id) !== String(user?.id)
+            ) {
+              const now = Date.now();
+              if (now - lastMarkAsReadRef.current > 1000) {
+                lastMarkAsReadRef.current = now;
+                socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+              }
+            }
+            break;
           }
-        } else if (data.type === 'mark_as_read') {
-          setMessages((prev) =>
-            prev.map((msg) =>
-              data.updated_ids.map(String).includes(String(msg.id))
-                ? { ...msg, is_read: true, read_at: data.read_at || new Date().toISOString() }
-                : msg
-            )
-          );
-  
-          setChatRooms((prev) =>
-            prev.map((room) =>
-              String(room.id) === String(data.room_id) ? { ...room, unread_count: 0 } : room
-            )
-          );
-  
-          setSelectedRoom((prev) =>
-            prev && String(prev.id) === String(data.room_id) ? { ...prev, unread_count: 0 } : prev
-          );
-        } else if (data.type === 'chat_room_update') {
-          setChatRooms((prev) =>
-            prev.map((room) =>
-              String(room.id) === String(data.room_id)
-                ? {
+
+          case 'mark_as_read':
+            if (String(data.room_id) === String(conversationId)) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  data.updated_ids.includes(String(msg.id))
+                    ? { ...msg, is_read: true, read_at: data.read_at || new Date().toISOString() }
+                    : msg
+                )
+              );
+            }
+            setChatRooms((prev) =>
+              prev.map((room) =>
+                String(room.id) === String(data.room_id) ? { ...room, unread_count: 0 } : room
+              )
+            );
+            setSelectedRoom((prev) =>
+              prev && String(prev.id) === String(data.room_id) ? { ...prev, unread_count: 0 } : prev
+            );
+            break;
+
+          case 'user_status':
+            setChatRooms((prev) =>
+              prev.map((room) => {
+                const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
+                if (String(otherUser.id) === String(data.user_id)) {
+                  return {
                     ...room,
-                    last_message: {
-                      ...data.last_message,
-                      content: decryptMessage(data.last_message.content, room.encryption_key),
-                    },
-                    unread_count: data.unread_count,
-                    last_message_at: data.last_message.sent_at,
+                    users: room.users.map((u) =>
+                      String(u.id) === String(data.user_id)
+                        ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
+                        : u
+                    ),
+                  };
+                }
+                return room;
+              })
+            );
+            setSelectedRoom((prev) =>
+              prev && prev.users.some((u) => String(u.id) === String(data.user_id))
+                ? {
+                    ...prev,
+                    users: prev.users.map((u) =>
+                      String(u.id) === String(data.user_id)
+                        ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
+                        : u
+                    ),
                   }
-                : room
-            ).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at))
-          );
-  
-          if (String(selectedRoom?.id) === String(data.room_id)) {
-            setSelectedRoom((prev) => ({
-              ...prev,
-              unread_count: data.unread_count,
-            }));
-          }
+                : prev
+            );
+            break;
         }
       };
-  
-      socket.onerror = (error) => console.error('Chat WebSocket error:', error);
-  
+
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
       socket.onclose = (event) => {
+        console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
         if (event.code !== 1000 && !socketClosedIntentionally) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
           setTimeout(() => {
             reconnectAttempts++;
+            console.log(`Reconnecting WebSocket, attempt ${reconnectAttempts}`);
             connectWebSocket();
           }, delay);
         }
       };
     };
-  
+
     connectWebSocket();
+
     return () => {
       socketClosedIntentionally = true;
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.close(1000, 'Component unmounted');
       }
     };
-  }, [conversationId, user?.id, token, selectedRoom?.encryption_key, dispatch]);
-
-  useEffect(() => {
-    if (!user?.id || !token) return;
-  
-    let socketClosedIntentionally = false;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 5;
-  
-    const connectStatusWebSocket = () => {
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        console.error('Max Status WebSocket reconnect attempts reached');
-        dispatch(showToast({ message: 'Lost connection to status server', type: 'error' }));
-        return;
-      }
-  
-      const socket = new WebSocket(`ws://localhost:8000/ws/user/${user.id}/?token=${token}`);
-      statusSocketRef.current = socket;
-  
-      socket.onopen = () => {
-        console.log('Status WebSocket connection established');
-        reconnectAttempts = 0;
-        const pingInterval = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000);
-  
-        socket.onclose = () => clearInterval(pingInterval);
-      };
-  
-      socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'chat_room_update') {
-          setChatRooms((prev) =>
-            prev.map((room) =>
-              String(room.id) === String(data.room_id)
-                ? {
-                    ...room,
-                    last_message: {
-                      ...data.last_message,
-                      content: decryptMessage(data.last_message.content, room.encryption_key),
-                    },
-                    unread_count: data.unread_count,
-                    last_message_at: data.last_message.sent_at,
-                  }
-                : room
-            ).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at))
-          );
-        } else if (data.type === 'user_status_update') {
-          setSelectedRoom((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              users: prev.users.map((u) =>
-                String(u.id) === String(data.user_id)
-                  ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
-                  : u
-              ),
-            };
-          });
-          setChatRooms((prev) =>
-            prev.map((room) => ({
-              ...room,
-              users: room.users.map((u) =>
-                String(u.id) === String(data.user_id)
-                  ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
-                  : u
-              ),
-            }))
-          );
-        }
-      };
-  
-      socket.onerror = (error) => console.error('Status WebSocket error:', error);
-  
-      socket.onclose = (event) => {
-        if (event.code !== 1000 && !socketClosedIntentionally) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          setTimeout(() => {
-            reconnectAttempts++;
-            connectStatusWebSocket();
-          }, delay);
-        }
-      };
-    };
-  
-    connectStatusWebSocket();
-    return () => {
-      socketClosedIntentionally = true;
-      if (statusSocketRef.current?.readyState === WebSocket.OPEN) {
-        statusSocketRef.current.close(1000, 'Component unmounted');
-      }
-    };
-  }, [user?.id, token]);
-
-  const encryptMessage = (text, key) => {
-    if (!text || !key) return text;
-    const derivedKey = CryptoJS.SHA256(key).toString();
-    return CryptoJS.AES.encrypt(text, derivedKey).toString();
-  };
-
-  const decryptMessage = (ciphertext, key) => {
-    if (!ciphertext || !key || !ciphertext.startsWith('U2FsdGVkX1')) {
-      return ciphertext || '[No Content]';
-    }
-    try {
-      const derivedKey = CryptoJS.SHA256(key).toString();
-      const bytes = CryptoJS.AES.decrypt(ciphertext, derivedKey);
-      const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-      return decrypted || '[Decryption Failed: Empty]';
-    } catch (e) {
-      console.error('Decryption error:', e.message);
-      return '[Decryption Failed]';
-    }
-  };
-
-  const updateChatRoomsOrder = (newMessage) => {
-    setChatRooms((prev) => {
-      const updatedRooms = prev.map((room) => {
-        if (String(room.id) === String(newMessage.room)) {
-          return {
-            ...room,
-            last_message: {
-              ...newMessage,
-              content: newMessage.is_deleted ? '[Deleted]' : decryptMessage(newMessage.content, room.encryption_key),
-            },
-            last_message_at: newMessage.sent_at,
-            unread_count: String(newMessage.sender.id) !== String(user?.id) && !newMessage.is_read
-              ? (room.unread_count || 0) + 1
-              : room.unread_count,
-          };
-        }
-        return room;
-      });
-      return updatedRooms.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
-    });
-  };
+  }, [user?.id, conversationId, dispatch]);
 
   const handleSendMessage = async () => {
     if (!message.trim() && !selectedFile) return;
-    if (!selectedRoom?.id || !selectedRoom.encryption_key) return;
-  
+    if (!selectedRoom?.id) return;
+
     setIsSending(true);
+    const tempId = `${user.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     try {
       const formData = new FormData();
       const plainContent = message.trim();
-      const encryptedContent = encryptMessage(plainContent, selectedRoom.encryption_key);
-      const tempId = `${user.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      if (plainContent) formData.append('content', encryptedContent);
+
+      if (plainContent) formData.append('content', plainContent);
       if (selectedFile) formData.append('file', selectedFile);
-      formData.append('room', selectedRoom.id);
       formData.append('tempId', tempId);
-  
-      // Don't add locally; wait for WebSocket update
-      // pendingMessages.current.set(tempId, { tempId, content: plainContent, sent_at: new Date().toISOString() });
-      // setMessages((prev) => [...prev, { tempId, content: plainContent, sender: user, key: tempId, sent_at: new Date().toISOString() }]);
-  
+
+      const optimisticMessage = {
+        tempId,
+        content: plainContent,
+        sender: user,
+        sent_at: new Date().toISOString(),
+        key: tempId,
+        is_read: false,
+        is_deleted: false,
+        file_url: selectedFile ? URL.createObjectURL(selectedFile) : null,
+      };
+      pendingMessages.current.set(tempId, optimisticMessage);
+      setMessages((prev) => [...prev, optimisticMessage]);
+
       const response = await axiosInstance.post(
         `/chatrooms/${selectedRoom.id}/send-message/`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
-  
+
       setMessage('');
       setSelectedFile(null);
       setFilePreview(null);
@@ -472,6 +343,8 @@ function Message() {
     } catch (error) {
       console.error('Error sending message:', error);
       dispatch(showToast({ message: 'Failed to send message', type: 'error' }));
+      setMessages((prev) => prev.filter((msg) => !msg.tempId || msg.tempId !== tempId));
+      pendingMessages.current.delete(tempId);
     } finally {
       setIsSending(false);
     }
@@ -480,35 +353,20 @@ function Message() {
   const handleStartChat = async (username) => {
     try {
       const response = await axiosInstance.post('/chatrooms/start-chat/', { username });
-      const roomUsers = response.data.users.map((u) => ({
-        id: u.id,
-        username: u.username,
-        profile_picture: u.profile_picture || null,
-        is_online: u.is_online,
-        last_seen: u.last_seen,
-      }));
-      const newRoom = {
-        id: response.data.id,
-        users: roomUsers,
-        last_message_at: response.data.last_message_at,
-        encryption_key: response.data.encryption_key,
-        unread_count: 0,
-      };
+      const newRoom = response.data;
       setSelectedRoom(newRoom);
       setChatRooms((prev) => {
-        if (!prev.some((r) => String(r.id) === String  (newRoom.id))) return [newRoom, ...prev];
+        if (!prev.some((r) => String(r.id) === String(newRoom.id))) return [newRoom, ...prev];
         return prev;
       });
       navigate(`/messages/${newRoom.id}`);
       const msgs = await getMessages(newRoom.id);
-      setMessages(
-        msgs.map((msg) => ({
-          ...msg,
-          content: decryptMessage(msg.content, newRoom.encryption_key),
-          sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
-          key: `${msg.id}-${msg.sent_at}`,
-        })) || []
-      );
+      setMessages(msgs.map((msg) => ({
+        ...msg,
+        sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
+        key: `${msg.id}-${msg.sent_at}`,
+        file_url: msg.file_url || null,
+      })) || []);
     } catch (error) {
       console.error('Error starting chat:', error);
       dispatch(showToast({ message: 'Failed to start chat', type: 'error' }));
@@ -521,17 +379,9 @@ function Message() {
       if (response.status === 200) {
         setMessages((prev) =>
           prev.map((msg) =>
-            String(msg.id) === String(messageId) ? { ...msg, is_deleted: true, content: '[Deleted]' } : msg
+            String(msg.id) === String(messageId) ? { ...msg, is_deleted: true, content: '[Deleted]', file_url: null } : msg
           )
         );
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(
-            JSON.stringify({
-              type: 'chat_message',
-              message: { id: messageId, room: selectedRoom.id, is_deleted: true },
-            })
-          );
-        }
       }
     } catch (error) {
       console.error('Error deleting message:', error.response?.data || error.message);
@@ -639,14 +489,18 @@ function Message() {
                     ) : chatRooms.length ? (
                       chatRooms.map((room) => {
                         const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
-                        const lastMessage = room.last_message?.content || 'No messages yet';
+                        const lastMessage = room.last_message?.is_deleted
+                          ? '[Deleted]'
+                          : room.last_message?.file_url
+                          ? '[Media]'
+                          : room.last_message?.content || 'No messages yet';
                         const unreadCount = room.unread_count || 0;
 
                         return (
                           <div
                             key={room.id}
                             className={`p-4 border-b border-gray-100 hover:bg-orange-50 cursor-pointer ${
-                              selectedRoom?.id === room.id ? 'bg-orange-100' : ''
+                              String(selectedRoom?.id) === String(room.id) ? 'bg-orange-100' : ''
                             }`}
                             onClick={() => navigate(`/messages/${room.id}`)}
                           >
@@ -735,7 +589,7 @@ function Message() {
                         ) : messages.length ? (
                           messages.map((msg) => (
                             <div
-                              key={msg.key} // Use the unique key
+                              key={msg.key}
                               className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
                             >
                               {String(msg?.sender?.id) !== String(user?.id) && (
@@ -761,9 +615,9 @@ function Message() {
                                   {msg?.is_deleted ? (
                                     <p className="italic text-gray-500">[Deleted]</p>
                                   ) : msg?.file_url ? (
-                                    msg.file_url.includes('video') ? (
+                                    msg.file_url.match(/\.(mp4|webm)$/) ? (
                                       <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
-                                    ) : msg.file_url.includes('audio') ? (
+                                    ) : msg.file_url.match(/\.(mp3|wav)$/) ? (
                                       <audio controls className="w-full h-10">
                                         <source src={msg.file_url} type="audio/mpeg" />
                                       </audio>
@@ -843,7 +697,7 @@ function Message() {
                             type="file"
                             ref={fileInputRef}
                             className="hidden"
-                            accept="image/*,audio/mpeg,video/mp4"
+                            accept="image/*,audio/*,video/*"
                             onChange={handleFileSelected}
                           />
                           <textarea

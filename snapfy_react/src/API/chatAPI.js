@@ -1,9 +1,15 @@
 // frontend/src/API/chatAPI.js
 import axiosInstance from '../axiosInstance';
 
-export const getMessages = async (roomId) => {
-  const response = await axiosInstance.get(`/chatrooms/${roomId}/messages/`);
-  return response.data;
+
+export const getMessages = async (conversationId) => {
+  try {
+    const response = await axiosInstance.get(`/chatrooms/${conversationId}/messages/`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    throw error;
+  }
 };
 
 export const sendMessage = async (roomId, content, file) => {

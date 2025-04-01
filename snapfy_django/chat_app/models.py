@@ -4,10 +4,11 @@ from user_app.models import User
 from cloudinary.models import CloudinaryField
 import os
 from django.utils import timezone
+from cryptography.fernet import Fernet
 
 def generate_encryption_key():
-    """Generate a random 32-byte (64-char hex) encryption key."""
-    return os.urandom(32).hex()
+    """Generate a Fernet-compatible encryption key."""
+    return Fernet.generate_key().decode()
 
 class ChatRoom(models.Model):
     users = models.ManyToManyField(User, related_name="chat_rooms")
@@ -21,7 +22,7 @@ class ChatRoom(models.Model):
         self.save()
     
     def update_unread_count(self):
-        self.unread_count = self.messages.filter(is_read=False).exclude(sender=self.request.user).count()
+        self.unread_count = self.messages.filter(is_read=False).exclude(sender__in=self.users.all()).count()
         self.save()
 
     def __str__(self):

@@ -307,6 +307,7 @@ CHANNEL_LAYERS = {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
             "hosts": [('127.0.0.1', 6379)],
+            "symmetric_encryption_keys": [SECRET_KEY],
             'capacity': 1000,  # Increase from default 100
             'expiry': 60,
         },

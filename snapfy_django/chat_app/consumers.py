@@ -2,44 +2,75 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken
-from .models import ChatRoom, Message
 from channels.db import database_sync_to_async
 from django.utils import timezone
+from .models import ChatRoom, Message
+from cryptography.fernet import Fernet
 
 User = get_user_model()
 
-class ChatConsumer(AsyncWebsocketConsumer):
+class UserChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.room_id = self.scope['url_route']['kwargs']['room_id']
-        self.room_group_name = f"chat_{self.room_id}"
+        self.user = None
         try:
-            token = self.scope['query_string'].decode().split('token=')[1].split('&')[0]
-            user = await self.get_user_from_token(token)
-            if not user or not await self.is_user_in_room(user):
-                await self.close(code=4003, reason="Invalid token or not in room")
+            headers = dict(self.scope['headers'])
+            print("WebSocket Headers:", headers)
+
+            token = self.scope['query_string'].decode().split('token=')[1] if b'token=' in self.scope['query_string'] else None
+            if not token:
+                cookie_header = headers.get(b'cookie', b'').decode('utf-8')
+                if not cookie_header:
+                    print("No cookies or token provided")
+                    await self.close(code=4003, reason="No cookies or token provided")
+                    return
+                for cookie in cookie_header.split('; '):
+                    if cookie.startswith('access_token='):
+                        token = cookie.split('=')[1]
+                        break
+                if not token:
+                    print("No access token found in cookies:", cookie_header)
+                    await self.close(code=4003, reason="No access token found")
+                    return
+
+            print("Access Token:", token)
+            self.user = await self.get_user_from_token(token)
+            if not self.user:
+                print("Invalid token or user not found")
+                await self.close(code=4003, reason="Invalid token")
                 return
-            self.scope['user'] = user
-            await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+
+            self.user_id = str(self.user.id)
+            self.group_name = f"user_{self.user_id}"
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
             await self.accept()
-            print(f"User {user.username} connected to room {self.room_id}")
+            await self.send(text_data=json.dumps({"type": "connection_established", "user_id": self.user_id}))
+
+            # Broadcast user online status
+            await self.broadcast_user_status(True)
+            print(f"User {self.user.username} connected to WebSocket")
         except Exception as e:
+            print(f"WebSocket connection error: {str(e)}")
             await self.close(code=4001, reason=f"Connection error: {str(e)}")
 
     @database_sync_to_async
     def get_user_from_token(self, token):
         try:
             access_token = AccessToken(token)
-            return User.objects.get(id=access_token['user_id'])
-        except Exception:
+            user = User.objects.get(id=access_token['user_id'])
+            user.is_online = True
+            user.last_seen = timezone.now()
+            user.save()
+            print(f"User authenticated: {user.username}")
+            return user
+        except Exception as e:
+            print(f"Token validation error: {str(e)}")
             return None
 
-    @database_sync_to_async
-    def is_user_in_room(self, user):
-        return ChatRoom.objects.filter(id=self.room_id, users=user).exists()
-
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
-        print(f"Disconnected from room {self.room_id} with code {close_code}")
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            await self.broadcast_user_status(False)
+        print(f"User disconnected with code {close_code}")
 
     async def receive(self, text_data):
         try:
@@ -47,44 +78,135 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message_type = data.get('type')
 
             if message_type == 'chat_message':
-                # Only handle deletions or other WebSocket-specific actions, not new messages
-                message = data.get('message')
-                if message and message.get('is_deleted', False):
-                    result = await self.save_message(message)
-                    await self.channel_layer.group_send(
-                        self.room_group_name,
-                        {"type": "chat_message", "message": result["message_data"]}
-                    )
-
+                await self.handle_chat_message(data)
             elif message_type == 'mark_as_read':
-                result = await self.mark_messages_read()
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "mark_as_read",
-                        "room_id": result["room_id"],
-                        "user_id": result["user_id"],
-                        "updated_ids": result["updated_ids"],
-                        "read_at": result["read_at"]
-                    }
-                )
+                await self.handle_mark_as_read(data)
         except json.JSONDecodeError as e:
-            print(f"Invalid JSON: {str(e)}")
             await self.send(text_data=json.dumps({"error": "Invalid message format"}))
         except Exception as e:
-            print(f"Error in receive: {str(e)}")
             await self.send(text_data=json.dumps({"error": f"Processing error: {str(e)}"}))
+
+    async def handle_chat_message(self, data):
+        room_id = data.get('room_id')
+        content = data.get('content')
+        temp_id = data.get('tempId')
+
+        if not room_id or not content:
+            await self.send(text_data=json.dumps({"error": "Room ID and content required"}))
+            return
+
+        if not await self.is_user_in_room(room_id):
+            await self.send(text_data=json.dumps({"error": "Not authorized for this room"}))
+            return
+
+        message_data = await self.save_message(room_id, content, temp_id)
+        room_users = await self.get_room_users(room_id)
+        for user in room_users:
+            await self.channel_layer.group_send(
+                f"user_{user.id}",
+                {
+                    "type": "chat_message",
+                    "message": message_data,
+                    "room_id": str(room_id)
+                }
+            )
+
+    async def handle_mark_as_read(self, data):
+        room_id = data.get('room_id')
+        if not await self.is_user_in_room(room_id):
+            return
+
+        result = await self.mark_messages_read(room_id)
+        room_users = await self.get_room_users(room_id)
+        for user in room_users:
+            await self.channel_layer.group_send(
+                f"user_{user.id}",
+                {
+                    "type": "mark_as_read",
+                    "room_id": str(result["room_id"]),
+                    "user_id": str(result["user_id"]),
+                    "updated_ids": result["updated_ids"],
+                    "read_at": result["read_at"]
+                }
+            )
+
+    async def broadcast_user_status(self, is_online):
+        await self.channel_layer.group_send(
+            "all_users",
+            {
+                "type": "user_status",
+                "user_id": str(self.user.id),
+                "is_online": is_online,
+                "last_seen": timezone.now().isoformat() if not is_online else None
+            }
+        )
+
+    @database_sync_to_async
+    def is_user_in_room(self, room_id):
+        return ChatRoom.objects.filter(id=room_id, users=self.user).exists()
 
     @database_sync_to_async
     def get_room_users(self, room_id):
         room = ChatRoom.objects.get(id=room_id)
         return list(room.users.all())
 
+    @database_sync_to_async
+    def save_message(self, room_id, content, temp_id=None):
+        room = ChatRoom.objects.get(id=room_id)
+        fernet = Fernet(room.encryption_key.encode())
+        encrypted_content = fernet.encrypt(content.encode()).decode()
+
+        message = Message.objects.create(
+            room=room,
+            sender=self.user,
+            content=encrypted_content
+        )
+
+        room.last_message_at = message.sent_at
+        room.unread_count = room.messages.filter(is_read=False).exclude(sender=self.user).count()
+        room.save()
+
+        message_data = {
+            "id": str(message.id),
+            "room": str(room.id),
+            "content": content,
+            "encrypted_content": encrypted_content,
+            "sent_at": message.sent_at.isoformat(),
+            "is_read": message.is_read,
+            "is_deleted": message.is_deleted,
+            "sender": {
+                "id": str(self.user.id),
+                "username": self.user.username,
+                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None
+            }
+        }
+        if temp_id:
+            message_data['tempId'] = temp_id
+        return message_data
+
+    @database_sync_to_async
+    def mark_messages_read(self, room_id):
+        room = ChatRoom.objects.get(id=room_id)
+        messages = room.messages.filter(is_read=False).exclude(sender=self.user)
+        updated_ids = list(messages.values_list('id', flat=True))
+
+        if updated_ids:
+            messages.update(is_read=True, read_at=timezone.now())
+            room.unread_count = 0
+            room.save()
+
+        return {
+            "room_id": str(room_id),
+            "user_id": str(self.user.id),
+            "updated_ids": [str(id) for id in updated_ids],
+            "read_at": timezone.now().isoformat() if updated_ids else None
+        }
+
     async def chat_message(self, event):
         await self.send(text_data=json.dumps({
             "type": "chat_message",
             "message": event["message"],
-            "room_id": str(self.room_id)
+            "room_id": event["room_id"]
         }))
 
     async def mark_as_read(self, event):
@@ -96,108 +218,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "read_at": event["read_at"]
         }))
 
-    async def chat_room_update(self, event):
+    async def user_status(self, event):
         await self.send(text_data=json.dumps({
-            "type": "chat_room_update",
-            "room_id": event["room_id"],
-            "last_message": event["last_message"],
-            "unread_count": event["unread_count"]
+            "type": "user_status",
+            "user_id": event["user_id"],
+            "is_online": event["is_online"],
+            "last_seen": event["last_seen"]
         }))
-
-    @database_sync_to_async
-    def save_message(self, message_data):
-        room = ChatRoom.objects.get(id=self.room_id)
-        sender = self.scope['user']
-        message = Message.objects.create(
-            room=room,
-            sender=sender,
-            content=message_data.get('content', ''),
-            file_url=message_data.get('file_url', '')
-        )
-
-        if message_data.get('is_deleted', False):
-            message.is_deleted = True
-            message.content = '[Deleted]'
-            message.save()
-
-        room.last_message = message
-        room.last_message_at = message.sent_at
-        room.unread_count = room.messages.filter(is_read=False).exclude(sender=sender).count()
-        room.save()
-
-        message_data_response = {
-            "id": str(message.id),
-            "room": str(room.id),
-            "content": message.content,  #encrypted content
-            "file_url": message.file_url,
-            "sent_at": message.sent_at.isoformat(),
-            "is_read": message.is_read,
-            "is_deleted": message.is_deleted,
-            "sender": {
-                "id": str(sender.id),
-                "username": sender.username,
-                "profile_picture": sender.profile_picture.url if sender.profile_picture else None
-            }
-        }
-
-        # Including tempId in the response
-        if 'tempId' in message_data:
-            message_data_response['tempId'] = message_data['tempId']
-
-        print(f"Saved message: {message_data_response}, Room encryption_key: {room.encryption_key}")
-        return {
-            "message_data": message_data_response,
-            "room_id": room.id,
-            "unread_count": room.unread_count
-        }
-
-    @database_sync_to_async
-    def mark_messages_read(self):
-        room = ChatRoom.objects.get(id=self.room_id)
-        messages = room.messages.filter(is_read=False).exclude(sender=self.scope['user'])
-        updated_ids = list(messages.values_list('id', flat=True))
-
-        if updated_ids:
-            messages.update(is_read=True, read_at=timezone.now())
-            room.unread_count = room.messages.filter(is_read=False).exclude(sender=self.scope['user']).count()
-            room.save()
-
-        return {
-            "room_id": str(room.id),
-            "user_id": str(self.scope['user'].id),
-            "updated_ids": updated_ids,
-            "read_at": timezone.now().isoformat() if updated_ids else None
-        }
-
-class StatusConsumer(AsyncWebsocketConsumer):
-    async def connect(self):
-        self.user_id = self.scope['url_route']['kwargs']['user_id']
-        self.group_name = f"user_{self.user_id}"
-        try:
-            token = self.scope['query_string'].decode().split('token=')[1].split('&')[0]
-            user = await self.get_user_from_token(token)
-            if not user or str(user.id) != self.user_id:
-                await self.close(code=4003, reason="Invalid token or user mismatch")
-                return
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
-            await self.accept()
-            print(f"User {user.username} connected to status {self.user_id}")
-        except Exception as e:
-            await self.close(code=4001, reason=f"Connection error: {str(e)}")
-
-    @database_sync_to_async
-    def get_user_from_token(self, token):
-        try:
-            access_token = AccessToken(token)
-            return User.objects.get(id=access_token['user_id'])
-        except Exception:
-            return None
-
-    async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
-
-    async def user_status_update(self, event):
-        await self.send(text_data=json.dumps(event))
-
-    async def chat_room_update(self, event):
-        await self.send(text_data=json.dumps(event))
