@@ -354,9 +354,9 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     } catch (error) {
       console.error('Error adding comment/reply:', error);
       if (error.response?.status === 401) {
-        await userLogout();
-        dispatch(logout());
-        navigate('/');
+        // await userLogout();
+        // dispatch(logout());
+        // navigate('/');
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
       } else {
         dispatch(showToast({ message: 'Error adding comment/reply', type: 'error' }));

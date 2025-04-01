@@ -52,9 +52,9 @@ const Post = ({
         setLikes(countResponse.likes);
       } catch (error) {
         if (error.response?.status === 401) {
-          await userLogout();
-          dispatch(logout());
-          navigate('/');
+          // await userLogout();
+          // dispatch(logout());
+          // navigate('/');
           dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
         } else {
           console.error('Error checking initial status:', error);
@@ -78,9 +78,9 @@ const Post = ({
       dispatch(showToast({ message: response.is_liked ? 'Post liked' : 'Post unliked', type: 'success' }));
     } catch (error) {
       if (error.response?.status === 401) {
-        await userLogout();
-        dispatch(logout());
-        navigate('/');
+        // await userLogout();
+        // dispatch(logout());
+        // navigate('/');
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
       } else {
         dispatch(showToast({ message: 'Failed to like post', type: 'error' }));
@@ -103,9 +103,9 @@ const Post = ({
       }
     } catch (error) {
       if (error.response?.status === 401) {
-        await userLogout();
-        dispatch(logout());
-        navigate('/');
+        // await userLogout();
+        // dispatch(logout());
+        // navigate('/');
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
       } else {
         console.error('Error saving/removing post:', error);

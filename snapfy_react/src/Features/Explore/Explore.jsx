@@ -65,8 +65,8 @@ const ExplorePage = () => {
     if (error) {
       if (error.response?.status === 401) {
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-        dispatch(logout());
-        navigate('/');
+        // dispatch(logout());
+        // navigate('/');
       } else {
         dispatch(showToast({ message: `Failed to load posts: ${error.message}. Please try again.`, type: 'error' }));
       }

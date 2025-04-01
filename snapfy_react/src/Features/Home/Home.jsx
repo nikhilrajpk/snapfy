@@ -38,6 +38,7 @@ function Home() {
     if (error) {
       if (error.response?.status === 401) {
         console.log('401 detected, waiting for token refresh');
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
         // Rely on axios interceptor instead of immediate logout
       } else {
         dispatch(showToast({ message: `Failed to load posts: ${error.message}`, type: 'error' }));

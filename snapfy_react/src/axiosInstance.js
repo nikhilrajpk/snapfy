@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { store } from './redux/store';
 import { logout } from './redux/slices/userSlice';
+import { showToast } from './redux/slices/toastSlice';
 
 const axiosInstance = axios.create({
   baseURL: 'http://127.0.0.1:8000/api/',
@@ -58,8 +59,10 @@ axiosInstance.interceptors.response.use(
         return axiosInstance(originalRequest);
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError);
-        store.dispatch(logout());
-        window.location.href = '/';
+        // await axios.post('http://127.0.0.1:8000/api/logout/')
+        // store.dispatch(logout());
+        store.dispatch(showToast({'message':'Please Logout due to token refresh failed', 'type':'warning'}))
+        // window.location.href = '/';
         return Promise.reject(refreshError);
       }
     }

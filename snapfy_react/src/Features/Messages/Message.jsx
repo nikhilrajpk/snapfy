@@ -257,12 +257,20 @@ function Message() {
 
     connectWebSocket();
 
+    // Add a timer to refresh last seen display every 60 seconds
+    const intervalId = setInterval(() => {
+      setChatRooms((prev) => [...prev]); // Trigger re-render by creating a new array reference
+      setSelectedRoom((prev) => (prev ? { ...prev } : null)); // Trigger re-render for selected room
+    }, 60000); // 60 seconds
+
     return () => {
       socketClosedIntentionally = true;
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.close(1000, 'Component unmounted');
       }
+      clearInterval(intervalId); // Clean up the interval on unmount
     };
+    
   }, [user?.id, conversationId, dispatch]);
 
   const handleSendMessage = async () => {

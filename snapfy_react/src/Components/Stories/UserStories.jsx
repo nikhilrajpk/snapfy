@@ -947,8 +947,8 @@ useEffect(() => {
       const handleLogout = async () => {
         try {
           // await userLogout();
-          dispatch(logout());
-          navigate('/');
+          // dispatch(logout());
+          // navigate('/');
           dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
         } catch (logoutError) {
           console.error('Logout error:', logoutError);

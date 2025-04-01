@@ -134,9 +134,9 @@ const Suggestions = () => {
       } catch (error) {
         console.error('Error retrieving users in suggestions:', error);
         if (error.response?.status === 401) {
-          await userLogout();
-          dispatch(logout());
-          navigate('/');
+          // await userLogout();
+          // dispatch(logout());
+          // navigate('/');
           dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
         } else {
           dispatch(showToast({ message: 'Failed to load suggestions', type: 'error' }));
@@ -161,9 +161,9 @@ const Suggestions = () => {
       setFollowedUsers((prev) => [...prev, username]);
     } catch (error) {
       if (error.response?.status === 401) {
-        await userLogout();
-        dispatch(logout());
-        navigate('/');
+        // await userLogout();
+        // dispatch(logout());
+        // navigate('/');
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
       } else {
         dispatch(showToast({ message: 'Failed to follow user', type: 'error' }));
