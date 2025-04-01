@@ -7,11 +7,12 @@ class ChatRoomSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     encryption_key = serializers.SerializerMethodField()
+    admin = UserSerializer(read_only=True)
 
     class Meta:
         model = ChatRoom
         fields = ['id', 'users', 'created_at', 'last_message_at', 'last_message', 
-                 'unread_count', 'encryption_key']
+                 'unread_count', 'encryption_key', 'is_group', 'group_name', 'admin']
         read_only_fields = ['id', 'created_at', 'last_message_at']
 
     def get_last_message(self, obj):

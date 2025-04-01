@@ -16,6 +16,9 @@ class ChatRoom(models.Model):
     last_message_at = models.DateTimeField(null=True, blank=True)
     encryption_key = models.CharField(max_length=64, default=generate_encryption_key)
     unread_count = models.PositiveIntegerField(default=0)
+    is_group = models.BooleanField(default=False)  # New field to distinguish group chats
+    group_name = models.CharField(max_length=100, blank=True, null=True)
+    admin = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='administered_groups')
 
     def update_last_message(self, message):
         self.last_message_at = message.sent_at
@@ -25,7 +28,18 @@ class ChatRoom(models.Model):
         self.unread_count = self.messages.filter(is_read=False).exclude(sender__in=self.users.all()).count()
         self.save()
 
+    def add_user(self, user):
+        self.users.add(user)
+        self.save()
+
+    def remove_user(self, user):
+        if self.users.count() > 1:  # Prevent removing last user
+            self.users.remove(user)
+            self.save()
+
     def __str__(self):
+        if self.is_group:
+            return f"Group: {self.group_name or self.id}"
         return f"ChatRoom {self.id} with {self.users.count()} users"
 
 class Message(models.Model):

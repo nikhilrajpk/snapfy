@@ -1,14 +1,16 @@
+// Message.jsx
 import React, { useState, useRef, useEffect, Suspense } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
 import { format } from 'date-fns';
 import Loader from '../../utils/Loader/Loader';
-import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash, IoMic, IoMicOff } from 'react-icons/io5';
+import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash, IoMic, IoMicOff, IoPersonAdd, IoPersonRemove, IoExitOutline } from 'react-icons/io5';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { getMessages } from '../../API/chatAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import axiosInstance from '../../axiosInstance';
+import groupIcon from '../../assets/group-icon.png';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
@@ -39,8 +41,14 @@ function Message() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [showImageModal, setShowImageModal] = useState(false); // Modal state
-  const [selectedImage, setSelectedImage] = useState(null); // Image to display in modal
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupUsernameInput, setGroupUsernameInput] = useState('');
+  const [groupUsers, setGroupUsers] = useState([]);
+  const [groupUserSuggestions, setGroupUserSuggestions] = useState([]);
+  const [showManageGroupModal, setShowManageGroupModal] = useState(false);
   const lastMarkAsReadRef = useRef(0);
   const pendingMessages = useRef(new Map());
 
@@ -397,6 +405,94 @@ function Message() {
     }
   };
 
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) {
+      dispatch(showToast({ message: 'Group name is required', type: 'error' }));
+      return;
+    }
+
+    try {
+      const usernames = groupUsers.map(user => user.username);
+      const response = await axiosInstance.post('/chatrooms/create-group/', {
+        group_name: groupName,
+        usernames,
+      });
+      const newRoom = response.data;
+      setChatRooms((prev) => [newRoom, ...prev]);
+      setSelectedRoom(newRoom);
+      navigate(`/messages/${newRoom.id}`);
+      setGroupName('');
+      setGroupUsers([]);
+      setGroupUsernameInput('');
+      setGroupUserSuggestions([]);
+      setShowGroupModal(false);
+      dispatch(showToast({ message: 'Group created successfully', type: 'success' }));
+    } catch (error) {
+      console.error('Error creating group:', error);
+      dispatch(showToast({ message: 'Failed to create group', type: 'error' }));
+    }
+  };
+
+  const handleAddUserToGroup = async (username) => {
+    if (!username.trim()) return;
+
+    try {
+      const response = await axiosInstance.post(`/chatrooms/${selectedRoom.id}/add-user/`, { username });
+      setSelectedRoom(response.data);
+      setChatRooms((prev) =>
+        prev.map((room) => (String(room.id) === String(selectedRoom.id) ? response.data : room))
+      );
+      dispatch(showToast({ message: `${username} added to group`, type: 'success' }));
+    } catch (error) {
+      console.error('Error adding user:', error);
+      dispatch(showToast({ message: 'Failed to add user', type: 'error' }));
+    }
+  };
+
+  const handleRemoveUserFromGroup = async (username) => {
+    try {
+      const response = await axiosInstance.post(`/chatrooms/${selectedRoom.id}/remove-user/`, { username });
+      setSelectedRoom(response.data);
+      setChatRooms((prev) =>
+        prev.map((room) => (String(room.id) === String(selectedRoom.id) ? response.data : room))
+      );
+      dispatch(showToast({ message: `${username} removed from group`, type: 'success' }));
+    } catch (error) {
+      console.error('Error removing user:', error);
+      dispatch(showToast({ message: 'Failed to remove user', type: 'error' }));
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    try {
+      await axiosInstance.post(`/chatrooms/${selectedRoom.id}/leave-group/`);
+      setChatRooms((prev) => prev.filter((room) => String(room.id) !== String(selectedRoom.id)));
+      setSelectedRoom(null);
+      setShowManageGroupModal(false);
+      navigate('/messages');
+      dispatch(showToast({ message: 'You have left the group', type: 'success' }));
+    } catch (error) {
+      console.error('Error leaving group:', error);
+      dispatch(showToast({ message: 'Failed to leave group', type: 'error' }));
+    }
+  };
+
+  const handleUpdateGroupName = async (newName) => {
+    if (!newName.trim()) return;
+
+    try {
+      const response = await axiosInstance.post(`/chatrooms/${selectedRoom.id}/update-group-name/`, { group_name: newName });
+      setSelectedRoom(response.data);
+      setChatRooms((prev) =>
+        prev.map((room) => (String(room.id) === String(selectedRoom.id) ? response.data : room))
+      );
+      dispatch(showToast({ message: 'Group name updated', type: 'success' }));
+    } catch (error) {
+      console.error('Error updating group name:', error);
+      dispatch(showToast({ message: 'Failed to update group name', type: 'error' }));
+    }
+  };
+
   const handleDeleteMessage = async (messageId) => {
     try {
       const response = await axiosInstance.post(`/chatrooms/${selectedRoom.id}/delete-message/`, { message_id: messageId });
@@ -415,19 +511,32 @@ function Message() {
     }
   };
 
-  const handleSearchUsers = async (term) => {
+  const handleSearchUsers = async (term, isGroupSearch = false) => {
     if (!term.trim()) {
-      setSearchResults([]);
+      isGroupSearch ? setGroupUserSuggestions([]) : setSearchResults([]);
       return;
     }
     try {
-      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
-      setSearchResults(response.data || []);
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`); // Fixed endpoint
+      const filteredUsers = response.data.filter(u => String(u.id) !== String(user.id)); // Exclude current user
+      isGroupSearch ? setGroupUserSuggestions(filteredUsers) : setSearchResults(filteredUsers);
     } catch (error) {
       console.error('Error searching users:', error);
-      setSearchResults([]);
+      isGroupSearch ? setGroupUserSuggestions([]) : setSearchResults([]);
       dispatch(showToast({ message: 'Search failed', type: 'error' }));
     }
+  };
+
+  const handleAddGroupUser = (user) => {
+    if (!groupUsers.some(u => u.id === user.id)) {
+      setGroupUsers([...groupUsers, user]);
+    }
+    setGroupUsernameInput('');
+    setGroupUserSuggestions([]);
+  };
+
+  const handleRemoveGroupUser = (userId) => {
+    setGroupUsers(groupUsers.filter(u => u.id !== userId));
   };
 
   const handleEmojiClick = (emoji) => {
@@ -468,7 +577,11 @@ function Message() {
     setSelectedImage(null);
   };
 
-  const otherUser = selectedRoom?.users?.find((u) => String(u?.id) !== String(user?.id));
+  const otherUser = selectedRoom && !selectedRoom.is_group
+    ? selectedRoom.users.find((u) => String(u?.id) !== String(user?.id))
+    : null;
+
+  const isAdmin = selectedRoom && selectedRoom.admin && String(selectedRoom.admin.id) === String(user?.id);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
@@ -516,13 +629,21 @@ function Message() {
                         </div>
                       )}
                     </div>
+                    <button
+                      onClick={() => setShowGroupModal(true)}
+                      className="mt-2 w-full bg-[#198754] text-white py-2 rounded-full hover:bg-[#157a47]"
+                    >
+                      Create Group
+                    </button>
                   </div>
-                  <div className="overflow-y-auto h-[calc(85vh-115px)]">
+                  <div className="overflow-y-auto h-[calc(85vh-160px)]">
                     {isLoading ? (
                       <Loader />
                     ) : chatRooms.length ? (
                       chatRooms.map((room) => {
-                        const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
+                        const otherUser = !room.is_group
+                          ? room.users.find((u) => String(u.id) !== String(user?.id))
+                          : null;
                         const lastMessage = room.last_message?.is_deleted
                           ? '[Deleted]'
                           : room.last_message?.file_url
@@ -541,19 +662,23 @@ function Message() {
                             <div className="flex items-center space-x-3">
                               <div className="relative">
                                 <img
-                                  src={otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png'}
-                                  alt={otherUser?.username || 'Unknown'}
+                                  src={room.is_group ? groupIcon : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png')}
+                                  alt={room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
                                   className="w-12 h-12 rounded-full object-cover border border-gray-200 shadow-sm"
-                                  onError={(e) => (e.target.src = '/default-profile.png')}
+                                  onError={(e) => (e.target.src = room.is_group ? groupIcon : '/default-profile.png')}
                                 />
-                                <div
-                                  className={`absolute bottom-0 right-0 w-3 h-3 ${
-                                    otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
-                                  } rounded-full border-2 border-white`}
-                                ></div>
+                                {!room.is_group && (
+                                  <div
+                                    className={`absolute bottom-0 right-0 w-3 h-3 ${
+                                      otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
+                                    } rounded-full border-2 border-white`}
+                                  ></div>
+                                )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <h3 className="text-sm font-semibold text-gray-800 truncate">{otherUser?.username || 'Unknown'}</h3>
+                                <h3 className="text-sm font-semibold text-gray-800 truncate">
+                                  {room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
+                                </h3>
                                 <p className="text-sm text-gray-600 truncate">{lastMessage}</p>
                                 {unreadCount > 0 && (
                                   <span className="text-xs bg-red-500 text-white rounded-full px-2 py-1">{unreadCount}</span>
@@ -576,37 +701,57 @@ function Message() {
                           <div className="relative">
                             <img
                               src={
-                                otherUser?.profile_picture
-                                  ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}`
-                                  : '/default-profile.png'
+                                selectedRoom.is_group
+                                  ? groupIcon
+                                  : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}` : '/default-profile.png')
                               }
-                              alt={otherUser?.username || 'User'}
+                              alt={selectedRoom.is_group ? selectedRoom.group_name : otherUser?.username || 'User'}
                               className="w-10 h-10 rounded-full object-cover border border-gray-200"
-                              onError={(e) => (e.target.src = '/default-profile.png')}
+                              onError={(e) => (e.target.src = selectedRoom.is_group ? groupIcon : '/default-profile.png')}
                             />
-                            <div
-                              className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${
-                                otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
-                              } rounded-full border-2 border-white`}
-                            ></div>
+                            {!selectedRoom.is_group && (
+                              <div
+                                className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${
+                                  otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
+                                } rounded-full border-2 border-white`}
+                              ></div>
+                            )}
                           </div>
                           <div>
-                            <h3 className="font-semibold text-gray-800">{otherUser?.username || 'Unknown User'}</h3>
-                            <p className={`text-xs ${otherUser?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
-                              {otherUser?.is_online ? 'Online' : `Last seen ${formatLastActive(otherUser?.last_seen)}`}
-                            </p>
+                            <Link to={`/user/${otherUser?.username}`}>
+                              <h3 className="font-semibold text-gray-800">
+                                {selectedRoom.is_group ? selectedRoom.group_name : otherUser?.username || 'Unknown User'}
+                              </h3>
+                            </Link>
+                            {!selectedRoom.is_group ? (
+                              <p className={`text-xs ${otherUser?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
+                                {otherUser?.is_online ? 'Online' : `Last seen ${formatLastActive(otherUser?.last_seen)}`}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-gray-500">{selectedRoom.users.length} members</p>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center space-x-3">
-                          <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Audio call">
-                            <IoCall size={20} />
-                          </button>
-                          <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Video call">
-                            <IoVideocam size={20} />
-                          </button>
-                          <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Conversation info">
-                            <IoInformationCircle size={20} />
-                          </button>
+                          {!selectedRoom.is_group && (
+                            <>
+                              <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Audio call">
+                                <IoCall size={20} />
+                              </button>
+                              <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Video call">
+                                <IoVideocam size={20} />
+                              </button>
+                            </>
+                          )}
+                          {selectedRoom.is_group && (
+                            <button
+                              onClick={() => setShowManageGroupModal(true)}
+                              className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+                              title="Manage group"
+                            >
+                              <IoInformationCircle size={20} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div
@@ -623,16 +768,20 @@ function Message() {
                               className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
                             >
                               {String(msg?.sender?.id) !== String(user?.id) && (
-                                <img
-                                  src={
-                                    msg?.sender?.profile_picture
-                                      ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}`
-                                      : '/default-profile.png'
-                                  }
-                                  alt={msg?.sender?.username || 'Unknown'}
-                                  className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
-                                  onError={(e) => (e.target.src = '/default-profile.png')}
-                                />
+                                <Link to={`/user/${msg?.sender?.username}`}>
+                                  <img
+                                    src={
+                                      msg?.sender?.profile_picture
+                                        ? `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`
+                                        : otherUser?.profile_picture
+                                        ? `${CLOUDINARY_ENDPOINT}/${otherUser?.profile_picture}`
+                                        : '/default-profile.png'
+                                    }
+                                    alt={msg?.sender?.username || 'Unknown'}
+                                    className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
+                                    onError={(e) => (e.target.src = '/default-profile.png')}
+                                  />
+                                </Link>
                               )}
                               <div className="max-w-[75%] relative group">
                                 <div
@@ -794,7 +943,7 @@ function Message() {
                     <div className="h-full flex justify-center items-center bg-gradient-to-b from-orange-50 to-white">
                       <div className="text-center p-6 max-w-md">
                         <h3 className="text-xl font-bold text-gray-800">Start a Chat</h3>
-                        <p className="text-gray-600 mt-2">Enter a username above to begin</p>
+                        <p className="text-gray-600 mt-2">Enter a username or create a group to begin</p>
                       </div>
                     </div>
                   )}
@@ -815,6 +964,126 @@ function Message() {
               className="absolute top-2 right-2 text-white bg-red-500 hover:bg-red-600 p-2 rounded-full"
             >
               ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create Group Modal */}
+      {showGroupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowGroupModal(false)}>
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Create Group</h3>
+            <input
+              type="text"
+              placeholder="Group Name"
+              className="w-full bg-gray-100 rounded-full px-4 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+            />
+            <div className="relative mb-4">
+              <input
+                type="text"
+                placeholder="Add Username"
+                className="w-full bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                value={groupUsernameInput}
+                onChange={(e) => {
+                  setGroupUsernameInput(e.target.value);
+                  handleSearchUsers(e.target.value, true);
+                }}
+              />
+              {groupUserSuggestions.length > 0 && (
+                <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
+                  {groupUserSuggestions.map((u) => (
+                    <div
+                      key={u.id}
+                      className="p-2 hover:bg-gray-100 cursor-pointer"
+                      onClick={() => handleAddGroupUser(u)}
+                    >
+                      {u.username}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-800">Selected Members</h4>
+              {groupUsers.length > 0 ? (
+                groupUsers.map((u) => (
+                  <div key={u.id} className="flex items-center justify-between py-2">
+                    <span>{u.username}</span>
+                    <button
+                      onClick={() => handleRemoveGroupUser(u.id)}
+                      className="text-red-500 hover:text-red-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-600">No members selected</p>
+              )}
+            </div>
+            <button
+              onClick={handleCreateGroup}
+              className="w-full bg-[#198754] text-white py-2 rounded-full hover:bg-[#157a47]"
+            >
+              Create
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Group Modal */}
+      {showManageGroupModal && selectedRoom?.is_group && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowManageGroupModal(false)}>
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Manage Group: {selectedRoom.group_name}</h3>
+            <input
+              type="text"
+              placeholder="New Group Name"
+              className="w-full bg-gray-100 rounded-full px-4 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+              defaultValue={selectedRoom.group_name}
+              onBlur={(e) => handleUpdateGroupName(e.target.value)}
+            />
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-800">Members</h4>
+              {selectedRoom.users.map((u) => (
+                <div key={u.id} className="flex items-center justify-between py-2">
+                  <Link to={`/user/${u?.username}`}>
+                    <span>{u.username} {String(u.id) === String(selectedRoom.admin?.id) ? '(Admin)' : ''}</span>
+                  </Link>
+                  {isAdmin && String(u.id) !== String(user.id) && (
+                    <button
+                      onClick={() => handleRemoveUserFromGroup(u.username)}
+                      className="text-red-500 hover:text-red-600"
+                      title="Remove user"
+                    >
+                      <IoPersonRemove size={20} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="Add Username"
+              className="w-full bg-gray-100 rounded-full px-4 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+              onKeyPress={(e) => e.key === 'Enter' && handleAddUserToGroup(e.target.value) && (e.target.value = '')}
+            />
+            {!isAdmin && (
+              <button
+                onClick={handleLeaveGroup}
+                className="w-full bg-red-500 text-white py-2 rounded-full hover:bg-red-600 mb-4"
+              >
+                <IoExitOutline className="inline mr-2" /> Leave Group
+              </button>
+            )}
+            <button
+              onClick={() => setShowManageGroupModal(false)}
+              className="w-full bg-gray-500 text-white py-2 rounded-full hover:bg-gray-600"
+            >
+              Close
             </button>
           </div>
         </div>

@@ -56,6 +56,96 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
+    @action(detail=False, methods=['post'], url_path='create-group')
+    def create_group(self, request):
+        group_name = request.data.get('group_name')
+        usernames = request.data.get('usernames', [])  # List of usernames to add
+
+        if not group_name:
+            return Response({"error": "Group name required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        chat_room = ChatRoom.objects.create(is_group=True, group_name=group_name, admin=request.user)  # Set creator as admin
+        chat_room.users.add(request.user)  # Add creator to the group
+
+        for username in usernames:
+            try:
+                user = User.objects.get(username=username)
+                if user != request.user:
+                    chat_room.users.add(user)
+            except User.DoesNotExist:
+                pass  # Silently skip invalid usernames
+
+        serializer = ChatRoomSerializer(chat_room, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='add-user')
+    def add_user(self, request, pk=None):
+        chat_room = self.get_object()
+        if not chat_room.is_group or request.user not in chat_room.users.all():
+            return Response({"error": "Not authorized or not a group"}, status=status.HTTP_403_FORBIDDEN)
+
+        username = request.data.get('username')
+        if not username:
+            return Response({"error": "Username required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+            if user in chat_room.users.all():
+                return Response({"error": "User already in group"}, status=status.HTTP_400_BAD_REQUEST)
+            chat_room.add_user(user)
+            return Response(ChatRoomSerializer(chat_room, context={'request': request}).data, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'], url_path='remove-user')
+    def remove_user(self, request, pk=None):
+        chat_room = self.get_object()
+        if not chat_room.is_group or request.user != chat_room.admin:  # Only admin can remove users
+            return Response({"error": "Not authorized or not a group admin"}, status=status.HTTP_403_FORBIDDEN)
+
+        username = request.data.get('username')
+        if not username:
+            return Response({"error": "Username required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+            if user not in chat_room.users.all():
+                return Response({"error": "User not in group"}, status=status.HTTP_400_BAD_REQUEST)
+            if user == chat_room.admin:
+                return Response({"error": "Cannot remove the admin"}, status=status.HTTP_400_BAD_REQUEST)
+            if chat_room.users.count() <= 2:  # Prevent emptying group
+                return Response({"error": "Cannot remove last member"}, status=status.HTTP_400_BAD_REQUEST)
+            chat_room.remove_user(user)
+            return Response(ChatRoomSerializer(chat_room, context={'request': request}).data, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'], url_path='leave-group')
+    def leave_group(self, request, pk=None):
+        chat_room = self.get_object()
+        if not chat_room.is_group or request.user not in chat_room.users.all():
+            return Response({"error": "Not authorized or not a group"}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.user == chat_room.admin:
+            return Response({"error": "Admin cannot leave the group"}, status=status.HTTP_400_BAD_REQUEST)
+
+        chat_room.remove_user(request.user)
+        return Response({"message": "You have left the group"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='update-group-name')
+    def update_group_name(self, request, pk=None):
+        chat_room = self.get_object()
+        if not chat_room.is_group or request.user not in chat_room.users.all():
+            return Response({"error": "Not authorized or not a group"}, status=status.HTTP_403_FORBIDDEN)
+
+        group_name = request.data.get('group_name')
+        if not group_name:
+            return Response({"error": "Group name required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        chat_room.group_name = group_name
+        chat_room.save()
+        return Response(ChatRoomSerializer(chat_room, context={'request': request}).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['get'], url_path='messages')
     def get_messages(self, request, pk=None):
         chat_room = self.get_object()
@@ -83,7 +173,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
 
         content = request.data.get('content', '')
-        file = request.FILES.get('file')  # This will handle audio files
+        file = request.FILES.get('file')
         temp_id = request.data.get('tempId')
 
         fernet = Fernet(chat_room.encryption_key.encode())
@@ -111,7 +201,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             message_data['tempId'] = temp_id
         if file:
             message_data['file_url'] = message.file.url if message.file else None
-            message_data['file_type'] = 'audio' if file.name.endswith(('.mp3', '.wav', '.ogg')) else 'other'
+            message_data['file_type'] = 'audio' if file.name.endswith(('.mp3', '.wav', '.ogg', '.webm')) else 'other'
 
         chat_room.last_message_at = message.sent_at
         chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
