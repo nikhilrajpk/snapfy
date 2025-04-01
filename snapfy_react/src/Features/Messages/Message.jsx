@@ -771,15 +771,13 @@ function Message() {
                                 <Link to={`/user/${msg?.sender?.username}`}>
                                   <img
                                     src={
-                                      msg?.sender?.profile_picture
-                                        ? `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`
-                                        : otherUser?.profile_picture
-                                        ? `${CLOUDINARY_ENDPOINT}/${otherUser?.profile_picture}`
-                                        : '/default-profile.png'
+                                      msg?.sender?.profile_picture.startsWith('http')
+                                        ? `${msg?.sender?.profile_picture}`
+                                        : `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`
                                     }
                                     alt={msg?.sender?.username || 'Unknown'}
                                     className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
-                                    onError={(e) => (e.target.src = '/default-profile.png')}
+                                    // onError={(e) => (e.target.src = `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`)}
                                   />
                                 </Link>
                               )}
