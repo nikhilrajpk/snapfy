@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { showToast } from '../../redux/slices/toastSlice';
 import { format } from 'date-fns';
 import Loader from '../../utils/Loader/Loader';
-import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash } from 'react-icons/io5';
+import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash, IoMic, IoMicOff } from 'react-icons/io5';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { getMessages } from '../../API/chatAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
@@ -24,6 +24,7 @@ function Message() {
   const fileInputRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const socketRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
@@ -36,8 +37,27 @@ function Message() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0); // Timer state
   const lastMarkAsReadRef = useRef(0);
   const pendingMessages = useRef(new Map());
+
+  // Timer effect for recording
+  useEffect(() => {
+    let timer;
+    if (isRecording) {
+      timer = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [isRecording]);
+
+  const formatRecordingTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   useEffect(() => {
     const chatContainer = messagesContainerRef.current;
@@ -151,6 +171,7 @@ function Message() {
                 profile_picture: message.sender.profile_picture || null,
               },
               key: `${message.id}-${message.sent_at}`,
+              file_type: message.file_type || 'other',
             };
 
             setChatRooms((prev) => {
@@ -166,7 +187,7 @@ function Message() {
                       is_deleted: newMessage.is_deleted,
                     },
                     last_message_at: newMessage.sent_at,
-                    unread_count: isOwnMessage || isCurrentRoom ? 0 : data.unread_count, // Use backend count unless in room or own message
+                    unread_count: isOwnMessage || isCurrentRoom ? 0 : data.unread_count,
                   };
                 }
                 return room;
@@ -174,7 +195,6 @@ function Message() {
               return updatedRooms.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
             });
 
-            // Only update messages if the message belongs to the current conversation
             if (String(data.room_id) === String(conversationId)) {
               setMessages((prev) => {
                 const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);
@@ -257,21 +277,55 @@ function Message() {
 
     connectWebSocket();
 
-    // Add a timer to refresh last seen display every 60 seconds
     const intervalId = setInterval(() => {
-      setChatRooms((prev) => [...prev]); // Trigger re-render by creating a new array reference
-      setSelectedRoom((prev) => (prev ? { ...prev } : null)); // Trigger re-render for selected room
-    }, 60000); // 60 seconds
+      setChatRooms((prev) => [...prev]);
+      setSelectedRoom((prev) => (prev ? { ...prev } : null));
+    }, 60000);
 
     return () => {
       socketClosedIntentionally = true;
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.close(1000, 'Component unmounted');
       }
-      clearInterval(intervalId); // Clean up the interval on unmount
+      clearInterval(intervalId);
     };
-    
   }, [user?.id, conversationId, dispatch]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      const audioChunks = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunks.push(event.data);
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+        setSelectedFile(audioFile);
+        setFilePreview(URL.createObjectURL(audioFile));
+        stream.getTracks().forEach((track) => track.stop());
+        setRecordingTime(0); // Reset timer after stopping
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      dispatch(showToast({ message: 'Recording started', type: 'info' }));
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      dispatch(showToast({ message: 'Failed to start recording', type: 'error' }));
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      dispatch(showToast({ message: 'Recording stopped', type: 'info' }));
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!message.trim() && !selectedFile) return;
@@ -289,6 +343,7 @@ function Message() {
       is_read: false,
       is_deleted: false,
       file_url: selectedFile ? URL.createObjectURL(selectedFile) : null,
+      file_type: selectedFile && selectedFile.type.startsWith('audio/') ? 'audio' : 'other',
     };
 
     setMessages((prev) => [...prev.filter((msg) => msg.tempId !== tempId), optimisticMessage]);
@@ -573,17 +628,17 @@ function Message() {
                                     String(msg?.sender?.id) === String(user?.id)
                                       ? 'bg-[#198754] text-white rounded-tr-none'
                                       : 'bg-white text-gray-800 rounded-tl-none'
-                                  }`}
+                                  } ${msg.file_type === 'audio' || msg.file_url?.match(/\.(mp3|wav|ogg|webm)$/) ? 'min-w-[250px]' : ''}`}
                                 >
                                   {msg?.is_deleted ? (
                                     <p className="italic text-gray-300">[Deleted]</p>
                                   ) : msg?.file_url ? (
-                                    msg.file_url.match(/\.(mp4|webm)$/) ? (
-                                      <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
-                                    ) : msg.file_url.match(/\.(mp3|wav)$/) ? (
-                                      <audio controls className="w-full h-10">
-                                        <source src={msg.file_url} type="audio/mpeg" />
+                                    msg.file_type === 'audio' || msg.file_url.match(/\.(mp3|wav|ogg|webm)$/) ? (
+                                      <audio controls className="w-full h-12">
+                                        <source src={msg.file_url} type={msg.file_type === 'audio' ? 'audio/webm' : 'audio/mpeg'} />
                                       </audio>
+                                    ) : msg.file_url.match(/\.(mp4|webm)$/) ? (
+                                      <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
                                     ) : (
                                       <img src={msg.file_url} alt="Shared file" className="rounded-lg max-h-60 w-auto" />
                                     )
@@ -629,16 +684,33 @@ function Message() {
                         {isSending && <div className="text-gray-500 text-sm mb-2">Sending...</div>}
                         {filePreview && (
                           <div className="mb-2">
-                            <img src={filePreview} alt="Selected file" className="max-h-20 w-auto rounded-lg" />
-                            <button
-                              onClick={() => {
-                                setSelectedFile(null);
-                                setFilePreview(null);
-                              }}
-                              className="text-red-500 text-sm"
-                            >
-                              Remove
-                            </button>
+                            {selectedFile && selectedFile.type.startsWith('audio/') ? (
+                              <div className="flex items-center space-x-2">
+                                <audio controls src={filePreview} className="w-64 h-12" />
+                                <button
+                                  onClick={() => {
+                                    setSelectedFile(null);
+                                    setFilePreview(null);
+                                  }}
+                                  className="text-red-500 text-sm"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center space-x-2">
+                                <img src={filePreview} alt="Selected file" className="max-h-20 w-auto rounded-lg" />
+                                <button
+                                  onClick={() => {
+                                    setSelectedFile(null);
+                                    setFilePreview(null);
+                                  }}
+                                  className="text-red-500 text-sm"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                         {showEmojiPicker && (
@@ -663,6 +735,18 @@ function Message() {
                             accept="image/*,audio/*,video/*"
                             onChange={handleFileSelected}
                           />
+                          <div className="flex items-center space-x-1">
+                            <button
+                              onClick={isRecording ? stopRecording : startRecording}
+                              className={`p-2 rounded-full ${isRecording ? 'text-red-500' : 'text-gray-500 hover:text-[#198754]'} hover:bg-gray-100`}
+                              title={isRecording ? 'Stop recording' : 'Record audio'}
+                            >
+                              {isRecording ? <IoMicOff size={24} /> : <IoMic size={24} />}
+                            </button>
+                            {isRecording && (
+                              <span className="text-red-500 text-sm font-semibold">{formatRecordingTime(recordingTime)}</span>
+                            )}
+                          </div>
                           <textarea
                             className="flex-1 border border-gray-300 rounded-full px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-[#198754] resize-none"
                             placeholder="Message..."
