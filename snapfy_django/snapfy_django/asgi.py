@@ -12,12 +12,14 @@ django_asgi_app = get_asgi_application()
 
 # Import routing after initialization
 from chat_app import routing 
+from notification_app import routing as notification_routing
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AuthMiddlewareStack(
         URLRouter(
-            routing.websocket_urlpatterns
+            routing.websocket_urlpatterns +
+            notification_routing.websocket_urlpatterns
         )
     ),
 })

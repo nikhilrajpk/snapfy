@@ -18,6 +18,7 @@ from django.db.models import Q
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
+from notification_app.utils import create_follow_notification
 
 from .serializer import UserSerializer, UserCreateSerializer, VerifyOTPSerializer, LoginSerializer, ResendOTPSerializer, ResetPasswordSerializer, UserProfileUpdateSerializer
 from .models import User, Report, BlockedUser
@@ -50,7 +51,7 @@ class UserAPIViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='follow')
     def follow(self, request, username=None):
         """Follow a user."""
-        user_to_follow = self.get_object()  # Gets user by username from URL
+        user_to_follow = self.get_object()
         current_user = request.user
 
         if current_user == user_to_follow:
@@ -61,12 +62,16 @@ class UserAPIViewSet(viewsets.ModelViewSet):
 
         user_to_follow.followers.add(current_user)
         serializer = self.get_serializer(user_to_follow)
+
+        # Trigger follow notification
+        create_follow_notification(to_user=user_to_follow, from_user=current_user)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='unfollow')
     def unfollow(self, request, username=None):
         """Unfollow a user."""
-        user_to_unfollow = self.get_object()  # Gets user by username from URL
+        user_to_unfollow = self.get_object()
         current_user = request.user
 
         if current_user == user_to_unfollow:

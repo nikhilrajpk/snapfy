@@ -9,6 +9,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import Post
 from .serializer import *
+from notification_app.utils import create_like_notification, create_comment_notification, create_mention_notification
+import re
 import logging
 
 
@@ -81,6 +83,9 @@ class PostAPIView(ModelViewSet):
         if not created:
             like.delete()
             return Response({'message': 'Post unliked', 'likes': Like.objects.filter(post=post).count(), 'is_liked': False}, status=status.HTTP_200_OK)
+        
+        # Trigger like notification
+        create_like_notification(to_user=post.user, from_user=user, post_id=post.id)
         return Response({'message': 'Post liked', 'likes': Like.objects.filter(post=post).count(), 'is_liked': True}, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['get'], url_path='liked_users')
@@ -118,7 +123,31 @@ class PostAPIView(ModelViewSet):
             context={'request': request}
         )
         if serializer.is_valid():
-            serializer.save()
+            comment = serializer.save()
+            
+            # Trigger comment notification
+            create_comment_notification(
+                to_user=post.user,
+                from_user=request.user,
+                post_id=post.id,
+                comment_text=request.data.get('text')
+            )
+            
+            # Check for mentions in comment and trigger notifications
+            mention_pattern = r'@(\w+)'
+            mentions = re.findall(mention_pattern, request.data.get('text', ''))
+            from user_app.models import User
+            for username in mentions:
+                try:
+                    mentioned_user = User.objects.get(username=username)
+                    create_mention_notification(
+                        to_user=mentioned_user,
+                        from_user=request.user,
+                        post_id=post.id
+                    )
+                except User.DoesNotExist:
+                    continue
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
@@ -165,9 +194,30 @@ class PostCreateAPIView(APIView):
     def post(self, request):
         serializer = PostCreateSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(user=request.user)  # Set user from request
+            post = serializer.save(user=request.user)
+            
+            # Check for mentions in caption
+            mention_pattern = r'@(\w+)'
+            caption_mentions = re.findall(mention_pattern, request.data.get('caption', ''))
+            serializer_mentions = request.data.get('mentions', [])  # From serializer
+            
+            # Combine mentions from caption and serializer
+            all_mentions = set(caption_mentions + (serializer_mentions if isinstance(serializer_mentions, list) else []))
+            
+            from user_app.models import User
+            for username in all_mentions:
+                try:
+                    mentioned_user = User.objects.get(username=username)
+                    create_mention_notification(
+                        to_user=mentioned_user,
+                        from_user=request.user,
+                        post_id=post.id
+                    )
+                except User.DoesNotExist:
+                    continue
+
             return Response({"message": "Post created successfully"}, status=status.HTTP_201_CREATED)
-        print('serializer errors ::', serializer.errors)
+        logger.error(f"Serializer errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 

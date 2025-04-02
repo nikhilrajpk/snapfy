@@ -21,6 +21,7 @@ const SearchBarPage = React.lazy(()=> import('../Pages/SearchBarPage'))
 const ExplorePage = React.lazy(()=> import('../Pages/ExplorePage'))
 const Shorts = React.lazy(()=> import('../Features/Shorts/Shorts'))
 const Message = React.lazy(()=> import('../Features/Messages/Message'))
+const Notification = React.lazy(()=> import('../Features/Notification/Notification'))
 
 const router = createBrowserRouter([
     {
@@ -153,6 +154,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute authentication={true}>
                         <Message/>
+                    </ProtectedRoute>
+                )
+            },
+            {
+                path: '/notifications',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <Notification/>
                     </ProtectedRoute>
                 )
             },

@@ -97,6 +97,8 @@ class PostCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {'user': {'required': False}}
 
     def validate_mentions(self, value):
+        if not value:
+            return []
         mentions_ids = []
         for username in value:
             try:
@@ -107,6 +109,8 @@ class PostCreateSerializer(serializers.ModelSerializer):
         return mentions_ids
 
     def validate_hashtags(self, value):
+        if not value:
+            return []
         hashtag_ids = []
         for name in value:
             hashtag, _ = Hashtag.objects.get_or_create(name=name)
