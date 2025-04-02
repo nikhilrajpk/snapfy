@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { UserPlus, Shield, Flag, Grid, PlaySquare, Bookmark, Archive, Play, Heart, MessageCircle, UserMinus, Search } from 'lucide-react';
 import SideBar from '../Navbar/SideBar';
 import PostPopup from '../Post/PostPopUp';
@@ -8,6 +8,7 @@ import { showToast } from '../../redux/slices/toastSlice';
 import { setUser } from '../../redux/slices/userSlice';
 import { followUser, unfollowUser, getUser, blockUser, unblockUser } from '../../API/authAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
+import axiosInstance from '../../axiosInstance';
 
 const ProfilePage = ({ isLoggedInUser, userData: initialUserData, onPostDeleted, onSaveChange, onUserUpdate }) => {
   const [showFollowModal, setShowFollowModal] = useState(null);
@@ -160,6 +161,7 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const [isBlockedByUser, setIsBlockedByUser] = useState(false); // Profile owner blocked logged-in user
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const handleImageError = useCallback(() => {
     setImageError(true);
@@ -296,6 +298,18 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
     }
   };
 
+  const handleMessageClick = async () => {
+    try {
+      const response = await axiosInstance.post('/chatrooms/start-chat/', { username: userData?.username });
+      const newRoom = response.data;
+      navigate(`/messages/${newRoom.id}`);
+      dispatch(showToast({ message: `Chat started with ${userData?.username}`, type: 'success' }));
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      dispatch(showToast({ message: 'Failed to start chat', type: 'error' }));
+    }
+  };
+
   const fullName = `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim();
 
   const renderMutualFollowers = () => {
@@ -379,6 +393,14 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
                     Follow
                   </>
                 )}
+              </button>
+              <button
+                onClick={handleMessageClick}
+                className="bg-[#198754] text-white px-4 py-2 rounded-lg text-sm font-medium transition duration-200 hover:bg-[#157a47] flex items-center"
+                disabled={isBlocked}
+              >
+                <MessageCircle size={16} className="mr-1" />
+                Message
               </button>
               <button className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
                 <Flag size={16} />

@@ -164,7 +164,7 @@ const Post = ({
 
       dispatch(showToast({ message: 'Post shared successfully', type: 'success' }));
       setIsShareModalOpen(false);
-      navigate(`/messages/${chatRoomId}`);
+      // navigate(`/messages/${chatRoomId}`);
     } catch (error) {
       console.error('Error sharing post:', error);
       dispatch(showToast({ message: 'Failed to share post', type: 'error' }));

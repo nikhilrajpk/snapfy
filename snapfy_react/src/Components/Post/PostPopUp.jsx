@@ -559,7 +559,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
       if (messageResponse.status === 200 || messageResponse.status === 201) {
         dispatch(showToast({ message: 'Post shared successfully', type: 'success' }));
         setIsShareModalOpen(false);
-        navigate(`/messages/${chatRoomId}`);
+        // navigate(`/messages/${chatRoomId}`);
       } else {
         throw new Error('Failed to send message');
       }
