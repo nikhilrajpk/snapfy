@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageSquare, Share2, Bookmark } from 'lucide-react';
+import { Heart, MessageSquare, Share2, Bookmark, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { savePost, removeSavedPost, isSavedPost, likePost, isLikedPost, getLikeCount } from '../../API/postAPI';
@@ -10,6 +10,7 @@ import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { getRelativeTime } from '../../utils/timeUtils/getRelativeTime';
 import { userLogout } from '../../API/authAPI';
 import { logout } from '../../redux/slices/userSlice';
+import axiosInstance from '../../axiosInstance';
 
 const Post = ({
   id,
@@ -32,6 +33,10 @@ const Post = ({
   const [saved, setSaved] = useState(false);
   const [savedPostId, setSavedPostId] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [recentChats, setRecentChats] = useState([]);
 
   useEffect(() => {
     const checkInitialStatus = async () => {
@@ -69,11 +74,23 @@ const Post = ({
     checkInitialStatus();
   }, [id, user?.id, initialLikes]);
 
+  useEffect(() => {
+    const fetchRecentChats = async () => {
+      try {
+        const response = await axiosInstance.get('/chatrooms/my-chats/');
+        setRecentChats(response.data.slice(0, 5)); // Limit to 5 recent chats
+      } catch (error) {
+        console.error('Error fetching recent chats:', error);
+      }
+    };
+    if (isShareModalOpen) fetchRecentChats();
+  }, [isShareModalOpen]);
+
   const handleLike = async () => {
     try {
       const response = await likePost(id);
-      // Assuming likePost returns { is_liked: boolean, likes: number }
-      setIsLiked(response.is_liked); // Use is_liked instead of exists
+      
+      setIsLiked(response.is_liked);
       setLikes(response.likes);
       dispatch(showToast({ message: response.is_liked ? 'Post liked' : 'Post unliked', type: 'success' }));
     } catch (error) {
@@ -112,6 +129,45 @@ const Post = ({
         setSaved(saved); // Revert on error
         dispatch(showToast({ message: 'Error saving/removing post', type: 'error' }));
       }
+    }
+  };
+
+  const handleSearchUsers = async (term) => {
+    setSearchTerm(term);
+    if (!term.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    try {
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
+      setSearchResults(response.data.filter(u => u.id !== user.id));
+    } catch (error) {
+      console.error('Error searching users:', error);
+      setSearchResults([]);
+    }
+  };
+
+  const handleSharePost = async (recipientId, roomId = null) => {
+    try {
+      let chatRoomId = roomId;
+      if (!chatRoomId) {
+        const response = await axiosInstance.post('/chatrooms/start-chat/', { username: recipientId });
+        chatRoomId = response.data.id;
+      }
+
+      const messageContent = `Shared post: ${window.location.origin}/post/${id}`;
+      const formData = new FormData();
+      formData.append('content', messageContent);
+      await axiosInstance.post(`/chatrooms/${chatRoomId}/send-message/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      dispatch(showToast({ message: 'Post shared successfully', type: 'success' }));
+      setIsShareModalOpen(false);
+      navigate(`/messages/${chatRoomId}`);
+    } catch (error) {
+      console.error('Error sharing post:', error);
+      dispatch(showToast({ message: 'Failed to share post', type: 'error' }));
     }
   };
 
@@ -192,12 +248,7 @@ const Post = ({
               >
                 <MessageSquare size={24} />
               </button>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.href).then(() => alert('Post link copied!'));
-                }}
-                className="text-gray-600 hover:text-green-500 transition-colors"
-              >
+              <button onClick={() => setIsShareModalOpen(true)} className="text-gray-600 hover:text-green-500 transition-colors">
                 <Share2 size={24} />
               </button>
             </div>
@@ -270,6 +321,68 @@ const Post = ({
           </div>,
           document.body
         )}
+
+      {/* Share modal */}
+      {isShareModalOpen && createPortal(
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setIsShareModalOpen(false)}>
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Share Post</h3>
+            <div className="relative mb-4">
+              <input
+                type="text"
+                placeholder="Search users..."
+                className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                value={searchTerm}
+                onChange={e => handleSearchUsers(e.target.value)}
+              />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
+              {searchResults.length > 0 && (
+                <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
+                  {searchResults.map(u => (
+                    <div
+                      key={u.id}
+                      className="p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between"
+                      onClick={() => handleSharePost(u.username)}
+                    >
+                      <img src={`${CLOUDINARY_ENDPOINT}${u?.profile_picture}`} className='w-5 object-contain rounded-full'/>
+                      <span>{u.username}</span>
+                      <button className="text-[#198754] hover:text-[#157a47]">Send</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-800 mb-2">Recent Chats</h4>
+              {recentChats.length > 0 ? (
+                recentChats.map(room => {
+                  const otherUser = room.users.find(u => u.id !== user.id);
+                  return (
+                    <div
+                      key={room.id}
+                      className="p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between"
+                      onClick={() => handleSharePost(otherUser.username, room.id)}
+                    >
+                      <img src={`${CLOUDINARY_ENDPOINT}${otherUser?.profile_picture}`} className='w-5 object-contain rounded-full'/>
+                      <span>{room.is_group ? room.group_name : otherUser?.username}</span>
+                      <button className="text-[#198754] hover:text-[#157a47]">Send</button>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-gray-600">No recent chats</p>
+              )}
+            </div>
+            <button
+              onClick={() => setIsShareModalOpen(false)}
+              className="mt-4 w-full bg-gray-500 text-white py-2 rounded-full hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };

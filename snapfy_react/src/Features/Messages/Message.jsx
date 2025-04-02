@@ -11,10 +11,12 @@ import { getMessages } from '../../API/chatAPI';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import axiosInstance from '../../axiosInstance';
 import groupIcon from '../../assets/group-icon.png';
+import { createPortal } from 'react-dom';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 const EmojiPicker = React.lazy(() => import('emoji-picker-react'));
+const PostPopup = React.lazy(()=> import('../../Components/Post/PostPopUp'))
 
 function Message() {
   const { conversationId } = useParams();
@@ -49,6 +51,7 @@ function Message() {
   const [groupUsers, setGroupUsers] = useState([]);
   const [groupUserSuggestions, setGroupUserSuggestions] = useState([]);
   const [showManageGroupModal, setShowManageGroupModal] = useState(false);
+  const [selectedPost, setSelectedPost] = useState(null);
   const lastMarkAsReadRef = useRef(0);
   const pendingMessages = useRef(new Map());
 
@@ -300,6 +303,53 @@ function Message() {
       clearInterval(intervalId);
     };
   }, [user?.id, conversationId, dispatch]);
+
+
+  const handlePostClick = async (postId) => {
+    try {
+      const response = await axiosInstance.get(`/posts/${postId}/`);
+      setSelectedPost(response.data);
+    } catch (error) {
+      console.error('Error fetching post:', error);
+      dispatch(showToast({ message: 'Failed to load post', type: 'error' }));
+    }
+  };
+
+  const renderMessageContent = (msg) => {
+    const postLinkRegex = /Shared post: (.*)\/post\/(\d+)/;
+    const match = msg.content.match(postLinkRegex);
+    if (match && !msg.is_deleted) {
+      const postId = match[2];
+      return (
+        <div
+          className="cursor-pointer text-blue-500 hover:underline"
+          onClick={() => handlePostClick(postId)}
+        >
+          View shared post
+        </div>
+      );
+    }
+    return msg.is_deleted ? (
+      <p className="italic text-gray-300">[Deleted]</p>
+    ) : msg.file_url ? (
+      msg.file_type === 'audio' || msg.file_url.match(/\.(mp3|wav|ogg|webm)$/) ? (
+        <audio controls className="w-full h-12">
+          <source src={msg.file_url} type={msg.file_type === 'audio' ? 'audio/webm' : 'audio/mpeg'} />
+        </audio>
+      ) : msg.file_url.match(/\.(mp4|webm)$/) ? (
+        <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
+      ) : (
+        <img
+          src={msg.file_url}
+          alt="Shared file"
+          className="rounded-lg max-h-60 w-auto cursor-pointer"
+          onClick={() => handleImageClick(msg.file_url)}
+        />
+      )
+    ) : (
+      <p className="whitespace-pre-wrap break-words">{msg.content || '[Empty]'}</p>
+    );
+  };
 
   const startRecording = async () => {
     try {
@@ -616,13 +666,14 @@ function Message() {
                           {searchResults.map((u) => (
                             <div
                               key={u.id}
-                              className="p-2 hover:bg-gray-100 cursor-pointer"
+                              className="p-2 hover:bg-gray-100 cursor-pointer flex justify-between"
                               onClick={() => {
                                 handleStartChat(u.username);
                                 setSearchResults([]);
                                 setSearchTerm('');
                               }}
                             >
+                              <img src={`${CLOUDINARY_ENDPOINT}${u?.profile_picture}`} className='w-5 object-contain rounded-full'/>
                               {u.username}
                             </div>
                           ))}
@@ -789,7 +840,8 @@ function Message() {
                                       : 'bg-white text-gray-800 rounded-tl-none'
                                   } ${msg.file_type === 'audio' || msg.file_url?.match(/\.(mp3|wav|ogg|webm)$/) ? 'min-w-[250px]' : ''}`}
                                 >
-                                  {msg?.is_deleted ? (
+
+                                  {/* {msg?.is_deleted ? (
                                     <p className="italic text-gray-300">[Deleted]</p>
                                   ) : msg?.file_url ? (
                                     msg.file_type === 'audio' || msg.file_url.match(/\.(mp3|wav|ogg|webm)$/) ? (
@@ -808,7 +860,10 @@ function Message() {
                                     )
                                   ) : (
                                     <p className="whitespace-pre-wrap break-words">{msg?.content || '[Empty]'}</p>
-                                  )}
+                                  )} */}
+
+                                  {renderMessageContent(msg)}
+
                                   <div
                                     className={`text-xs mt-1 flex items-center ${
                                       String(msg?.sender?.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'
@@ -1085,6 +1140,16 @@ function Message() {
             </button>
           </div>
         </div>
+      )}
+
+      {selectedPost && createPortal(
+        <PostPopup
+          post={selectedPost}
+          userData={{ username: selectedPost.user.username, profileImage: selectedPost.user.profile_picture }}
+          isOpen={!!selectedPost}
+          onClose={() => setSelectedPost(null)}
+        />,
+        document.body
       )}
     </div>
   );
