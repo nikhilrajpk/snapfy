@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Smile, X, Bookmark, Send, MoreHorizontal, ChevronRight, ChevronLeft, Edit, Trash, Archive } from 'lucide-react';
+import { Heart, MessageCircle, Smile, X, Bookmark, Send, MoreHorizontal, ChevronRight, ChevronLeft, Edit, Trash, Archive, Search } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useQueryClient } from '@tanstack/react-query';
 import { userLogout } from '../../API/authAPI';
 import { logout } from '../../redux/slices/userSlice';
+import { createPortal } from 'react-dom';
 
 const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSaveChange = null, onLikeChange = null, onCommentCountChange = null, }) => {
   const [liked, setLiked] = useState(post?.is_liked || false);
@@ -31,26 +32,47 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
   const [showLikedUsers, setShowLikedUsers] = useState(false);
   const [likedUsers, setLikedUsers] = useState([]);
   const [expandedReplies, setExpandedReplies] = useState({}); // New state to track which comments' replies are expanded
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [recentChats, setRecentChats] = useState([]);
 
   const commentInputRef = useRef(null);
   const popupRef = useRef(null);
   const menuRef = useRef(null);
   const confirmationRef = useRef(null);
   const videoRef = useRef(null);
+  const shareModalRef = useRef(null);
   const { user } = useSelector(state => state.user);
   const currentUser = user;
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    const fetchRecentChats = async () => {
+      try {
+        const response = await axiosInstance.get('/chatrooms/my-chats/');
+        setRecentChats(response.data.slice(0, 5)); // Limit to 5 recent chats
+      } catch (error) {
+        console.error('Error fetching recent chats:', error);
+      }
+    };
+    if (isShareModalOpen) fetchRecentChats();
+  }, [isShareModalOpen]);
+
   // Detect clicks outside to close popup
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (popupRef.current && !popupRef.current.contains(event.target) && 
-          !confirmationRef.current?.contains(event.target) && 
-          !menuRef.current?.contains(event.target)) {
+      if (
+        popupRef.current && !popupRef.current.contains(event.target) &&
+        !confirmationRef.current?.contains(event.target) &&
+        !menuRef.current?.contains(event.target) &&
+        !shareModalRef.current?.contains(event.target) // Exclude share modal
+      ) {
         onClose();
         setShowLikedUsers(false);
+        setIsShareModalOpen(false); // Close share modal if open
       }
     };
     if (isOpen) {
@@ -494,6 +516,59 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
     );
   };
 
+  const handleSearchUsers = async (term) => {
+    setSearchTerm(term);
+    if (!term.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    try {
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
+      setSearchResults(response.data.filter(u => u.id !== user.id));
+    } catch (error) {
+      console.error('Error searching users:', error);
+      dispatch(showToast({ message: 'Failed to search users', type: 'error' }));
+      setSearchResults([]);
+    }
+  };
+
+  const handleSharePost = async (recipientUsername, roomId = null) => {
+    if (!post?.id || !user?.id) {
+      dispatch(showToast({ message: 'Invalid post or user data', type: 'error' }));
+      return;
+    }
+
+    try {
+      let chatRoomId = roomId;
+      if (!chatRoomId) {
+        const response = await axiosInstance.post('/chatrooms/start-chat/', { username: recipientUsername });
+        if (!response.data?.id) {
+          throw new Error('Failed to start chat: No chat room ID returned');
+        }
+        chatRoomId = response.data.id;
+      }
+
+      const messageContent = `Shared post: ${window.location.origin}/post/${post.id}`;
+      const formData = new FormData();
+      formData.append('content', messageContent);
+
+      const messageResponse = await axiosInstance.post(`/chatrooms/${chatRoomId}/send-message/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      if (messageResponse.status === 200 || messageResponse.status === 201) {
+        dispatch(showToast({ message: 'Post shared successfully', type: 'success' }));
+        setIsShareModalOpen(false);
+        navigate(`/messages/${chatRoomId}`);
+      } else {
+        throw new Error('Failed to send message');
+      }
+    } catch (error) {
+      console.error('Error sharing post:', error.response?.data || error.message);
+      dispatch(showToast({ message: error.response?.data?.detail || 'Failed to share post', type: 'error' }));
+    }
+  };
+
   const isPostOwner = currentUser && currentUser.username === post?.user?.username;
   const isVideo = post?.file?.includes('/video/upload/');
   const normalizeUrl = (url) => url ? url.replace(/^(auto\/upload\/)+/, '') : '/default-post.png';
@@ -717,7 +792,7 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
                 <button onClick={() => commentInputRef.current.focus()}>
                   <MessageCircle size={24} className="transition-transform hover:scale-110" />
                 </button>
-                <button>
+                <button onClick={() => setIsShareModalOpen(true)}>
                   <Send size={24} className="transition-transform hover:scale-110" />
                 </button>
               </div>
@@ -846,6 +921,69 @@ const PostPopup = ({ post, userData, isOpen, onClose, onPostDeleted = null, onSa
             </div>
           </div>
         </div>
+      )}
+
+{isShareModalOpen && createPortal(
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => setIsShareModalOpen(false)}>
+          <div
+            ref={shareModalRef}
+            className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md max-h-[80vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Share Post</h3>
+            <div className="relative mb-4">
+              <input
+                type="text"
+                placeholder="Search users..."
+                className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                value={searchTerm}
+                onChange={e => handleSearchUsers(e.target.value)}
+              />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
+              {searchResults.length > 0 && (
+                <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-[70]">
+                  {searchResults.map(u => (
+                    <div
+                      key={u.id}
+                      className="p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between"
+                      onClick={() => handleSharePost(u.username)}
+                    >
+                      <span>{u.username}</span>
+                      <button className="text-[#198754] hover:text-[#157a47]">Send</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-800 mb-2">Recent Chats</h4>
+              {recentChats.length > 0 ? (
+                recentChats.map(room => {
+                  const otherUser = room.users.find(u => u.id !== user.id);
+                  return (
+                    <div
+                      key={room.id}
+                      className="p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between"
+                      onClick={() => handleSharePost(otherUser?.username, room.id)}
+                    >
+                      <span>{room.is_group ? room.group_name : otherUser?.username || 'Unknown'}</span>
+                      <button className="text-[#198754] hover:text-[#157a47]">Send</button>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-gray-600">No recent chats</p>
+              )}
+            </div>
+            <button
+              onClick={() => setIsShareModalOpen(false)}
+              className="mt-4 w-full bg-gray-500 text-white py-2 rounded-full hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

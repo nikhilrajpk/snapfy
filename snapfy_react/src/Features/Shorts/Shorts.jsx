@@ -204,10 +204,10 @@ const ShortCard = ({ short, onClick }) => {
           <MessageCircle size={34} stroke="#198754" />
           <span className="text-sm text-[#198754] font-semibold mt-1">{short.comment_count || 0}</span>
         </button>
-        <button className="flex flex-col items-center hover:scale-110 transition-transform duration-200">
+        {/* <button className="flex flex-col items-center hover:scale-110 transition-transform duration-200">
           <Share2 size={34} stroke="#198754" />
           <span className="text-sm text-[#198754] font-semibold mt-1">Share</span>
-        </button>
+        </button> */}
         <button onClick={handleSave} className="flex flex-col items-center hover:scale-110 transition-transform duration-200">
           <Bookmark size={34} stroke="#198754" fill={isSaved ? '#198754' : 'none'} />
           <span className="text-sm text-[#198754] font-semibold mt-1">{isSaved ? 'Saved' : 'Save'}</span>
