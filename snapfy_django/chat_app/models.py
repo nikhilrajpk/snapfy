@@ -96,12 +96,15 @@ class CallLog(models.Model):
     call_status = models.CharField(max_length=10, choices=CALL_STATUSES, default='ongoing')
     call_start_time = models.DateTimeField(default=now)
     call_end_time = models.DateTimeField(null=True, blank=True)
-    duration = models.IntegerField(null=True, blank=True, help_text="Call duration in seconds")
+    duration = models.IntegerField(null=True, blank=True)  # In seconds
+    sdp = models.TextField(null=True, blank=True)  # Store SDP offer
     
     def save(self, *args, **kwargs):
-        if self.call_status == 'completed' and self.call_end_time:
-            self.duration = (self.call_end_time - self.call_start_time).total_seconds()
-        super(CallLog, self).save(*args, **kwargs)
+        if self.call_end_time and self.call_status == 'completed':
+            self.duration = int((self.call_end_time - self.call_start_time).total_seconds())
+        else:
+            self.duration = None  # No duration for missed/rejected calls
+            super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.caller} -> {self.receiver} ({self.call_type}, {self.call_status})"

@@ -6,11 +6,14 @@ from rest_framework import status
 from cryptography.fernet import Fernet, InvalidToken
 import base64
 import binascii
-from .models import ChatRoom, Message, User
-from .serializers import ChatRoomSerializer, MessageSerializer, UserSerializer
+from .models import ChatRoom, Message, CallLog
+from user_app.models import User
+from .serializers import ChatRoomSerializer, MessageSerializer, UserSerializer, CallLogSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
+from django.db import models
+import json
 
 class ChatAPIViewSet(viewsets.ModelViewSet):
     queryset = ChatRoom.objects.all()
@@ -313,3 +316,106 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             "count": len(updated_ids),
             "updated_ids": [str(id) for id in updated_ids]
         }, status=status.HTTP_200_OK)
+        
+        
+    # Call functionality
+    @action(detail=True, methods=['post'], url_path='start-call')
+    def start_call(self, request, pk=None):
+        chat_room = self.get_object()
+        if request.user not in chat_room.users.all() or chat_room.is_group:
+            return Response({"error": "Not authorized or group chat not supported"}, 
+                        status=status.HTTP_403_FORBIDDEN)
+
+        call_type = request.data.get('call_type', 'audio')
+        sdp = request.data.get('sdp')
+        
+        if call_type not in ['audio', 'video']:
+            return Response({"error": "Invalid call type"}, 
+                        status=status.HTTP_400_BAD_REQUEST)
+
+        other_user = chat_room.users.exclude(id=request.user.id).first()
+        if not other_user:
+            return Response({"error": "No other user in chat"}, 
+                        status=status.HTTP_400_BAD_REQUEST)
+
+        call_log = CallLog.objects.create(
+            caller=request.user,
+            receiver=other_user,
+            call_type=call_type,
+            call_status='ongoing',
+            sdp=sdp
+        )
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            caller_data = {
+                "id": str(request.user.id),
+                "username": request.user.username,
+                "profile_picture": request.user.profile_picture.url if request.user.profile_picture else None
+            }
+            
+            async_to_sync(channel_layer.group_send)(
+                f"user_{other_user.id}",
+                {
+                    "type": "call_offer",
+                    "call_id": str(call_log.id),
+                    "room_id": str(chat_room.id),
+                    "target_user_id": str(other_user.id),  # Add target_user_id
+                    "caller": caller_data,
+                    "sdp": sdp,
+                    "call_type": call_type
+                }
+            )
+            
+        return Response({
+            "call_id": str(call_log.id),
+            "room_id": str(chat_room.id),
+            "caller": caller_data,
+            "call_type": call_type,
+            "status": "ongoing"
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='end-call')
+    def end_call(self, request, pk=None):
+        chat_room = self.get_object()
+        call_id = request.data.get('call_id')
+        call_status = request.data.get('call_status', 'completed')
+        duration = request.data.get('duration', 0)
+
+        try:
+            call_log = CallLog.objects.filter(
+                models.Q(id=call_id) &
+                (models.Q(caller=request.user) | models.Q(receiver=request.user))
+            ).get()
+
+            call_log.call_end_time = timezone.now()
+            call_log.call_status = call_status
+            call_log.duration = duration
+            call_log.save()
+
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                target_user = call_log.receiver if request.user == call_log.caller else call_log.caller
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{target_user.id}",
+                    {
+                        "type": "call_ended",
+                        "call_id": str(call_log.id),
+                        "room_id": str(chat_room.id),
+                        "call_status": call_status,
+                        "duration": duration
+                    }
+                )
+            return Response(CallLogSerializer(call_log, context={'request': request}).data, status=status.HTTP_200_OK)
+        except CallLog.DoesNotExist:
+            return Response({"error": "Call not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['get'], url_path='call-history')
+    def call_history(self, request, pk=None):
+        chat_room = self.get_object()
+        call_logs = CallLog.objects.filter(
+            models.Q(caller=request.user, receiver__in=chat_room.users.all()) |
+            models.Q(receiver=request.user, caller__in=chat_room.users.all())
+        ).order_by('-call_start_time')
+        serializer = CallLogSerializer(call_logs, many=True, context={'request': request})
+        return Response(serializer.data)

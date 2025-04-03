@@ -1,4 +1,3 @@
-// Message.jsx
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -16,7 +15,7 @@ import { createPortal } from 'react-dom';
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
 const EmojiPicker = React.lazy(() => import('emoji-picker-react'));
-const PostPopup = React.lazy(()=> import('../../Components/Post/PostPopUp'))
+const PostPopup = React.lazy(() => import('../../Components/Post/PostPopUp'));
 
 function Message() {
   const { conversationId } = useParams();
@@ -29,6 +28,8 @@ function Message() {
   const emojiPickerRef = useRef(null);
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const peerConnectionRef = useRef(null);
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
@@ -52,8 +53,18 @@ function Message() {
   const [groupUserSuggestions, setGroupUserSuggestions] = useState([]);
   const [showManageGroupModal, setShowManageGroupModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
-  const lastMarkAsReadRef = useRef(0);
-  const pendingMessages = useRef(new Map());
+  const [callState, setCallState] = useState(null); // null, 'incoming', 'outgoing', 'active', 'ended'
+  const [callId, setCallId] = useState(null);
+  const [caller, setCaller] = useState(null);
+  const [callOfferSdp, setCallOfferSdp] = useState(null);
+  const [callDuration, setCallDuration] = useState(0);
+  const callDurationRef = useRef(0);
+  const callTimerRef = useRef(null);
+
+  // WebRTC Configuration
+  const RTC_CONFIG = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Public STUN server
+  };
 
   // Timer effect for recording
   useEffect(() => {
@@ -104,6 +115,47 @@ function Message() {
     fetchChatRooms();
   }, [dispatch, user, navigate]);
 
+  // Check for active calls when component mounts or conversation changes
+  const checkActiveCalls = async () => {
+    if (!conversationId) return;
+    
+    try {
+      const response = await axiosInstance.get(`/chatrooms/${conversationId}/call-history/`);
+      const activeCall = response.data.find(call => 
+        call.call_status === 'ongoing' && !call.call_end_time
+      );
+      
+      if (activeCall) {
+        setCallId(activeCall.id);
+        if (String(activeCall.caller.id) === String(user.id)) {
+          setCallState('outgoing');
+        } else {
+          setCallState('incoming');
+          setCaller(activeCall.caller);
+          setCallOfferSdp(activeCall.sdp);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking active calls:', error);
+    }
+  };
+
+  // call timer
+  useEffect(() => {
+    if (callState === 'active') {
+      callDurationRef.current = 0;
+      setCallDuration(0);
+      callTimerRef.current = setInterval(() => {
+        callDurationRef.current += 1;
+        setCallDuration(callDurationRef.current);
+      }, 1000);
+    } else if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    return () => clearInterval(callTimerRef.current);
+  }, [callState]);
+
   useEffect(() => {
     if (!conversationId || !user) return;
 
@@ -114,13 +166,30 @@ function Message() {
         setSelectedRoom(roomData);
 
         const msgs = await getMessages(conversationId);
-        setMessages(msgs.map((msg) => ({
+        const messageItems = msgs.map((msg) => ({
           ...msg,
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
-          key: `${msg.id}-${msg.sent_at}`,
+          key: `${msg.id}-${msg.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
           file_url: msg.file_url || null,
-        })) || []);
-        setInitialLoad(true);
+        })) || [];
+
+        // Check for call history and add to messages
+        const callHistory = await axiosInstance.get(`/chatrooms/${conversationId}/call-history/`);
+        const callItems = callHistory.data.map((call) => ({
+          id: `call-${call.id}`,
+          key: `call-${call.id}-${call.call_start_time}-${Math.random().toString(36).substr(2, 5)}`,
+          sender: call.caller.id === user.id ? user : call.caller,
+          content: `Call: ${call.call_type} - ${call.call_status}`,
+          sent_at: call.call_end_time || call.call_start_time,
+          is_call: true,
+          call_status: call.call_status,
+          call_duration: call.duration ? formatCallDuration(call.duration) : null,
+        }));
+
+        setMessages([...messageItems, ...callItems].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at)));
+
+        // Check for active calls
+        await checkActiveCalls();
 
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
@@ -132,7 +201,7 @@ function Message() {
         setIsLoading(false);
       }
     };
-
+    
     fetchRoomAndMessages();
   }, [conversationId, dispatch, user, navigate]);
 
@@ -147,31 +216,29 @@ function Message() {
     if (!user?.id) return;
 
     let socketClosedIntentionally = false;
-
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
       const socket = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
       socketRef.current = socket;
 
-      socket.onopen = () => {
-        console.log('User WebSocket connection established');
-        socket.send(JSON.stringify({ type: 'join_all_users' }));
-        if (conversationId) {
-          socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+      socket.onclose = (event) => {
+        if (event.code !== 1000) { // Abnormal closure
+          console.log('WebSocket disconnected, reconnecting...');
+          setTimeout(connectWebSocket, 3000); // Reconnect after 3 seconds
         }
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         const data = JSON.parse(event.data);
-        console.log('WebSocket data:', data);
+        console.log('WebSocket data:', JSON.stringify(data, null, 2));
 
         switch (data.type) {
-          case 'connection_established':
-            console.log('Connection established:', data.user_id);
-            break;
-
           case 'chat_message': {
             const message = data.message;
+            if (!message || !message.sender || !message.sender.id) {
+              console.error('Invalid chat_message data:', data);
+              break;
+            }
             const newMessage = {
               ...message,
               file_url: message.file_url || null,
@@ -183,7 +250,7 @@ function Message() {
                 username: message.sender.username || 'Unknown',
                 profile_picture: message.sender.profile_picture || null,
               },
-              key: `${message.id}-${message.sent_at}`,
+              key: `${message.id}-${message.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
               file_type: message.file_type || 'other',
             };
 
@@ -222,7 +289,7 @@ function Message() {
               });
 
               if (String(newMessage.sender.id) !== String(user?.id)) {
-                socket.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+                socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
               }
             }
             break;
@@ -276,34 +343,297 @@ function Message() {
                 : prev
             );
             break;
+
+            case 'call_offer':
+              if (String(data.room_id) === String(conversationId) && String(data.caller.id) !== String(user.id)) {
+                console.log('Received call offer:', data);
+                setCallState('incoming');
+                setCallId(data.call_id);
+                setCaller(data.caller);
+                // Store the full offer object
+                setCallOfferSdp({
+                  type: data.sdp.type || 'offer',
+                  sdp: data.sdp.sdp || data.sdp
+                });
+                
+                // Show notification
+                dispatch(showToast({
+                  message: `Incoming call from ${data.caller.username}`,
+                  type: 'info',
+                  action: {
+                    label: 'Answer',
+                    onClick: () => navigate(`/messages/${data.room_id}`)
+                  }
+                }));
+              }
+              break;
+
+
+          case 'call_answer':
+            if (String(data.room_id) === String(conversationId) && peerConnectionRef.current) {
+              await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+              setCallState('active');
+            }
+            break;
+
+          case 'ice_candidate':
+            if (String(data.room_id) === String(conversationId) && peerConnectionRef.current) {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+            break;
+
+          case 'call_ended':
+            if (String(data.room_id) === String(conversationId)) {
+              endCall(data.call_status, false); // Prevent duplicate from WebSocket
+              const existingCallIndex = messages.findIndex((msg) => msg.id === `call-${data.call_id}`);
+              const callMessage = {
+                id: `call-${data.call_id}`,
+                key: `call-${data.call_id}-${new Date().toISOString()}-${Math.random().toString(36).substr(2, 5)}`,
+                sender: caller || user,
+                content: `Call: audio - ${data.call_status}`,
+                sent_at: new Date().toISOString(),
+                is_call: true,
+                call_status: data.call_status,
+                call_duration: formatCallDuration(data.duration || 0),
+              };
+              setMessages((prev) =>
+                existingCallIndex !== -1
+                  ? prev.map((msg, index) => (index === existingCallIndex ? callMessage : msg))
+                  : [...prev, callMessage].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at))
+              );
+            }
+            break;
         }
       };
 
       socket.onerror = (error) => console.error('WebSocket error:', error);
       socket.onclose = (event) => {
         console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
-        if (event.code !== 1000 && !socketClosedIntentionally) {
-          setTimeout(connectWebSocket, 1000);
-        }
+        if (event.code !== 1000 && !socketClosedIntentionally) setTimeout(connectWebSocket, 1000);
       };
     };
 
     connectWebSocket();
 
-    const intervalId = setInterval(() => {
-      setChatRooms((prev) => [...prev]);
-      setSelectedRoom((prev) => (prev ? { ...prev } : null));
-    }, 60000);
-
     return () => {
-      socketClosedIntentionally = true;
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.close(1000, 'Component unmounted');
       }
-      clearInterval(intervalId);
     };
   }, [user?.id, conversationId, dispatch]);
 
+  // WebRTC Call Functions
+  const startCall = async () => {
+    try {
+      const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
+      if (!otherUser?.id) throw new Error('No user to call');
+  
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+  
+      peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
+      stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
+  
+      peerConnectionRef.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          socketRef.current.send(JSON.stringify({
+            type: 'ice_candidate',
+            room_id: conversationId,
+            target_user_id: otherUser.id,
+            candidate: event.candidate,
+          }));
+        }
+      };
+  
+      const offer = await peerConnectionRef.current.createOffer();
+      await peerConnectionRef.current.setLocalDescription(offer);
+  
+      const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
+        call_type: 'audio',
+        sdp: offer,
+      });
+  
+      if (!response.data.call_id) {
+        throw new Error('Failed to start call: no call ID returned');
+      }
+  
+      setCallId(response.data.call_id);
+      setCallState('outgoing');
+  
+    } catch (error) {
+      console.error('Error starting call:', error);
+      dispatch(showToast({ message: 'Failed to start call', type: 'error' }));
+      endCall('failed');
+    }
+  };
+
+  const acceptCall = async () => {
+    try {
+      if (!callOfferSdp || !caller?.id) {
+        console.error('Call acceptance failed - missing data:', { 
+          callOfferSdp, 
+          caller,
+          callState,
+          callId
+        });
+        throw new Error('Call offer or caller info missing');
+      }
+  
+      // Ensure we have a valid SDP offer
+      const offer = {
+        type: callOfferSdp.type || 'offer',
+        sdp: callOfferSdp.sdp
+      };
+  
+      if (!offer.sdp) {
+        throw new Error('Invalid SDP offer');
+      }
+  
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+  
+      // Create new peer connection
+      peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
+      stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
+  
+      peerConnectionRef.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          socketRef.current.send(JSON.stringify({
+            type: 'ice_candidate',
+            room_id: conversationId,
+            target_user_id: caller.id,
+            candidate: event.candidate,
+          }));
+        }
+      };
+  
+      peerConnectionRef.current.ontrack = (event) => {
+        const remoteAudio = new Audio();
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+      };
+  
+      // Set remote description first
+      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+      
+      // Create and set local answer
+      const answer = await peerConnectionRef.current.createAnswer();
+      await peerConnectionRef.current.setLocalDescription(answer);
+  
+      // Send answer to caller
+      socketRef.current.send(JSON.stringify({
+        type: 'call_answer',
+        room_id: conversationId,
+        target_user_id: caller.id,
+        call_id: callId,
+        sdp: answer,
+      }));
+  
+      setCallState('active');
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      dispatch(showToast({ message: 'Failed to accept call', type: 'error' }));
+      endCall('failed');
+    }
+  };
+
+  const endCall = async (status = 'completed', localInitiated = true) => {
+    // Clean up media streams
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+  
+    // Stop call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+  
+    // Notify server if we initiated the end
+    if (callId && localInitiated) {
+      try {
+        await axiosInstance.post(`/chatrooms/${conversationId}/end-call/`, {
+          call_id: callId,
+          call_status: status,
+          duration: callDurationRef.current,
+        });
+  
+        const targetUserId = caller?.id || 
+          (selectedRoom?.users.find(u => String(u.id) !== String(user.id))?.id);
+        
+        if (targetUserId) {
+          socketRef.current.send(JSON.stringify({
+            type: 'call_ended',
+            room_id: conversationId,
+            target_user_id: targetUserId,
+            call_id: callId,
+            call_status: status,
+            duration: callDurationRef.current,
+          }));
+        }
+      } catch (error) {
+        console.error('Error ending call:', error);
+      }
+    }
+  
+    // Reset all call state
+    setCallState(null);
+    setCallId(null);
+    setCaller(null);
+    setCallOfferSdp(null);
+    setCallDuration(0);
+    callDurationRef.current = 0;
+  };
+
+  const cleanupCall = () => {
+    if (callState) {
+      setCallState(null);
+      setCallId(null);
+      setCaller(null);
+      setCallOfferSdp(null);
+      setCallDuration(0);
+      callDurationRef.current = 0;
+      
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+        callTimerRef.current = null;
+      }
+    }
+  };
+
+  const formatCallDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+
+
+  useEffect(() => {
+    console.log('Caller state updated:', caller);
+  }, [caller]);
+
+  useEffect(() => {
+    console.log('Call state changed:', {
+      state: callState,
+      caller: caller,
+      callId: callId
+    });
+  }, [callState, caller, callId]);
 
   const handlePostClick = async (postId) => {
     try {
@@ -316,19 +646,35 @@ function Message() {
   };
 
   const renderMessageContent = (msg) => {
+    // First check if it's a call
+    if (msg.is_call) {
+      return (
+        <div className="flex items-center space-x-2">
+          <IoCall className={msg.call_status === 'completed' ? 'text-green-500' : 'text-red-500'} />
+          <span className="text-blue-500 italic">
+            {msg.call_status === 'completed' ? 'Call completed' : `Call ${msg.call_status}`}
+            {msg.call_duration && ` (${msg.call_duration})`}
+          </span>
+        </div>
+      );
+    }
+  
+    // Then handle regular messages
     const postLinkRegex = /Shared post: (.*)\/post\/(\d+)/;
     const match = msg.content.match(postLinkRegex);
+    
     if (match && !msg.is_deleted) {
       const postId = match[2];
       return (
         <div
-          className="cursor-pointer text-blue-500 hover:underline"
+          className="cursor-pointer text-blue-400 hover:underline"
           onClick={() => handlePostClick(postId)}
         >
           View shared post
         </div>
       );
     }
+  
     return msg.is_deleted ? (
       <p className="italic text-gray-300">[Deleted]</p>
     ) : msg.file_url ? (
@@ -567,8 +913,8 @@ function Message() {
       return;
     }
     try {
-      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`); // Fixed endpoint
-      const filteredUsers = response.data.filter(u => String(u.id) !== String(user.id)); // Exclude current user
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
+      const filteredUsers = response.data.filter(u => String(u.id) !== String(user.id));
       isGroupSearch ? setGroupUserSuggestions(filteredUsers) : setSearchResults(filteredUsers);
     } catch (error) {
       console.error('Error searching users:', error);
@@ -786,7 +1132,12 @@ function Message() {
                         <div className="flex items-center space-x-3">
                           {!selectedRoom.is_group && (
                             <>
-                              <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Audio call">
+                              <button
+                                onClick={startCall}
+                                className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+                                title="Audio call"
+                                disabled={callState}
+                              >
                                 <IoCall size={20} />
                               </button>
                               <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Video call">
@@ -828,7 +1179,6 @@ function Message() {
                                     }
                                     alt={msg?.sender?.username || 'Unknown'}
                                     className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
-                                    // onError={(e) => (e.target.src = `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`)}
                                   />
                                 </Link>
                               )}
@@ -840,37 +1190,14 @@ function Message() {
                                       : 'bg-white text-gray-800 rounded-tl-none'
                                   } ${msg.file_type === 'audio' || msg.file_url?.match(/\.(mp3|wav|ogg|webm)$/) ? 'min-w-[250px]' : ''}`}
                                 >
-
-                                  {/* {msg?.is_deleted ? (
-                                    <p className="italic text-gray-300">[Deleted]</p>
-                                  ) : msg?.file_url ? (
-                                    msg.file_type === 'audio' || msg.file_url.match(/\.(mp3|wav|ogg|webm)$/) ? (
-                                      <audio controls className="w-full h-12">
-                                        <source src={msg.file_url} type={msg.file_type === 'audio' ? 'audio/webm' : 'audio/mpeg'} />
-                                      </audio>
-                                    ) : msg.file_url.match(/\.(mp4|webm)$/) ? (
-                                      <video src={msg.file_url} controls className="rounded-lg max-h-60 w-auto" />
-                                    ) : (
-                                      <img
-                                        src={msg.file_url}
-                                        alt="Shared file"
-                                        className="rounded-lg max-h-60 w-auto cursor-pointer"
-                                        onClick={() => handleImageClick(msg.file_url)}
-                                      />
-                                    )
-                                  ) : (
-                                    <p className="whitespace-pre-wrap break-words">{msg?.content || '[Empty]'}</p>
-                                  )} */}
-
                                   {renderMessageContent(msg)}
-
                                   <div
                                     className={`text-xs mt-1 flex items-center ${
                                       String(msg?.sender?.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'
                                     }`}
                                   >
                                     {formatMessageTime(msg?.sent_at)}
-                                    {String(msg?.sender?.id) === String(user?.id) && (
+                                    {String(msg?.sender?.id) === String(user?.id) && !msg.is_call && (
                                       <span className="ml-1">
                                         {msg?.is_read ? '✓✓' : '✓'}
                                         {msg?.is_read && msg?.read_at && (
@@ -882,7 +1209,7 @@ function Message() {
                                     )}
                                   </div>
                                 </div>
-                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && msg.id && (
+                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && !msg.is_call && msg.id && (
                                   <button
                                     onClick={() => handleDeleteMessage(msg.id)}
                                     className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
@@ -1138,6 +1465,43 @@ function Message() {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Call Modal */}
+      {(callState === 'incoming' || callState === 'outgoing' || callState === 'active') && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md text-center">
+            <img
+              src={callState === 'incoming' ? (caller?.profile_picture ? `${CLOUDINARY_ENDPOINT}${caller.profile_picture}` : '/default-profile.png') : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png')}
+              alt={callState === 'incoming' ? caller?.username : otherUser?.username}
+              className="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-4 border-blue-400"
+            />
+            <h3 className="text-2xl font-bold text-gray-800">
+              {callState === 'incoming' ? 'Incoming Call' : callState === 'outgoing' ? 'Calling...' : 'In Call'}
+            </h3>
+            <p className="text-gray-600 mt-2">{callState === 'incoming' ? caller?.username : otherUser?.username}</p>
+            {callState === 'active' && (
+              <div className="text-xl font-mono mt-4">{formatCallDuration(callDuration)}</div>
+            )}
+            <div className="flex justify-center mt-4 space-x-4">
+              {callState === 'incoming' && (
+                <>
+                  <button onClick={acceptCall} className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" title="Accept call">
+                    <IoCall size={24} />
+                  </button>
+                  <button onClick={() => endCall('rejected')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="Reject call">
+                    <IoCall size={24} className="transform rotate-135" />
+                  </button>
+                </>
+              )}
+              {(callState === 'outgoing' || callState === 'active') && (
+                <button onClick={() => endCall(callState === 'outgoing' ? 'missed' : 'completed')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="End call">
+                  <IoCall size={24} className="transform rotate-135" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

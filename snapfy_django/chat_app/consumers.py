@@ -30,9 +30,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             await self.accept()
             await self.send(text_data=json.dumps({"type": "connection_established", "user_id": self.user_id}))
             await self.broadcast_user_status(True)
-            print(f"User {self.user.username} connected to WebSocket")
         except Exception as e:
-            print(f"WebSocket connection error: {str(e)}")
             await self.close(code=4001, reason=f"Connection error: {str(e)}")
 
     @database_sync_to_async
@@ -65,6 +63,14 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 await self.handle_mark_as_read(data)
             elif message_type == 'join_all_users':
                 await self.channel_layer.group_add("all_users", self.channel_name)
+            elif message_type == 'call_offer':
+                await self.forward_call_signal(data, 'call_offer')
+            elif message_type == 'call_answer':
+                await self.forward_call_signal(data, 'call_answer')
+            elif message_type == 'ice_candidate':
+                await self.forward_call_signal(data, 'ice_candidate')
+            elif message_type == 'call_ended':
+                await self.forward_call_signal(data, 'call_ended')
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({"error": "Invalid message format"}))
 
@@ -210,4 +216,87 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             "user_id": event["user_id"],
             "is_online": event["is_online"],
             "last_seen": event["last_seen"]
+        }))
+        
+        
+    # Call functionality
+    async def forward_call_signal(self, data, signal_type):
+        room_id = data.get('room_id')
+        target_user_id = data.get('target_user_id')
+        
+        if not target_user_id or not await self.is_user_in_room(room_id):
+            return
+
+        payload = {
+            "type": signal_type,
+            "call_id": data.get('call_id'),
+            "room_id": room_id,
+            "target_user_id": target_user_id,  # Make sure this is included
+            "caller": {
+                "id": str(self.user.id),
+                "username": self.user.username,
+                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else ""
+            },
+            "call_status": data.get('call_status', 'ongoing')
+        }
+        
+        if signal_type in ["call_offer", "call_answer"]:
+            payload["sdp"] = data.get('sdp')
+        if signal_type == "ice_candidate":
+            payload["candidate"] = data.get('candidate')
+        if signal_type == "call_ended":
+            payload["duration"] = data.get('duration', 0)
+
+        await self.channel_layer.group_send(f"user_{target_user_id}", payload)
+
+    # WebSocket message handlers
+    async def call_offer(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "call_offer",
+            "call_id": event["call_id"],
+            "room_id": event["room_id"],
+            "caller": event["caller"],
+            "sdp": event["sdp"],
+            "call_type": event.get("call_type", "audio")
+        }))
+        
+        # Send notification if target_user_id exists
+        if 'target_user_id' in event:
+            await self.channel_layer.group_send(
+                f"user_{event['target_user_id']}_notifications",
+                {
+                    "type": "notification_message",
+                    "notification": {
+                        "id": f"call-{event['call_id']}",
+                        "message": json.dumps({
+                            "type": "call",
+                            "from_user": event["caller"],
+                            "room_id": event["room_id"],
+                            "call_id": event["call_id"]
+                        }),
+                        "created_at": timezone.now().isoformat(),
+                        "is_read": False
+                    }
+                }
+            )
+
+    async def call_answer(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def ice_candidate(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def call_ended(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "call_ended",
+            "call_id": event["call_id"],
+            "room_id": event["room_id"],
+            "call_status": event["call_status"],
+            "duration": event.get("duration", 0)
+        }))
+
+    async def call_history_update(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "call_history_update",
+            "call_data": event["call_data"]
         }))

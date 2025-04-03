@@ -64,9 +64,8 @@ class MessageSerializer(serializers.ModelSerializer):
 class CallLogSerializer(serializers.ModelSerializer):
     caller = UserSerializer(read_only=True)
     receiver = UserSerializer(read_only=True)
-    
+
     class Meta:
         model = CallLog
-        fields = ['id', 'caller', 'receiver', 'call_type', 'call_status', 
-                 'call_start_time', 'call_end_time', 'duration']
+        fields = ['id', 'caller', 'receiver', 'call_type', 'call_status', 'call_start_time', 'call_end_time', 'duration', 'sdp']
         read_only_fields = ['id', 'call_start_time', 'duration']
