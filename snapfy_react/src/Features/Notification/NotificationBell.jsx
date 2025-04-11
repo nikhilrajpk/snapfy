@@ -63,18 +63,18 @@ const NotificationBell = () => {
     const data = JSON.parse(notification.message);
     if (data.type === 'call') {
       e.preventDefault();
-      // Check if call is still active
       axiosInstance.get(`/chatrooms/${data.room_id}/call-history/`)
         .then(response => {
           const call = response.data.find(c => String(c.id) === String(data.call_id));
           if (call && call.call_status === 'ongoing' && !call.call_end_time) {
-            navigate(`/messages/${data.room_id}`);
+            // navigate(`/messages/${data.room_id}`);
           } else {
             dispatch(showToast({ message: 'Call has ended', type: 'info' }));
           }
         })
         .catch(error => {
           console.error('Error checking call status:', error);
+          dispatch(showToast({ message: 'Error checking call status', type: 'error' }));
         });
       setDropdownOpen(false);
     }

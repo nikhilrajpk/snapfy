@@ -224,44 +224,44 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         room_id = data.get('room_id')
         target_user_id = data.get('target_user_id')
         
-        if not target_user_id or not await self.is_user_in_room(room_id):
+        if not target_user_id or not room_id or not await self.is_user_in_room(room_id):
+            await self.send(text_data=json.dumps({"error": "Invalid call data"}))
             return
 
         payload = {
             "type": signal_type,
             "call_id": data.get('call_id'),
             "room_id": room_id,
-            "target_user_id": target_user_id,  # Make sure this is included
+            "target_user_id": target_user_id,
             "caller": {
                 "id": str(self.user.id),
                 "username": self.user.username,
-                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else ""
+                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None
             },
             "call_status": data.get('call_status', 'ongoing')
         }
         
         if signal_type in ["call_offer", "call_answer"]:
             payload["sdp"] = data.get('sdp')
-        if signal_type == "ice_candidate":
+        elif signal_type == "ice_candidate":
             payload["candidate"] = data.get('candidate')
-        if signal_type == "call_ended":
+        elif signal_type == "call_ended":
             payload["duration"] = data.get('duration', 0)
 
         await self.channel_layer.group_send(f"user_{target_user_id}", payload)
 
     # WebSocket message handlers
     async def call_offer(self, event):
-        await self.send(text_data=json.dumps({
-            "type": "call_offer",
-            "call_id": event["call_id"],
-            "room_id": event["room_id"],
-            "caller": event["caller"],
-            "sdp": event["sdp"],
-            "call_type": event.get("call_type", "audio")
-        }))
-        
-        # Send notification if target_user_id exists
-        if 'target_user_id' in event:
+        if all(k in event for k in ['call_id', 'room_id', 'caller', 'sdp']):
+            await self.send(text_data=json.dumps({
+                "type": "call_offer",
+                "call_id": event["call_id"],
+                "room_id": event["room_id"],
+                "caller": event["caller"],
+                "sdp": event["sdp"],
+                "call_type": event.get("call_type", "audio")
+            }))
+            # Send notification
             await self.channel_layer.group_send(
                 f"user_{event['target_user_id']}_notifications",
                 {

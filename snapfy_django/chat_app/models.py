@@ -89,7 +89,7 @@ class CallLog(models.Model):
         ('missed', 'Missed'),
         ('rejected', 'Rejected'),
     ]
-    
+    room = models.ForeignKey('ChatRoom', on_delete=models.CASCADE, related_name='call_logs')
     caller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='outgoing_calls')
     receiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='incoming_calls')
     call_type = models.CharField(max_length=10, choices=CALL_TYPES)

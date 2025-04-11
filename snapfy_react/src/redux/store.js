@@ -1,6 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import userReducer from './slices/userSlice';
 import toastReducer from './slices/toastSlice';
+import callReducer from './slices/callSlice'
 
 // Load state from localStorage
 const loadState = () => {
@@ -14,6 +15,7 @@ const loadState = () => {
         user: parsedState.user || null,
         isAuthenticated: parsedState.isAuthenticated || false,
       },
+      call: undefined,
       toast: undefined, // Don’t persist toast state
     };
   } catch (err) {
@@ -40,6 +42,7 @@ const saveState = (state) => {
 export const store = configureStore({
   reducer: {
     user: userReducer,
+    call: callReducer,
     toast: toastReducer,
   },
   preloadedState: loadState(),

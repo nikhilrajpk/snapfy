@@ -33,10 +33,6 @@ export const NotificationProvider = ({ children }) => {
       dispatch(showToast({
         message: `Incoming call from ${data.caller.username}`,
         type: 'info',
-        action: {
-          label: 'Answer',
-          onClick: () => navigate(`/messages/${data.room_id}`)
-        }
       }));
     }
   };

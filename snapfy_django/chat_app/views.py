@@ -339,6 +339,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST)
 
         call_log = CallLog.objects.create(
+            room=chat_room,  # Add this line to associate with the chat room
             caller=request.user,
             receiver=other_user,
             call_type=call_type,
@@ -360,7 +361,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                     "type": "call_offer",
                     "call_id": str(call_log.id),
                     "room_id": str(chat_room.id),
-                    "target_user_id": str(other_user.id),  # Add target_user_id
+                    "target_user_id": str(other_user.id),
                     "caller": caller_data,
                     "sdp": sdp,
                     "call_type": call_type

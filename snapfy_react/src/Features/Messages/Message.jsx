@@ -425,6 +425,11 @@ function Message() {
   // WebRTC Call Functions
   const startCall = async () => {
     try {
+      if (callState) {
+        dispatch(showToast({ message: 'Another call is already in progress', type: 'warning' }));
+        return;
+      }
+      
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
   
@@ -445,54 +450,52 @@ function Message() {
         }
       };
   
+      peerConnectionRef.current.ontrack = (event) => {
+        const remoteAudio = new Audio();
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.play().catch(err => console.error('Audio play error:', err));
+      };
+  
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
   
       const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
         call_type: 'audio',
-        sdp: offer,
+        sdp: offer,  // Send the full offer object
       });
-  
-      if (!response.data.call_id) {
-        throw new Error('Failed to start call: no call ID returned');
-      }
   
       setCallId(response.data.call_id);
       setCallState('outgoing');
+      
+      // Send call offer via WebSocket
+      socketRef.current.send(JSON.stringify({
+        type: 'call_offer',
+        call_id: response.data.call_id,
+        room_id: conversationId,
+        target_user_id: otherUser.id,
+        sdp: offer,
+        call_type: 'audio'
+      }));
   
     } catch (error) {
       console.error('Error starting call:', error);
-      dispatch(showToast({ message: 'Failed to start call', type: 'error' }));
-      endCall('failed');
+      cleanupCall();
+      dispatch(showToast({ 
+        message: error.response?.data?.error || 'Failed to start call', 
+        type: 'error' 
+      }));
     }
   };
 
   const acceptCall = async () => {
     try {
-      if (!callOfferSdp || !caller?.id) {
-        console.error('Call acceptance failed - missing data:', { 
-          callOfferSdp, 
-          caller,
-          callState,
-          callId
-        });
-        throw new Error('Call offer or caller info missing');
-      }
-  
-      // Ensure we have a valid SDP offer
-      const offer = {
-        type: callOfferSdp.type || 'offer',
-        sdp: callOfferSdp.sdp
-      };
-  
-      if (!offer.sdp) {
-        throw new Error('Invalid SDP offer');
+      if (!callOfferSdp || !callId || !caller?.id) {
+        throw new Error('Invalid call data');
       }
   
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
   
-      // Create new peer connection
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
   
@@ -510,17 +513,13 @@ function Message() {
       peerConnectionRef.current.ontrack = (event) => {
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
-        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+        remoteAudio.play().catch(err => console.error('Audio play error:', err));
       };
   
-      // Set remote description first
-      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-      
-      // Create and set local answer
+      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(callOfferSdp));
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
   
-      // Send answer to caller
       socketRef.current.send(JSON.stringify({
         type: 'call_answer',
         room_id: conversationId,
@@ -532,8 +531,8 @@ function Message() {
       setCallState('active');
     } catch (error) {
       console.error('Error accepting call:', error);
+      cleanupCall();
       dispatch(showToast({ message: 'Failed to accept call', type: 'error' }));
-      endCall('failed');
     }
   };
 
