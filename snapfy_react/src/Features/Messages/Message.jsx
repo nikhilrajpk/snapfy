@@ -140,9 +140,9 @@ function Message() {
 
   useEffect(() => {
     if (!conversationId || !user) return;
-
+  
     const fetchRoomAndMessages = async () => {
-      if (roomCache[conversationId]) {
+      if (roomCache[conversationId] && roomCache[conversationId].room.id === conversationId) {
         setSelectedRoom(roomCache[conversationId].room);
         setMessages(roomCache[conversationId].messages);
         setIsLoading(false);
@@ -150,7 +150,7 @@ function Message() {
       }
   
       setIsLoading(true);
-      dispatch(resetCall());
+      dispatch(resetCall()); // Reset call state on chat change
       try {
         const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then((res) => res.data);
         setSelectedRoom(roomData);
@@ -171,7 +171,7 @@ function Message() {
           content: `Call: ${call.call_type} - ${call.call_status}`,
           sent_at: call.call_end_time || call.call_start_time,
           is_call: true,
-          call_status: call.call_status,
+          call_status: call.call_status, // Use backend status
           call_duration: call.duration ? formatCallDuration(call.duration) : null,
         }));
   
@@ -192,7 +192,7 @@ function Message() {
         setIsLoading(false);
       }
     };
-
+  
     fetchRoomAndMessages();
   }, [conversationId, dispatch, user, navigate]);
 
@@ -368,8 +368,8 @@ function Message() {
             processedCallIds.add(callKey);
             if (String(data.room_id) === String(roomId)) {
               handleEndCall(data.call_status, data.duration, false);
-              // updateCallHistory(data.call_id, data.call_status, data.duration);
             }
+            updateCallHistory(data.call_id, data.call_status, data.duration);
             break;
           }
 
@@ -423,22 +423,26 @@ function Message() {
       dispatch(showToast({ message: 'Another call is in progress', type: 'warning' }));
       return;
     }
-
+  
     if (!selectedRoom || !conversationId) {
       dispatch(showToast({ message: 'No chat selected', type: 'error' }));
       return;
     }
-
+  
     try {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
-
+      if (!otherUser.is_online) {
+        dispatch(showToast({ message: `${otherUser.username} is offline`, type: 'error' }));
+        return;
+      }
+  
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-
+  
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-
+  
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
@@ -449,29 +453,29 @@ function Message() {
           }));
         }
       };
-
+  
       peerConnectionRef.current.ontrack = (event) => {
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
         remoteAudio.play().catch((err) => console.error('Audio play error:', err));
       };
-
+  
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
-
+  
       const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
         call_type: 'audio',
         sdp: offer,
       });
-
+  
       if (!response.data.call_id) throw new Error('Invalid response from server');
-
+  
       dispatch(startCall({
         callId: response.data.call_id,
         roomId: conversationId,
         caller: user,
       }));
-
+  
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({
           type: 'call_offer',
@@ -501,19 +505,14 @@ function Message() {
       dispatch(showToast({ message: 'Invalid call data', type: 'error' }));
       return;
     }
-
-    // Navigate immediately without waiting for fetch
-    if (conversationId !== roomId) {
-      navigate(`/messages/${roomId}`);
-    }
-
+  
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-
+  
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-
+  
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
@@ -524,17 +523,17 @@ function Message() {
           }));
         }
       };
-
+  
       peerConnectionRef.current.ontrack = (event) => {
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
         remoteAudio.play().catch((err) => console.error('Audio play error:', err));
       };
-
+  
       await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(callOfferSdp));
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
-
+  
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({
           type: 'call_answer',
@@ -544,6 +543,10 @@ function Message() {
           sdp: answer,
         }));
         dispatch(setCallState('active'));
+        // Navigate only if explicitly accepting
+        if (conversationId !== roomId) {
+          navigate(`/messages/${roomId}`);
+        }
       } else {
         throw new Error('WebSocket not connected');
       }
@@ -557,7 +560,7 @@ function Message() {
   const handleEndCall = async (status = 'completed', duration = callDuration, localInitiated = true) => {
     if (!callId || !roomId) return;
   
-    const finalStatus = callState === 'active' ? 'completed' : status; // Ensure "completed" if call was active
+    const finalStatus = callState === 'active' ? 'completed' : status;
   
     if (localInitiated) {
       try {
@@ -587,7 +590,7 @@ function Message() {
     }
   
     cleanupCall();
-    dispatch(endCall({ status: finalStatus, duration }));
+    dispatch(endCall({ status: finalStatus, duration: 0 })); // Reset duration to 0
     if (String(roomId) === String(conversationId)) {
       updateCallHistory(callId, finalStatus, duration);
     }
@@ -606,6 +609,7 @@ function Message() {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
+    dispatch(setCallDuration(0)); // Ensure duration is reset
   };
 
   const updateCallHistory = (callId, status, duration) => {
@@ -619,22 +623,19 @@ function Message() {
       sent_at: new Date().toISOString(),
       is_call: true,
       call_status: status,
-      call_duration: formatCallDuration(duration || 0),
+      call_duration: formatCallDuration(duration || 0), // Use provided duration
     };
   
     setMessages((prev) => {
       const existingIndex = prev.findIndex((msg) => msg.id === `call-${callId}`);
       if (existingIndex !== -1) {
-        // Update existing entry
         return prev.map((msg, idx) => (idx === existingIndex ? callMessage : msg));
       }
-      // Add new entry if not present
       return [...prev.filter((msg) => msg.id !== callMessage.id), callMessage].sort(
         (a, b) => new Date(a.sent_at) - new Date(b.sent_at)
       );
     });
   
-    // Update cache to prevent duplicates on reload
     setRoomCache((prev) => ({
       ...prev,
       [conversationId]: {

@@ -41,7 +41,7 @@ export const NotificationProvider = ({ children }) => {
     if (!user?.username) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = window.location.host;
+    const host = 'localhost:8000'; // Point to Django backend
     socketRef.current = new WebSocket(`${protocol}://${host}/ws/notifications/${user.username}/`);
 
     socketRef.current.onopen = () => {
