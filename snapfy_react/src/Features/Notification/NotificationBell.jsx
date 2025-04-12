@@ -1,3 +1,4 @@
+// notification bell
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -9,10 +10,10 @@ import { useDispatch } from 'react-redux';
 
 const NotificationBell = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const { unreadCount, recentNotifications, setUnreadCount, setRecentNotifications } = useNotifications();
+  const { unreadCount, recentNotifications, setUnreadCount, setRecentNotifications, syncUnreadCount } = useNotifications();
   const dropdownRef = useRef(null);
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
 
   const markAsRead = async (notificationId, e) => {
     e.stopPropagation();
@@ -34,6 +35,12 @@ const NotificationBell = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (dropdownOpen) {
+      syncUnreadCount();
+    }
+  }, [dropdownOpen, syncUnreadCount]);
 
   const getNotificationMessage = (notification) => {
     const data = JSON.parse(notification.message);
@@ -63,9 +70,10 @@ const NotificationBell = () => {
   };
 
   const handleNotificationClick = (notification, e) => {
+    e.preventDefault();
+    e.stopPropagation();
     const data = JSON.parse(notification.message);
     if (data.type === 'call') {
-      e.preventDefault();
       axiosInstance.get(`/chatrooms/${data.room_id}/call-history/`)
         .then(response => {
           const call = response.data.find(c => String(c.id) === String(data.call_id));
@@ -79,6 +87,9 @@ const NotificationBell = () => {
           console.error('Error checking call status:', error);
           dispatch(showToast({ message: 'Error checking call status', type: 'error' }));
         });
+      setDropdownOpen(false);
+    } else {
+      navigate(getNotificationLink(notification));
       setDropdownOpen(false);
     }
   };
@@ -101,29 +112,31 @@ const NotificationBell = () => {
           </div>
           <div className="max-h-96 overflow-y-auto">
             {recentNotifications.length > 0 ? (
-              recentNotifications.map((notification) => (
-                <Link
-                  key={notification.id}
-                  to={getNotificationLink(notification)}
-                  className={`flex items-center p-3 hover:bg-gray-100 transition-colors ${notification.is_read ? 'bg-white' : 'bg-blue-50'}`}
-                  onClick={(e) => handleNotificationClick(notification, e)}
-                >
-                  <img
-                    src={JSON.parse(notification.message).from_user.profile_picture ?
-                      `${CLOUDINARY_ENDPOINT}${JSON.parse(notification.message).from_user.profile_picture}` :
-                      '/default-profile.png'}
-                    className="w-8 h-8 rounded-full mr-2"
-                    alt="User"
-                    onError={(e) => (e.target.src = '/default-profile.png')}
-                  />
-                  <span className="text-sm text-gray-700 flex-1">{getNotificationMessage(notification)}</span>
-                  {!notification.is_read && (
-                    <button onClick={(e) => markAsRead(notification.id, e)} className="ml-2 text-green-500 hover:text-green-700">
-                      Mark as read
-                    </button>
-                  )}
-                </Link>
-              ))
+              recentNotifications.map((notification) => {
+                const data = JSON.parse(notification.message);
+                return (
+                  <div
+                    key={notification.id}
+                    className={`flex items-center p-3 hover:bg-gray-100 transition-colors ${notification.is_read ? 'bg-white' : 'bg-blue-50'}`}
+                    onClick={(e) => handleNotificationClick(notification, e)}
+                  >
+                    <img
+                      src={data.from_user.profile_picture ?
+                        `${CLOUDINARY_ENDPOINT}${data.from_user.profile_picture}` :
+                        '/default-profile.png'}
+                      className="w-8 h-8 rounded-full mr-2"
+                      alt="User"
+                      onError={(e) => (e.target.src = '/default-profile.png')}
+                    />
+                    <span className="text-sm text-gray-700 flex-1">{getNotificationMessage(notification)}</span>
+                    {!notification.is_read && (
+                      <button onClick={(e) => markAsRead(notification.id, e)} className="ml-2 text-green-500 hover:text-green-700">
+                        Mark as read
+                      </button>
+                    )}
+                  </div>
+                );
+              })
             ) : (
               <p className="p-3 text-gray-500 text-center">No notifications yet</p>
             )}

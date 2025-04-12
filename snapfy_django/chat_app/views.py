@@ -17,6 +17,10 @@ from django.db import models
 from django.core.cache import cache
 import json
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class ChatAPIViewSet(viewsets.ModelViewSet):
     queryset = ChatRoom.objects.all()
     permission_classes = [IsAuthenticated]
@@ -42,7 +46,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                 ),
                 models.Prefetch(
                     'messages',
-                    queryset=Message.objects.order_by('-sent_at')[:1]
+                    queryset=Message.objects.select_related('sender').order_by('-sent_at')
                 )
             )
             .order_by('-last_message_at')
@@ -358,22 +362,22 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         chat_room = self.get_object()
         if request.user not in chat_room.users.all() or chat_room.is_group:
             return Response({"error": "Not authorized or group chat not supported"}, 
-                          status=status.HTTP_403_FORBIDDEN)
+                            status=status.HTTP_403_FORBIDDEN)
 
         call_type = request.data.get('call_type', 'audio')
         sdp = request.data.get('sdp')
         
         if call_type not in ['audio', 'video']:
             return Response({"error": "Invalid call type"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+                            status=status.HTTP_400_BAD_REQUEST)
         if not sdp:
             return Response({"error": "SDP offer required"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+                            status=status.HTTP_400_BAD_REQUEST)
 
         other_user = chat_room.users.exclude(id=request.user.id).first()
         if not other_user:
             return Response({"error": "No other user in chat"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+                            status=status.HTTP_400_BAD_REQUEST)
 
         call_log = CallLog.objects.create(
             room=chat_room,
@@ -408,7 +412,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             )
             
             return Response({
-                "call_id": str(call_log.id),
+                "call_id": str(call_log.id),  # Ensure string ID
                 "room_id": str(chat_room.id),
                 "caller": caller_data,
                 "call_type": call_type,
@@ -416,6 +420,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
 
         if channel_layer:
+            logger.info(f"Sending call_offer to user_{other_user.id} for call_id {call_log.id}")
             async_to_sync(channel_layer.group_send)(
                 f"user_{other_user.id}",
                 {
@@ -439,7 +444,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             )
             
         return Response({
-            "call_id": str(call_log.id),
+            "call_id": str(call_log.id),  # Ensure string ID
             "room_id": str(chat_room.id),
             "caller": caller_data,
             "call_type": call_type,

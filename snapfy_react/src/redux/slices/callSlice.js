@@ -31,6 +31,7 @@ const callSlice = createSlice({
       state.roomId = action.payload;
     },
     resetCall(state) {
+      if (state.callState === 'active') return; // Prevent reset during active call
       state.callState = null;
       state.callId = null;
       state.caller = null;

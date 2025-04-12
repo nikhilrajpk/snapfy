@@ -150,7 +150,6 @@ function Message() {
       }
   
       setIsLoading(true);
-      dispatch(resetCall());
       try {
         const [roomResponse, messagesResponse, callHistoryResponse] = await Promise.all([
           axiosInstance.get(`/chatrooms/${conversationId}/`),
@@ -211,6 +210,8 @@ function Message() {
     if (!user?.id) return;
 
     const processedCallIds = new Set(); // Track processed call IDs
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
 
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
@@ -218,25 +219,46 @@ function Message() {
         console.error('No access token found');
         return;
       }
+
+      let sessionId = localStorage.getItem('session_id');
+      if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        localStorage.setItem('session_id', sessionId);
+      }
+
       socketRef.current = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
 
       socketRef.current.onopen = () => {
         console.log('WebSocket connected');
-        // Check active calls on reconnect
-        if (callId && roomId) {
-          axiosInstance.get(`/chatrooms/${roomId}/call-history/`)
-            .then(response => {
-              const call = response.data.find(c => String(c.id) === String(callId));
-              if (!call || call.call_end_time) {
-                cleanupCall();
-                dispatch(resetCall());
-              }
-            })
-            .catch(error => {
-              console.error('Error checking call status:', error);
-              cleanupCall();
-              dispatch(resetCall());
-            });
+        reconnectAttempts = 0;
+        localStorage.setItem('session_id', sessionId);
+  
+        // Restore call state if it exists and is still valid
+        const savedCallState = localStorage.getItem('call_state');
+        if (savedCallState && callState !== 'active') { // Only restore if not already in active call
+          const { callId, roomId, caller, sdp, state, timestamp } = JSON.parse(savedCallState);
+          if (Date.now() - timestamp < 60000) { // Valid for 60 seconds
+            dispatch(startCall({ callId, roomId, caller, sdp }));
+            dispatch(setCallState(state));
+            if (state === 'outgoing' && caller.id === user.id) {
+              const otherUserId = selectedRoom?.users.find(u => String(u.id) !== String(user.id))?.id;
+              socketRef.current.send(JSON.stringify({
+                type: 'call_offer',
+                call_id: callId,
+                room_id: roomId,
+                target_user_id: otherUserId,
+                sdp: sdp,
+                call_type: 'audio',
+                caller: {
+                  id: user.id,
+                  username: user.username,
+                  profile_picture: user.profile_picture || null,
+                },
+              }));
+            }
+          } else {
+            localStorage.removeItem('call_state');
+          }
         }
       };
 
@@ -245,6 +267,19 @@ function Message() {
         console.log('WebSocket message:', data); // Debug log
 
         switch (data.type) {
+          case 'connection_established':
+              console.log(`Connection established for user ${data.user_id}`);
+              break;
+
+          case 'connection_replace':
+            console.log('New connection established, closing this one');
+            if (callState === 'active' || callState === 'incoming' || callState === 'outgoing') {
+              console.log('Preserving connection due to active call');
+              return; // Do not close if call is active
+            }
+            socketRef.current.close(1000, 'Replaced by new connection');
+              break;
+
           case 'chat_message': {
             const message = data.message;
             if (!message?.sender?.id) break;
@@ -317,34 +352,39 @@ function Message() {
             break;
 
           case 'user_status':
-            setChatRooms((prev) =>
-              prev.map((room) => {
-                const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
-                if (String(otherUser?.id) === String(data.user_id)) {
-                  return {
-                    ...room,
-                    users: room.users.map((u) =>
-                      String(u.id) === String(data.user_id)
-                        ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
-                        : u
-                    ),
-                  };
-                }
-                return room;
-              })
-            );
-            setSelectedRoom((prev) =>
-              prev && prev.users.some((u) => String(u.id) === String(data.user_id))
-                ? {
-                    ...prev,
-                    users: prev.users.map((u) =>
-                      String(u.id) === String(data.user_id)
-                        ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
-                        : u
-                    ),
+            console.log(`User status update: ${data.user_id} is_online=${data.is_online}`);
+            // Debounce status updates
+            clearTimeout(window.statusUpdateTimeout);
+            window.statusUpdateTimeout = setTimeout(() => {
+              setChatRooms((prev) =>
+                prev.map((room) => {
+                  const otherUser = room.users.find((u) => String(u.id) !== String(user?.id));
+                  if (String(otherUser?.id) === String(data.user_id)) {
+                    return {
+                      ...room,
+                      users: room.users.map((u) =>
+                        String(u.id) === String(data.user_id)
+                          ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
+                          : u
+                      ),
+                    };
                   }
-                : prev
-            );
+                  return room;
+                })
+              );
+              setSelectedRoom((prev) =>
+                prev && prev.users.some((u) => String(u.id) === String(data.user_id))
+                  ? {
+                      ...prev,
+                      users: prev.users.map((u) =>
+                        String(u.id) === String(data.user_id)
+                          ? { ...u, is_online: data.is_online, last_seen: data.last_seen }
+                          : u
+                      ),
+                    }
+                  : prev
+              );
+            }, 500);
             break;
 
           case 'call_offer':
@@ -353,6 +393,7 @@ function Message() {
                 dispatch(showToast({ message: 'Invalid call data received', type: 'error' }));
                 break;
               }
+              console.log('Received call_offer:', data);
               dispatch(acceptCall({
                 callId: data.call_id,
                 caller: data.caller,
@@ -362,8 +403,9 @@ function Message() {
               dispatch(showToast({
                 message: `Incoming call from ${data.caller.username}`,
                 type: 'info',
-                action: { label: 'Answer' }, 
+                action: { label: 'Answer' },
               }));
+              dispatch(setCallState('incoming'));
             }
             break;
 
@@ -372,7 +414,6 @@ function Message() {
               await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
               dispatch(setCallState('active'));
             } else if (String(data.caller.id) === String(user.id) && callState === 'outgoing') {
-              // Caller (Zoro) receives the answer
               await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
               dispatch(setCallState('active'));
             }
@@ -386,7 +427,7 @@ function Message() {
 
           case 'call_ended': {
             const callKey = `${data.call_id}-${data.type}`;
-            if (processedCallIds.has(callKey)) break; // Skip if already processed
+            if (processedCallIds.has(callKey)) break;
             processedCallIds.add(callKey);
             if (String(data.room_id) === String(roomId)) {
               handleEndCall(data.call_status, data.duration, false);
@@ -412,9 +453,17 @@ function Message() {
       };
 
       socketRef.current.onerror = (error) => console.error('WebSocket error:', error);
+
       socketRef.current.onclose = (event) => {
         console.log('WebSocket closed:', event);
-        if (event.code !== 1000) setTimeout(connectWebSocket, 3000); // Reconnect if not intentional close
+        if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          setTimeout(() => connectWebSocket(), 2000 * reconnectAttempts);
+          console.log(`Reconnecting WebSocket (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+        } else if (reconnectAttempts >= maxReconnectAttempts && callState !== 'active') {
+          dispatch(showToast({ message: 'Failed to connect to chat server', type: 'error' }));
+          handleEndCall('disconnected', callDuration, true);
+        }
       };
     };
 
@@ -426,7 +475,7 @@ function Message() {
         socketRef.current.close(1000, 'User left messaging section');
       }
     };
-  }, [user?.id, dispatch, navigate, roomId]);
+  }, [user?.id, dispatch, navigate, roomId, callId, callState]);
 
   useEffect(() => {
     if (callState === 'active') {
@@ -448,6 +497,11 @@ function Message() {
   
     if (!selectedRoom || !conversationId) {
       dispatch(showToast({ message: 'No chat selected', type: 'error' }));
+      return;
+    }
+  
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      dispatch(showToast({ message: 'Chat server not connected. Please try again.', type: 'error' }));
       return;
     }
   
@@ -486,6 +540,7 @@ function Message() {
         sdp: offer,
       });
   
+      console.log('start-call response:', response.data);
       if (response.data.status === 'missed') {
         cleanupCall();
         dispatch(showToast({ message: `${otherUser.username} is offline`, type: 'info' }));
@@ -493,34 +548,46 @@ function Message() {
         return;
       }
   
-      if (!response.data.call_id) throw new Error('Invalid response from server');
+      if (!response.data.call_id) {
+        throw new Error('Invalid call_id from server');
+      }
   
       dispatch(startCall({
         callId: response.data.call_id,
         roomId: conversationId,
         caller: user,
+        sdp: offer,
+      }));
+      dispatch(setCallState('outgoing'));
+  
+      // Store call state in localStorage for recovery
+      localStorage.setItem('call_state', JSON.stringify({
+        callId: response.data.call_id,
+        roomId: conversationId,
+        caller: user,
+        sdp: offer,
+        state: 'outgoing',
+        timestamp: Date.now(),
       }));
   
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
-          type: 'call_offer',
-          call_id: response.data.call_id,
-          room_id: conversationId,
-          target_user_id: otherUser.id,
-          sdp: offer,
-          call_type: 'audio',
-          caller: {
-            id: user.id,
-            username: user.username,
-            profile_picture: user.profile_picture || null,
-          },
-        }));
-      } else {
-        throw new Error('WebSocket not connected');
-      }
+      socketRef.current.send(JSON.stringify({
+        type: 'call_offer',
+        call_id: response.data.call_id,
+        room_id: conversationId,
+        target_user_id: otherUser.id,
+        sdp: offer,
+        call_type: 'audio',
+        caller: {
+          id: user.id,
+          username: user.username,
+          profile_picture: user.profile_picture || null,
+        },
+      }));
     } catch (error) {
       console.error('Error starting call:', error);
       cleanupCall();
+      dispatch(resetCall());
+      localStorage.removeItem('call_state');
       dispatch(showToast({ message: error.message || 'Failed to start call', type: 'error' }));
     }
   };
@@ -528,6 +595,8 @@ function Message() {
   const acceptCallFn = async () => {
     if (!callId || !caller?.id || !callOfferSdp || !roomId) {
       dispatch(showToast({ message: 'Invalid call data', type: 'error' }));
+      cleanupCall();
+      dispatch(resetCall());
       return;
     }
   
@@ -566,9 +635,24 @@ function Message() {
           target_user_id: caller.id,
           call_id: callId,
           sdp: answer,
+          caller: {
+            id: user.id,
+            username: user.username,
+            profile_picture: user.profile_picture || null,
+          },
         }));
         dispatch(setCallState('active'));
-        // Navigate only if explicitly accepting
+  
+        // Store call state for active call
+        localStorage.setItem('call_state', JSON.stringify({
+          callId: callId,
+          roomId: roomId,
+          caller: caller,
+          sdp: callOfferSdp,
+          state: 'active',
+          timestamp: Date.now(),
+        }));
+  
         if (conversationId !== roomId) {
           navigate(`/messages/${roomId}`);
         }
@@ -579,6 +663,8 @@ function Message() {
       console.error('Error accepting call:', error);
       cleanupCall();
       dispatch(showToast({ message: error.message || 'Failed to accept call', type: 'error' }));
+      dispatch(resetCall());
+      localStorage.removeItem('call_state');
     }
   };
 
@@ -615,7 +701,8 @@ function Message() {
     }
   
     cleanupCall();
-    dispatch(endCall({ status: finalStatus, duration: 0 })); // Reset duration to 0
+    dispatch(endCall({ status: finalStatus, duration: 0 }));
+    localStorage.removeItem('call_state');
     if (String(roomId) === String(conversationId)) {
       updateCallHistory(callId, finalStatus, duration);
     }
@@ -634,7 +721,6 @@ function Message() {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
-    dispatch(setCallDuration(0)); // Ensure duration is reset
   };
 
   const updateCallHistory = (callId, status, duration) => {

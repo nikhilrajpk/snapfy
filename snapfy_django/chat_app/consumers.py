@@ -3,35 +3,97 @@ import json
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken
 from channels.db import database_sync_to_async
+from django.db import models
 from django.utils import timezone
-from .models import ChatRoom, Message
+from .models import ChatRoom, Message, CallLog
 from cryptography.fernet import Fernet
+import logging
+import redis.asyncio as redis
+import uuid
+import asyncio
+import datetime
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 class UserChatConsumer(AsyncWebsocketConsumer):
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.redis_client = None
+    
     async def connect(self):
         self.user = None
+        self.connection_id = str(uuid.uuid4())
+        self.session_id = None
+        self.redis_client = redis.from_url("redis://localhost:6379/0")
+
+        query_string = self.scope.get('query_string', b'').decode()
+        if 'session_id=' in query_string:
+            self.session_id = query_string.split('session_id=')[1].split('&')[0]
+        else:
+            self.session_id = str(uuid.uuid4())
+
         try:
-            token = self.scope['query_string'].decode().split('token=')[1] if b'token=' in self.scope['query_string'] else None
+            token = query_string.split('token=')[1].split('&')[0] if 'token=' in query_string else None
             if not token:
+                logger.warning("No token provided")
                 await self.close(code=4003, reason="No token provided")
                 return
 
             self.user = await self.get_user_from_token(token)
             if not self.user:
+                logger.warning("Invalid token")
                 await self.close(code=4003, reason="Invalid token")
                 return
 
             self.user_id = str(self.user.id)
             self.group_name = f"user_{self.user_id}"
+
+            await self.add_connection_to_redis()
+            connections = await self.get_user_connections()
+            # Only replace connections that are not handling active calls
+            active_call = await self.check_active_call()
+            other_connections = [
+                conn for conn in connections
+                if conn.get('session_id') != self.session_id and
+                (not conn.get('timestamp') or
+                (timezone.now() - datetime.datetime.fromisoformat(conn.get('timestamp'))).total_seconds() > 300) and
+                not active_call  # Skip replacement if this connection is part of an active call
+            ]
+            if other_connections and not active_call:
+                logger.info(f"User {self.user_id} has stale connections, notifying others")
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {
+                        "type": "connection_replace",
+                        "user_id": self.user_id,
+                        "except_connection": self.connection_id
+                    }
+                )
+                await asyncio.sleep(0.5)
+
             await self.channel_layer.group_add(self.group_name, self.channel_name)
             await self.channel_layer.group_add("all_users", self.channel_name)
             await self.accept()
             await self.send(text_data=json.dumps({"type": "connection_established", "user_id": self.user_id}))
+            await self.update_user_status(True)
             await self.broadcast_user_status(True)
         except Exception as e:
+            logger.error(f"Connection error: {str(e)}")
             await self.close(code=4001, reason=f"Connection error: {str(e)}")
+        finally:
+            if self.redis_client:
+                await self.redis_client.close()
+                
+    @database_sync_to_async
+    def check_active_call(self):
+        # Check if the user is part of an active call
+        return CallLog.objects.filter(
+            models.Q(caller=self.user) | models.Q(receiver=self.user),
+            call_status='ongoing',
+            call_end_time__isnull=True
+        ).exists()
 
     @database_sync_to_async
     def get_user_from_token(self, token):
@@ -44,25 +106,83 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             return user
         except Exception:
             return None
+        
+    @database_sync_to_async
+    def update_user_status(self, is_online):
+        if self.user:
+            self.user.is_online = is_online
+            self.user.last_seen = timezone.now() if not is_online else None
+            self.user.save()
+            logger.info(f"User {self.user_id} status updated: is_online={is_online}")
+            
+    async def add_connection_to_redis(self):
+        try:
+            conn_data = json.dumps({
+                "conn_id": self.connection_id,
+                "session_id": self.session_id or "",
+                "timestamp": timezone.now().isoformat()
+            })
+            await self.redis_client.sadd(f"user_connections:{self.user_id}", conn_data)
+            await self.redis_client.expire(f"user_connections:{self.user_id}", 3600)
+        except Exception as e:
+            logger.error(f"Error adding connection to Redis: {e}")
+
+    async def remove_connection_from_redis(self):
+        try:
+            conn_data = json.dumps({"conn_id": self.connection_id, "session_id": self.session_id or ""})
+            await self.redis_client.srem(f"user_connections:{self.user_id}", conn_data)
+        except Exception as e:
+            logger.error(f"Error removing connection from Redis: {e}")
+
+    async def get_user_connections(self):
+        redis_client = redis.from_url("redis://localhost:6379/0")
+        try:
+            connections = await redis_client.smembers(f"user_connections:{self.user_id}")
+            result = []
+            for conn in connections:
+                try:
+                    conn_data = conn.decode('utf-8')
+                    if not conn_data:
+                        logger.warning(f"Empty connection data in Redis for user {self.user_id}")
+                        continue
+                    parsed_data = json.loads(conn_data)
+                    result.append(parsed_data)
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"Invalid connection data in Redis for user {self.user_id}: {e}")
+                    # Remove corrupted data
+                    await redis_client.srem(f"user_connections:{self.user_id}", conn)
+                    continue
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching connections from Redis: {e}")
+            return []
+        finally:
+            await redis_client.close()
 
     async def disconnect(self, close_code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
             await self.channel_layer.group_discard("all_users", self.channel_name)
-            await self.broadcast_user_status(False)
-        print(f"User disconnected with code {close_code}")
+            await self.remove_connection_from_redis()
+
+            await asyncio.sleep(1)
+            remaining_connections = await self.get_user_connections()
+            if not remaining_connections:
+                await self.update_user_status(False)
+                await self.broadcast_user_status(False)
+
+        logger.info(f"User {self.user_id} connection {self.connection_id} disconnected with code {close_code}")
+        if self.redis_client:
+            await self.redis_client.close()
 
     async def receive(self, text_data):
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
-
             if message_type == 'chat_message':
                 await self.handle_chat_message(data)
             elif message_type == 'mark_as_read':
                 await self.handle_mark_as_read(data)
-            elif message_type == 'join_all_users':
-                await self.channel_layer.group_add("all_users", self.channel_name)
             elif message_type == 'call_offer':
                 await self.forward_call_signal(data, 'call_offer')
             elif message_type == 'call_answer':
@@ -99,6 +219,11 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                     "unread_count": message_data.get('unread_count', 0)
                 }
             )
+            
+    async def connection_replace(self, event):
+        if event.get("except_connection") != self.connection_id:
+            logger.info(f"Received connection_replace for user {self.user_id}, closing connection {self.connection_id}")
+            await self.close(code=1000, reason="Connection replaced by new session")
 
     async def handle_mark_as_read(self, data):
         room_id = data.get('room_id')
@@ -252,8 +377,10 @@ class UserChatConsumer(AsyncWebsocketConsumer):
 
     # WebSocket message handlers
     async def call_offer(self, event):
+        logger.info(f"Sending call_offer for call_id {event['call_id']} to user {event['target_user_id']}")
         required_fields = ['call_id', 'room_id', 'caller', 'sdp']
         if not all(k in event for k in required_fields):
+            logger.info(f"Sending call_offer for call_id {event['call_id']} to user {event['target_user_id']}")
             await self.send(text_data=json.dumps({"type": "error", "error": "Missing call offer data"}))
             return
 
@@ -274,6 +401,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps(event))
 
     async def call_ended(self, event):
+        logger.info(f"Sending call_ended for call_id {event['call_id']} with status {event['call_status']}")
         await self.send(text_data=json.dumps({
             "type": "call_ended",
             "call_id": event["call_id"],
