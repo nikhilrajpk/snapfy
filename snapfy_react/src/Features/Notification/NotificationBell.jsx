@@ -42,7 +42,10 @@ const NotificationBell = () => {
       case 'mention': return `${data.from_user.username} mentioned you in a post`;
       case 'like': return `${data.from_user.username} liked your post`;
       case 'comment': return `${data.from_user.username} commented: "${data.content.substring(0, 20)}..."`;
-      case 'call': return `${data.from_user.username} is calling you`;
+      case 'call': 
+        return data.call_status === 'missed' 
+          ? `Missed call from ${data.from_user.username}`
+          : `${data.from_user.username} is calling you`;
       default: return 'New notification';
     }
   };
@@ -67,9 +70,9 @@ const NotificationBell = () => {
         .then(response => {
           const call = response.data.find(c => String(c.id) === String(data.call_id));
           if (call && call.call_status === 'ongoing' && !call.call_end_time) {
-            // navigate(`/messages/${data.room_id}`);
+            navigate(`/messages/${data.room_id}`);
           } else {
-            dispatch(showToast({ message: 'Call has ended', type: 'info' }));
+            dispatch(showToast({ message: call.call_status === 'missed' ? 'Missed call' : 'Call has ended', type: 'info' }));
           }
         })
         .catch(error => {

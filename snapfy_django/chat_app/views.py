@@ -9,6 +9,7 @@ import binascii
 from .models import ChatRoom, Message, CallLog
 from user_app.models import User
 from .serializers import ChatRoomSerializer, MessageSerializer, UserSerializer, CallLogSerializer
+from notification_app.utils import create_call_notification
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
@@ -352,13 +353,36 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         )
 
         channel_layer = get_channel_layer()
-        if channel_layer:
-            caller_data = {
-                "id": str(request.user.id),
-                "username": request.user.username,
-                "profile_picture": request.user.profile_picture.url if request.user.profile_picture else None,
-            }
+        caller_data = {
+            "id": str(request.user.id),
+            "username": request.user.username,
+            "profile_picture": request.user.profile_picture.url if request.user.profile_picture else None,
+        }
+
+        if not other_user.is_online:
+            call_log.call_status = 'missed'
+            call_log.call_end_time = timezone.now()
+            call_log.duration = 0
+            call_log.save()
             
+            create_call_notification(
+                to_user=other_user,
+                from_user=request.user,
+                call_id=call_log.id,
+                room_id=chat_room.id,
+                call_type=call_type,
+                call_status='missed'
+            )
+            
+            return Response({
+                "call_id": str(call_log.id),
+                "room_id": str(chat_room.id),
+                "caller": caller_data,
+                "call_type": call_type,
+                "status": "missed",
+            }, status=status.HTTP_200_OK)
+
+        if channel_layer:
             async_to_sync(channel_layer.group_send)(
                 f"user_{other_user.id}",
                 {
@@ -370,6 +394,15 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                     "sdp": sdp,
                     "call_type": call_type,
                 }
+            )
+            
+            create_call_notification(
+                to_user=other_user,
+                from_user=request.user,
+                call_id=call_log.id,
+                room_id=chat_room.id,
+                call_type=call_type,
+                call_status='ongoing'
             )
             
         return Response({
@@ -393,12 +426,12 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                 (models.Q(caller=request.user) | models.Q(receiver=request.user))
             ).get()
 
-            if call_log.call_end_time:  # Prevent duplicate updates
+            if call_log.call_end_time:
                 return Response(CallLogSerializer(call_log, context={'request': request}).data, status=status.HTTP_200_OK)
 
             call_log.call_end_time = timezone.now()
             call_log.call_status = call_status
-            call_log.duration = duration
+            call_log.duration = duration if call_status == 'completed' else 0
             call_log.save()
 
             channel_layer = get_channel_layer()
@@ -413,10 +446,9 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                         "room_id": str(chat_room.id),
                         "target_user_id": str(target_user.id),
                         "call_status": call_status,
-                        "duration": duration,
+                        "duration": duration if call_status == 'completed' else 0,
                     }
                 )
-                # Send history update to both users once
                 for user in [call_log.caller, call_log.receiver]:
                     async_to_sync(channel_layer.group_send)(
                         f"user_{user.id}",
@@ -425,6 +457,18 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                             "call_data": call_data,
                         }
                     )
+                    
+                # Send missed call notification if applicable
+                if call_status == 'missed':
+                    create_call_notification(
+                        to_user=target_user,
+                        from_user=request.user,
+                        call_id=call_log.id,
+                        room_id=chat_room.id,
+                        call_type=call_log.call_type,
+                        call_status='missed'
+                    )
+
             return Response(call_data, status=status.HTTP_200_OK)
         except CallLog.DoesNotExist:
             return Response({"error": "Call not found"}, status=status.HTTP_404_NOT_FOUND)

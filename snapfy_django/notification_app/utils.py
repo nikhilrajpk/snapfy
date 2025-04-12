@@ -117,3 +117,34 @@ def create_comment_notification(to_user, from_user, post_id, comment_text):
             }
         }
     )
+    
+def create_call_notification(to_user, from_user, call_id, room_id, call_type, call_status):
+    if to_user.id == from_user.id:
+        return
+    
+    profile_picture = str(from_user.profile_picture) if from_user.profile_picture else None
+    message = json.dumps({
+        'type': 'call',
+        'from_user': {
+            'username': from_user.username,
+            'profile_picture': profile_picture,
+        },
+        'call_id': str(call_id),
+        'room_id': str(room_id),
+        'call_type': call_type,
+        'call_status': call_status,
+    })
+    
+    notification = Notification.objects.create(user=to_user, message=message)
+    async_to_sync(channel_layer.group_send)(
+        f'user_{to_user.username}_notifications',
+        {
+            'type': 'notification_message',
+            'notification': {
+                'id': notification.id,
+                'message': message,
+                'created_at': notification.created_at.isoformat(),
+                'is_read': notification.is_read
+            }
+        }
+    )

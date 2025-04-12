@@ -216,7 +216,25 @@ function Message() {
       }
       socketRef.current = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
 
-      socketRef.current.onopen = () => console.log('WebSocket connected');
+      socketRef.current.onopen = () => {
+        console.log('WebSocket connected');
+        // Check active calls on reconnect
+        if (callId && roomId) {
+          axiosInstance.get(`/chatrooms/${roomId}/call-history/`)
+            .then(response => {
+              const call = response.data.find(c => String(c.id) === String(callId));
+              if (!call || call.call_end_time) {
+                cleanupCall();
+                dispatch(resetCall());
+              }
+            })
+            .catch(error => {
+              console.error('Error checking call status:', error);
+              cleanupCall();
+              dispatch(resetCall());
+            });
+        }
+      };
 
       socketRef.current.onmessage = async (event) => {
         const data = JSON.parse(event.data);
@@ -432,10 +450,6 @@ function Message() {
     try {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
-      if (!otherUser.is_online) {
-        dispatch(showToast({ message: `${otherUser.username} is offline`, type: 'error' }));
-        return;
-      }
   
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
@@ -467,6 +481,13 @@ function Message() {
         call_type: 'audio',
         sdp: offer,
       });
+  
+      if (response.data.status === 'missed') {
+        cleanupCall();
+        dispatch(showToast({ message: `${otherUser.username} is offline`, type: 'info' }));
+        updateCallHistory(response.data.call_id, 'missed', 0);
+        return;
+      }
   
       if (!response.data.call_id) throw new Error('Invalid response from server');
   

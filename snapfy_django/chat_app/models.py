@@ -100,11 +100,11 @@ class CallLog(models.Model):
     sdp = models.TextField(null=True, blank=True)  # Store SDP offer
     
     def save(self, *args, **kwargs):
-        if self.call_end_time and self.call_status == 'completed':
-            self.duration = int((self.call_end_time - self.call_start_time).total_seconds())
+        if self.call_end_time and self.call_status in ['completed', 'rejected', 'missed']:
+            self.duration = int((self.call_end_time - self.call_start_time).total_seconds()) if self.call_status == 'completed' else 0
         else:
-            self.duration = None  # No duration for missed/rejected calls
-            super().save(*args, **kwargs)
+            self.duration = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.caller} -> {self.receiver} ({self.call_type}, {self.call_status})"
