@@ -14,6 +14,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
 from django.db import models
+from django.core.cache import cache
 import json
 
 class ChatAPIViewSet(viewsets.ModelViewSet):
@@ -26,7 +27,26 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='my-chats')
     def my_chats(self, request):
-        chat_rooms = self.get_queryset().prefetch_related('users', 'messages').order_by('-last_message_at')
+        cache_key = f"my_chats_{request.user.id}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+
+        chat_rooms = (
+            self.get_queryset()
+            .select_related('admin')
+            .prefetch_related(
+                models.Prefetch(
+                    'users',
+                    queryset=User.objects.only('id', 'username', 'profile_picture', 'is_online', 'last_seen')
+                ),
+                models.Prefetch(
+                    'messages',
+                    queryset=Message.objects.order_by('-sent_at')[:1]
+                )
+            )
+            .order_by('-last_message_at')
+        )
         serializer = self.get_serializer(chat_rooms, many=True, context={'request': request})
         data = serializer.data
 
@@ -39,6 +59,8 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                     ).decode()
                 except (InvalidToken, ValueError, binascii.Error):
                     room_data['last_message']['content'] = '[Decryption Error]'
+
+        cache.set(cache_key, data, timeout=60)  # Cache for 1 minute
         return Response(data)
 
     @action(detail=False, methods=['post'], url_path='start-chat')
@@ -153,7 +175,17 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='messages')
     def get_messages(self, request, pk=None):
         chat_room = self.get_object()
-        messages = chat_room.messages.all().order_by('sent_at')
+        cache_key = f"messages_{pk}_{request.user.id}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+
+        messages = (
+            chat_room.messages
+            .select_related('sender')
+            .only('id', 'content', 'file', 'sent_at', 'is_read', 'read_at', 'is_deleted', 'sender__id', 'sender__username', 'sender__profile_picture')
+            .order_by('sent_at')
+        )
         serializer = MessageSerializer(messages, many=True, context={'request': request})
         data = serializer.data
 
@@ -168,6 +200,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         except (ValueError, binascii.Error) as e:
             return Response({"error": f"Invalid encryption key: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        cache.set(cache_key, data, timeout=300)  # Cache for 5 minutes
         return Response(data)
 
     @action(detail=True, methods=['post'], url_path='send-message')
@@ -476,9 +509,27 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='call-history')
     def call_history(self, request, pk=None):
         chat_room = self.get_object()
-        call_logs = CallLog.objects.filter(
-            models.Q(caller=request.user, receiver__in=chat_room.users.all()) |
-            models.Q(receiver=request.user, caller__in=chat_room.users.all())
-        ).order_by('-call_start_time')
+        cache_key = f"call_history_{pk}_{request.user.id}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+
+        call_logs = (
+            CallLog.objects
+            .filter(
+                models.Q(caller=request.user, receiver__in=chat_room.users.all()) |
+                models.Q(receiver=request.user, caller__in=chat_room.users.all())
+            )
+            .select_related('caller', 'receiver')
+            .only(
+                'id', 'call_type', 'call_status', 'call_start_time', 'call_end_time', 'duration',
+                'caller__id', 'caller__username', 'caller__profile_picture',
+                'receiver__id', 'receiver__username', 'receiver__profile_picture'
+            )
+            .order_by('-call_start_time')
+        )
         serializer = CallLogSerializer(call_logs, many=True, context={'request': request})
-        return Response(serializer.data)
+        data = serializer.data
+
+        cache.set(cache_key, data, timeout=300)  # Cache for 5 minutes
+        return Response(data)

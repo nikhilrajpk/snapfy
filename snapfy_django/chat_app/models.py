@@ -36,6 +36,13 @@ class ChatRoom(models.Model):
         if self.users.count() > 1:  # Prevent removing last user
             self.users.remove(user)
             self.save()
+            
+    class Meta:
+        indexes = [
+            models.Index(fields=['last_message_at']),
+            models.Index(fields=['is_group']),
+            models.Index(fields=['admin']),
+        ]
 
     def __str__(self):
         if self.is_group:
@@ -58,6 +65,7 @@ class Message(models.Model):
             models.Index(fields=['room', 'sent_at']),
             models.Index(fields=['is_read']),
             models.Index(fields=['is_deleted']),
+            models.Index(fields=['sender']),
         ]
 
     def save(self, *args, **kwargs):

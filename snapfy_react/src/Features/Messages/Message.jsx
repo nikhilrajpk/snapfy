@@ -150,28 +150,32 @@ function Message() {
       }
   
       setIsLoading(true);
-      dispatch(resetCall()); // Reset call state on chat change
+      dispatch(resetCall());
       try {
-        const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then((res) => res.data);
+        const [roomResponse, messagesResponse, callHistoryResponse] = await Promise.all([
+          axiosInstance.get(`/chatrooms/${conversationId}/`),
+          axiosInstance.get(`/chatrooms/${conversationId}/messages/`),
+          axiosInstance.get(`/chatrooms/${conversationId}/call-history/`),
+        ]);
+  
+        const roomData = roomResponse.data;
         setSelectedRoom(roomData);
   
-        const msgs = await getMessages(conversationId);
-        const messageItems = (msgs || []).map((msg) => ({
+        const messageItems = (messagesResponse.data || []).map((msg) => ({
           ...msg,
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
           key: `${msg.id}-${msg.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
           file_url: msg.file_url || null,
         }));
   
-        const callHistory = await axiosInstance.get(`/chatrooms/${conversationId}/call-history/`);
-        const callItems = (callHistory.data || []).map((call) => ({
+        const callItems = (callHistoryResponse.data || []).map((call) => ({
           id: `call-${call.id}`,
           key: `call-${call.id}-${call.call_start_time}-${Math.random().toString(36).substr(2, 5)}`,
           sender: call.caller.id === user.id ? user : call.caller,
           content: `Call: ${call.call_type} - ${call.call_status}`,
           sent_at: call.call_end_time || call.call_start_time,
           is_call: true,
-          call_status: call.call_status, // Use backend status
+          call_status: call.call_status,
           call_duration: call.duration ? formatCallDuration(call.duration) : null,
         }));
   
