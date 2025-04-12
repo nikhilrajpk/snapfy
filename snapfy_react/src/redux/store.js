@@ -1,4 +1,5 @@
 import { configureStore } from '@reduxjs/toolkit';
+import {thunk} from 'redux-thunk';
 import userReducer from './slices/userSlice';
 import toastReducer from './slices/toastSlice';
 import callReducer from './slices/callSlice'
@@ -46,6 +47,7 @@ export const store = configureStore({
     toast: toastReducer,
   },
   preloadedState: loadState(),
+  middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(thunk),
 });
 
 // Save Redux state on changes

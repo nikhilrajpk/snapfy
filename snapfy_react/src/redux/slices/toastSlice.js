@@ -3,7 +3,8 @@ import { createSlice } from "@reduxjs/toolkit";
 export const initialState = {
     show: false,
     message: null,
-    type: null
+    type: null,
+    action: null,
 }
 
 const toastSlice = createSlice({
@@ -14,6 +15,7 @@ const toastSlice = createSlice({
             state.show = true
             state.message = action.payload.message
             state.type = action.payload.type
+            state.action = action.payload.action || null
         },
         hideToast : (state)=>{
             state.show = false

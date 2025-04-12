@@ -225,7 +225,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         target_user_id = data.get('target_user_id')
         
         if not target_user_id or not room_id or not await self.is_user_in_room(room_id):
-            await self.send(text_data=json.dumps({"error": "Invalid call data"}))
+            await self.send(text_data=json.dumps({"type": "error", "error": "Invalid call data"}))
             return
 
         payload = {
@@ -236,9 +236,9 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             "caller": {
                 "id": str(self.user.id),
                 "username": self.user.username,
-                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None
+                "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None,
             },
-            "call_status": data.get('call_status', 'ongoing')
+            "call_status": data.get('call_status', 'ongoing'),
         }
         
         if signal_type in ["call_offer", "call_answer"]:
@@ -252,33 +252,20 @@ class UserChatConsumer(AsyncWebsocketConsumer):
 
     # WebSocket message handlers
     async def call_offer(self, event):
-        if all(k in event for k in ['call_id', 'room_id', 'caller', 'sdp']):
-            await self.send(text_data=json.dumps({
-                "type": "call_offer",
-                "call_id": event["call_id"],
-                "room_id": event["room_id"],
-                "caller": event["caller"],
-                "sdp": event["sdp"],
-                "call_type": event.get("call_type", "audio")
-            }))
-            # Send notification
-            await self.channel_layer.group_send(
-                f"user_{event['target_user_id']}_notifications",
-                {
-                    "type": "notification_message",
-                    "notification": {
-                        "id": f"call-{event['call_id']}",
-                        "message": json.dumps({
-                            "type": "call",
-                            "from_user": event["caller"],
-                            "room_id": event["room_id"],
-                            "call_id": event["call_id"]
-                        }),
-                        "created_at": timezone.now().isoformat(),
-                        "is_read": False
-                    }
-                }
-            )
+        required_fields = ['call_id', 'room_id', 'caller', 'sdp']
+        if not all(k in event for k in required_fields):
+            await self.send(text_data=json.dumps({"type": "error", "error": "Missing call offer data"}))
+            return
+
+        await self.send(text_data=json.dumps({
+            "type": "call_offer",
+            "call_id": event["call_id"],
+            "room_id": event["room_id"],
+            "caller": event["caller"],
+            "sdp": event["sdp"],
+            "call_type": event.get("call_type", "audio"),
+            "target_user_id": event.get("target_user_id"),
+        }))
 
     async def call_answer(self, event):
         await self.send(text_data=json.dumps(event))

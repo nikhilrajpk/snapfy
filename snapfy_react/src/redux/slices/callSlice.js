@@ -1,18 +1,16 @@
+// slices/callSlice.js
 import { createSlice } from '@reduxjs/toolkit';
-
-const initialState = {
-  callState: null, // null, 'incoming', 'outgoing', 'active', 'ended'
-  callId: null,
-  caller: null,
-  callOfferSdp: null,
-  callDuration: 0,
-  callStartTime: null,
-  roomId: null,
-};
 
 const callSlice = createSlice({
   name: 'call',
-  initialState,
+  initialState: {
+    callState: null, // 'incoming', 'outgoing', 'active', null
+    callId: null,
+    caller: null,
+    callOfferSdp: null,
+    callDuration: 0,
+    roomId: null,
+  },
   reducers: {
     setCallState(state, action) {
       state.callState = action.payload;
@@ -29,40 +27,16 @@ const callSlice = createSlice({
     setCallDuration(state, action) {
       state.callDuration = action.payload;
     },
-    setCallStartTime(state, action) {
-      state.callStartTime = action.payload;
-    },
     setRoomId(state, action) {
       state.roomId = action.payload;
     },
-    startCall(state, action) {
-      const { callId, roomId, caller } = action.payload;
-      state.callState = 'outgoing';
-      state.callId = callId;
-      state.caller = caller;
-      state.roomId = roomId;
-      state.callDuration = 0;
-      state.callStartTime = null;
-      state.callOfferSdp = null;
-    },
-    acceptCall(state, action) {
-      const { callId, caller, sdp, roomId } = action.payload;
-      state.callState = 'active';
-      state.callId = callId;
-      state.caller = caller;
-      state.callOfferSdp = sdp;
-      state.roomId = roomId;
-      state.callStartTime = new Date();
-      state.callDuration = 0;
-    },
-    endCall(state, action) {
-      const { status, duration } = action.payload;
-      state.callState = 'ended';
-      state.callDuration = duration || state.callDuration;
-      // Reset other fields after a delay or immediately based on your needs
-    },
     resetCall(state) {
-      return initialState; // Reset to initial state
+      state.callState = null;
+      state.callId = null;
+      state.caller = null;
+      state.callOfferSdp = null;
+      state.callDuration = 0;
+      state.roomId = null;
     },
   },
 });
@@ -73,12 +47,30 @@ export const {
   setCaller,
   setCallOfferSdp,
   setCallDuration,
-  setCallStartTime,
   setRoomId,
-  startCall,
-  acceptCall,
-  endCall,
   resetCall,
 } = callSlice.actions;
+
+// Thunk actions
+export const startCall = (callData) => async (dispatch) => {
+  dispatch(setCallState('outgoing'));
+  dispatch(setCallId(callData.callId));
+  dispatch(setCaller(callData.caller));
+  dispatch(setRoomId(callData.roomId));
+};
+
+export const acceptCall = (callData) => async (dispatch) => {
+  dispatch(setCallState('incoming'));
+  dispatch(setCallId(callData.callId));
+  dispatch(setCaller(callData.caller));
+  dispatch(setCallOfferSdp(callData.sdp));
+  dispatch(setRoomId(callData.roomId));
+};
+
+export const endCall = (callData) => async (dispatch) => {
+  dispatch(setCallState(null));
+  dispatch(setCallDuration(0)); // Reset duration here
+  // Keep callId and roomId for history update, reset later if needed
+};
 
 export default callSlice.reducer;

@@ -324,27 +324,31 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         chat_room = self.get_object()
         if request.user not in chat_room.users.all() or chat_room.is_group:
             return Response({"error": "Not authorized or group chat not supported"}, 
-                        status=status.HTTP_403_FORBIDDEN)
+                          status=status.HTTP_403_FORBIDDEN)
 
         call_type = request.data.get('call_type', 'audio')
         sdp = request.data.get('sdp')
         
         if call_type not in ['audio', 'video']:
             return Response({"error": "Invalid call type"}, 
-                        status=status.HTTP_400_BAD_REQUEST)
+                          status=status.HTTP_400_BAD_REQUEST)
+        if not sdp:
+            return Response({"error": "SDP offer required"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
 
         other_user = chat_room.users.exclude(id=request.user.id).first()
         if not other_user:
             return Response({"error": "No other user in chat"}, 
-                        status=status.HTTP_400_BAD_REQUEST)
+                          status=status.HTTP_400_BAD_REQUEST)
 
         call_log = CallLog.objects.create(
-            room=chat_room,  # Add this line to associate with the chat room
+            room=chat_room,
             caller=request.user,
             receiver=other_user,
             call_type=call_type,
             call_status='ongoing',
-            sdp=sdp
+            sdp=sdp,
+            call_start_time=timezone.now(),
         )
 
         channel_layer = get_channel_layer()
@@ -352,7 +356,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             caller_data = {
                 "id": str(request.user.id),
                 "username": request.user.username,
-                "profile_picture": request.user.profile_picture.url if request.user.profile_picture else None
+                "profile_picture": request.user.profile_picture.url if request.user.profile_picture else None,
             }
             
             async_to_sync(channel_layer.group_send)(
@@ -364,7 +368,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                     "target_user_id": str(other_user.id),
                     "caller": caller_data,
                     "sdp": sdp,
-                    "call_type": call_type
+                    "call_type": call_type,
                 }
             )
             
@@ -373,7 +377,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             "room_id": str(chat_room.id),
             "caller": caller_data,
             "call_type": call_type,
-            "status": "ongoing"
+            "status": "ongoing",
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='end-call')
@@ -389,6 +393,9 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                 (models.Q(caller=request.user) | models.Q(receiver=request.user))
             ).get()
 
+            if call_log.call_end_time:  # Prevent duplicate updates
+                return Response(CallLogSerializer(call_log, context={'request': request}).data, status=status.HTTP_200_OK)
+
             call_log.call_end_time = timezone.now()
             call_log.call_status = call_status
             call_log.duration = duration
@@ -397,17 +404,28 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             channel_layer = get_channel_layer()
             if channel_layer:
                 target_user = call_log.receiver if request.user == call_log.caller else call_log.caller
+                call_data = CallLogSerializer(call_log, context={'request': request}).data
                 async_to_sync(channel_layer.group_send)(
                     f"user_{target_user.id}",
                     {
                         "type": "call_ended",
                         "call_id": str(call_log.id),
                         "room_id": str(chat_room.id),
+                        "target_user_id": str(target_user.id),
                         "call_status": call_status,
-                        "duration": duration
+                        "duration": duration,
                     }
                 )
-            return Response(CallLogSerializer(call_log, context={'request': request}).data, status=status.HTTP_200_OK)
+                # Send history update to both users once
+                for user in [call_log.caller, call_log.receiver]:
+                    async_to_sync(channel_layer.group_send)(
+                        f"user_{user.id}",
+                        {
+                            "type": "call_history_update",
+                            "call_data": call_data,
+                        }
+                    )
+            return Response(call_data, status=status.HTTP_200_OK)
         except CallLog.DoesNotExist:
             return Response({"error": "Call not found"}, status=status.HTTP_404_NOT_FOUND)
 

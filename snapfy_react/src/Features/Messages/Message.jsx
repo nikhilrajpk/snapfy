@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { showToast } from '../../redux/slices/toastSlice';
+import { showToast, hideToast } from '../../redux/slices/toastSlice';
 import { format } from 'date-fns';
 import Loader from '../../utils/Loader/Loader';
 import { IoCall, IoVideocam, IoInformationCircle, IoImage, IoSend, IoSearch, IoTrash, IoMic, IoMicOff, IoPersonAdd, IoPersonRemove, IoExitOutline } from 'react-icons/io5';
@@ -11,6 +11,18 @@ import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import axiosInstance from '../../axiosInstance';
 import groupIcon from '../../assets/group-icon.png';
 import { createPortal } from 'react-dom';
+import {
+  setCallState,
+  setCallId,
+  setCaller,
+  setCallOfferSdp,
+  setCallDuration,
+  setRoomId,
+  startCall,
+  acceptCall,
+  endCall,
+  resetCall,
+} from '../../redux/slices/callSlice';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
 const Logo = React.lazy(() => import('../../Components/Logo/Logo'));
@@ -22,6 +34,8 @@ function Message() {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.user);
+  const toasts = useSelector((state) => state.toast);
+  const { callState, callId, caller, callOfferSdp, callDuration, roomId } = useSelector((state) => state.call);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -53,45 +67,54 @@ function Message() {
   const [groupUserSuggestions, setGroupUserSuggestions] = useState([]);
   const [showManageGroupModal, setShowManageGroupModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
-  const [callState, setCallState] = useState(null); // null, 'incoming', 'outgoing', 'active', 'ended'
-  const [callId, setCallId] = useState(null);
-  const [caller, setCaller] = useState(null);
-  const [callOfferSdp, setCallOfferSdp] = useState(null);
-  const [callDuration, setCallDuration] = useState(0);
-  const callDurationRef = useRef(0);
+  const [roomCache, setRoomCache] = useState({}); // Cache for room data and messages
   const callTimerRef = useRef(null);
 
-  // WebRTC Configuration
   const RTC_CONFIG = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Public STUN server
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   };
 
-  // Timer effect for recording
   useEffect(() => {
     let timer;
     if (isRecording) {
-      timer = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
-      }, 1000);
+      timer = setInterval(() => setRecordingTime((prev) => prev + 1), 1000);
     }
     return () => clearInterval(timer);
   }, [isRecording]);
 
-  const formatRecordingTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
   useEffect(() => {
-    const chatContainer = messagesContainerRef.current;
-    if (chatContainer && !initialLoad) {
-      const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop <= chatContainer.clientHeight + 50;
-      if (isAtBottom) {
+    if (!initialLoad && messages.length) {
+      const chatContainer = messagesContainerRef.current;
+      if (chatContainer.scrollHeight - chatContainer.scrollTop <= chatContainer.clientHeight + 50) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
     }
   }, [messages, initialLoad]);
+
+
+  const renderToasts = () => (
+    <div className="fixed bottom-4 right-4 z-50">
+      {toasts.show && (
+        <div className={`p-4 rounded-lg shadow-lg ${toasts.type === 'error' ? 'bg-red-500' : 'bg-blue-500'} text-white`}>
+          {toasts.message}
+          {toasts.action && (
+            <button
+              onClick={() => {
+                if (toasts.action.label === 'Answer' && roomId) {
+                  navigate(`/messages/${roomId}`);
+                  acceptCallFn(); // Accept call when clicked
+                  dispatch(hideToast()); // Hide toast after action
+                }
+              }}
+              className="ml-4 underline"
+            >
+              {toasts.action.label}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   useEffect(() => {
     if (!user) {
@@ -115,67 +138,33 @@ function Message() {
     fetchChatRooms();
   }, [dispatch, user, navigate]);
 
-  // Check for active calls when component mounts or conversation changes
-  const checkActiveCalls = async () => {
-    if (!conversationId) return;
-    
-    try {
-      const response = await axiosInstance.get(`/chatrooms/${conversationId}/call-history/`);
-      const activeCall = response.data.find(call => 
-        call.call_status === 'ongoing' && !call.call_end_time
-      );
-      
-      if (activeCall) {
-        setCallId(activeCall.id);
-        if (String(activeCall.caller.id) === String(user.id)) {
-          setCallState('outgoing');
-        } else {
-          setCallState('incoming');
-          setCaller(activeCall.caller);
-          setCallOfferSdp(activeCall.sdp);
-        }
-      }
-    } catch (error) {
-      console.error('Error checking active calls:', error);
-    }
-  };
-
-  // call timer
-  useEffect(() => {
-    if (callState === 'active') {
-      callDurationRef.current = 0;
-      setCallDuration(0);
-      callTimerRef.current = setInterval(() => {
-        callDurationRef.current += 1;
-        setCallDuration(callDurationRef.current);
-      }, 1000);
-    } else if (callTimerRef.current) {
-      clearInterval(callTimerRef.current);
-      callTimerRef.current = null;
-    }
-    return () => clearInterval(callTimerRef.current);
-  }, [callState]);
-
   useEffect(() => {
     if (!conversationId || !user) return;
 
     const fetchRoomAndMessages = async () => {
+      if (roomCache[conversationId]) {
+        setSelectedRoom(roomCache[conversationId].room);
+        setMessages(roomCache[conversationId].messages);
+        setIsLoading(false);
+        return;
+      }
+  
       setIsLoading(true);
+      dispatch(resetCall());
       try {
         const roomData = await axiosInstance.get(`/chatrooms/${conversationId}/`).then((res) => res.data);
         setSelectedRoom(roomData);
-
+  
         const msgs = await getMessages(conversationId);
-        const messageItems = msgs.map((msg) => ({
+        const messageItems = (msgs || []).map((msg) => ({
           ...msg,
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
           key: `${msg.id}-${msg.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
           file_url: msg.file_url || null,
-        })) || [];
-
-        // Check for call history and add to messages
+        }));
+  
         const callHistory = await axiosInstance.get(`/chatrooms/${conversationId}/call-history/`);
-        const callItems = callHistory.data.map((call) => ({
+        const callItems = (callHistory.data || []).map((call) => ({
           id: `call-${call.id}`,
           key: `call-${call.id}-${call.call_start_time}-${Math.random().toString(36).substr(2, 5)}`,
           sender: call.caller.id === user.id ? user : call.caller,
@@ -185,12 +174,14 @@ function Message() {
           call_status: call.call_status,
           call_duration: call.duration ? formatCallDuration(call.duration) : null,
         }));
-
-        setMessages([...messageItems, ...callItems].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at)));
-
-        // Check for active calls
-        await checkActiveCalls();
-
+  
+        const combinedMessages = [...messageItems, ...callItems].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+        setMessages(combinedMessages);
+        setRoomCache((prev) => ({
+          ...prev,
+          [conversationId]: { room: roomData, messages: combinedMessages },
+        }));
+  
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
         }
@@ -201,7 +192,7 @@ function Message() {
         setIsLoading(false);
       }
     };
-    
+
     fetchRoomAndMessages();
   }, [conversationId, dispatch, user, navigate]);
 
@@ -215,30 +206,27 @@ function Message() {
   useEffect(() => {
     if (!user?.id) return;
 
-    let socketClosedIntentionally = false;
+    const processedCallIds = new Set(); // Track processed call IDs
+
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
-      const socket = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
-      socketRef.current = socket;
+      if (!accessToken) {
+        console.error('No access token found');
+        return;
+      }
+      socketRef.current = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
 
-      socket.onclose = (event) => {
-        if (event.code !== 1000) { // Abnormal closure
-          console.log('WebSocket disconnected, reconnecting...');
-          setTimeout(connectWebSocket, 3000); // Reconnect after 3 seconds
-        }
-      };
+      socketRef.current.onopen = () => console.log('WebSocket connected');
 
-      socket.onmessage = async (event) => {
+      socketRef.current.onmessage = async (event) => {
         const data = JSON.parse(event.data);
-        console.log('WebSocket data:', JSON.stringify(data, null, 2));
+        console.log('WebSocket message:', data); // Debug log
 
         switch (data.type) {
           case 'chat_message': {
             const message = data.message;
-            if (!message || !message.sender || !message.sender.id) {
-              console.error('Invalid chat_message data:', data);
-              break;
-            }
+            if (!message?.sender?.id) break;
+
             const newMessage = {
               ...message,
               file_url: message.file_url || null,
@@ -254,8 +242,8 @@ function Message() {
               file_type: message.file_type || 'other',
             };
 
-            setChatRooms((prev) => {
-              const updatedRooms = prev.map((room) => {
+            setChatRooms((prev) =>
+              prev.map((room) => {
                 if (String(room.id) === String(data.room_id)) {
                   const isOwnMessage = String(newMessage.sender.id) === String(user?.id);
                   const isCurrentRoom = String(data.room_id) === String(conversationId);
@@ -271,20 +259,15 @@ function Message() {
                   };
                 }
                 return room;
-              });
-              return updatedRooms.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
-            });
+              }).sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
+            );
 
             if (String(data.room_id) === String(conversationId)) {
               setMessages((prev) => {
                 const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);
-                if (tempIdMatch) {
-                  return prev.map((msg) => (msg.tempId === message.tempId ? newMessage : msg));
-                }
+                if (tempIdMatch) return prev.map((msg) => (msg.tempId === message.tempId ? newMessage : msg));
                 const existingIndex = prev.findIndex((msg) => String(msg.id) === String(message.id));
-                if (existingIndex !== -1) {
-                  return prev.map((msg, index) => (index === existingIndex ? newMessage : msg));
-                }
+                if (existingIndex !== -1) return prev.map((msg, idx) => (idx === existingIndex ? newMessage : msg));
                 return [...prev, newMessage];
               });
 
@@ -304,9 +287,7 @@ function Message() {
               );
             }
             setChatRooms((prev) =>
-              prev.map((room) =>
-                String(room.id) === String(data.room_id) ? { ...room, unread_count: 0 } : room
-              )
+              prev.map((room) => String(room.id) === String(data.room_id) ? { ...room, unread_count: 0 } : room)
             );
             setSelectedRoom((prev) =>
               prev && String(prev.id) === String(data.room_id) ? { ...prev, unread_count: 0 } : prev
@@ -344,103 +325,122 @@ function Message() {
             );
             break;
 
-            case 'call_offer':
-              if (String(data.room_id) === String(conversationId) && String(data.caller.id) !== String(user.id)) {
-                console.log('Received call offer:', data);
-                setCallState('incoming');
-                setCallId(data.call_id);
-                setCaller(data.caller);
-                // Store the full offer object
-                setCallOfferSdp({
-                  type: data.sdp.type || 'offer',
-                  sdp: data.sdp.sdp || data.sdp
-                });
-                
-                // Show notification
-                dispatch(showToast({
-                  message: `Incoming call from ${data.caller.username}`,
-                  type: 'info',
-                  action: {
-                    label: 'Answer',
-                    onClick: () => navigate(`/messages/${data.room_id}`)
-                  }
-                }));
+          case 'call_offer':
+            if (String(data.caller.id) !== String(user.id)) {
+              if (!data.call_id || !data.room_id || !data.caller || !data.sdp) {
+                dispatch(showToast({ message: 'Invalid call data received', type: 'error' }));
+                break;
               }
-              break;
-
+              dispatch(acceptCall({
+                callId: data.call_id,
+                caller: data.caller,
+                sdp: data.sdp,
+                roomId: data.room_id,
+              }));
+              dispatch(showToast({
+                message: `Incoming call from ${data.caller.username}`,
+                type: 'info',
+                action: { label: 'Answer' }, 
+              }));
+            }
+            break;
 
           case 'call_answer':
-            if (String(data.room_id) === String(conversationId) && peerConnectionRef.current) {
+            if (String(data.target_user_id) === String(user.id) && peerConnectionRef.current) {
               await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              setCallState('active');
+              dispatch(setCallState('active'));
+            } else if (String(data.caller.id) === String(user.id) && callState === 'outgoing') {
+              // Caller (Zoro) receives the answer
+              await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+              dispatch(setCallState('active'));
             }
             break;
 
           case 'ice_candidate':
-            if (String(data.room_id) === String(conversationId) && peerConnectionRef.current) {
+            if (String(data.target_user_id) === String(user.id) && peerConnectionRef.current) {
               await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
             }
             break;
 
-          case 'call_ended':
-            if (String(data.room_id) === String(conversationId)) {
-              endCall(data.call_status, false); // Prevent duplicate from WebSocket
-              const existingCallIndex = messages.findIndex((msg) => msg.id === `call-${data.call_id}`);
-              const callMessage = {
-                id: `call-${data.call_id}`,
-                key: `call-${data.call_id}-${new Date().toISOString()}-${Math.random().toString(36).substr(2, 5)}`,
-                sender: caller || user,
-                content: `Call: audio - ${data.call_status}`,
-                sent_at: new Date().toISOString(),
-                is_call: true,
-                call_status: data.call_status,
-                call_duration: formatCallDuration(data.duration || 0),
-              };
-              setMessages((prev) =>
-                existingCallIndex !== -1
-                  ? prev.map((msg, index) => (index === existingCallIndex ? callMessage : msg))
-                  : [...prev, callMessage].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at))
-              );
+          case 'call_ended': {
+            const callKey = `${data.call_id}-${data.type}`;
+            if (processedCallIds.has(callKey)) break; // Skip if already processed
+            processedCallIds.add(callKey);
+            if (String(data.room_id) === String(roomId)) {
+              handleEndCall(data.call_status, data.duration, false);
+              // updateCallHistory(data.call_id, data.call_status, data.duration);
             }
+            break;
+          }
+
+          case 'call_history_update': {
+            const callKey = `${data.call_data.id}-${data.type}`;
+            if (processedCallIds.has(callKey)) break; // Skip if already processed
+            processedCallIds.add(callKey);
+            if (String(data.call_data.room.id) === String(conversationId)) {
+              updateCallHistory(data.call_data.id, data.call_data.call_status, data.call_data.duration);
+            }
+            break;
+          }
+
+          case 'error':
+            dispatch(showToast({ message: data.error || 'WebSocket error', type: 'error' }));
             break;
         }
       };
 
-      socket.onerror = (error) => console.error('WebSocket error:', error);
-      socket.onclose = (event) => {
-        console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
-        if (event.code !== 1000 && !socketClosedIntentionally) setTimeout(connectWebSocket, 1000);
+      socketRef.current.onerror = (error) => console.error('WebSocket error:', error);
+      socketRef.current.onclose = (event) => {
+        console.log('WebSocket closed:', event);
+        if (event.code !== 1000) setTimeout(connectWebSocket, 3000); // Reconnect if not intentional close
       };
     };
 
     connectWebSocket();
 
     return () => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.close(1000, 'Component unmounted');
+      // Only close WebSocket if leaving the entire messaging section, not on room change
+      if (socketRef.current?.readyState === WebSocket.OPEN && !conversationId) {
+        socketRef.current.close(1000, 'User left messaging section');
       }
     };
-  }, [user?.id, conversationId, dispatch]);
+  }, [user?.id, dispatch, navigate, roomId]);
 
-  // WebRTC Call Functions
-  const startCall = async () => {
+  useEffect(() => {
+    if (callState === 'active') {
+      callTimerRef.current = setInterval(() => {
+        dispatch(setCallDuration(callDuration + 1));
+      }, 1000);
+    } else if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    return () => clearInterval(callTimerRef.current);
+  }, [callState, callDuration, dispatch]);
+
+  const startCallFn = async () => {
+    if (callState) {
+      dispatch(showToast({ message: 'Another call is in progress', type: 'warning' }));
+      return;
+    }
+
+    if (!selectedRoom || !conversationId) {
+      dispatch(showToast({ message: 'No chat selected', type: 'error' }));
+      return;
+    }
+
     try {
-      if (callState) {
-        dispatch(showToast({ message: 'Another call is already in progress', type: 'warning' }));
-        return;
-      }
-      
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
-  
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-  
+
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-  
+
       peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate) {
+        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
             type: 'ice_candidate',
             room_id: conversationId,
@@ -449,131 +449,136 @@ function Message() {
           }));
         }
       };
-  
+
       peerConnectionRef.current.ontrack = (event) => {
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
-        remoteAudio.play().catch(err => console.error('Audio play error:', err));
+        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
       };
-  
+
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
-  
+
       const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
         call_type: 'audio',
-        sdp: offer,  // Send the full offer object
-      });
-  
-      setCallId(response.data.call_id);
-      setCallState('outgoing');
-      
-      // Send call offer via WebSocket
-      socketRef.current.send(JSON.stringify({
-        type: 'call_offer',
-        call_id: response.data.call_id,
-        room_id: conversationId,
-        target_user_id: otherUser.id,
         sdp: offer,
-        call_type: 'audio'
+      });
+
+      if (!response.data.call_id) throw new Error('Invalid response from server');
+
+      dispatch(startCall({
+        callId: response.data.call_id,
+        roomId: conversationId,
+        caller: user,
       }));
-  
+
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'call_offer',
+          call_id: response.data.call_id,
+          room_id: conversationId,
+          target_user_id: otherUser.id,
+          sdp: offer,
+          call_type: 'audio',
+          caller: {
+            id: user.id,
+            username: user.username,
+            profile_picture: user.profile_picture || null,
+          },
+        }));
+      } else {
+        throw new Error('WebSocket not connected');
+      }
     } catch (error) {
       console.error('Error starting call:', error);
       cleanupCall();
-      dispatch(showToast({ 
-        message: error.response?.data?.error || 'Failed to start call', 
-        type: 'error' 
-      }));
+      dispatch(showToast({ message: error.message || 'Failed to start call', type: 'error' }));
     }
   };
 
-  const acceptCall = async () => {
+  const acceptCallFn = async () => {
+    if (!callId || !caller?.id || !callOfferSdp || !roomId) {
+      dispatch(showToast({ message: 'Invalid call data', type: 'error' }));
+      return;
+    }
+
+    // Navigate immediately without waiting for fetch
+    if (conversationId !== roomId) {
+      navigate(`/messages/${roomId}`);
+    }
+
     try {
-      if (!callOfferSdp || !callId || !caller?.id) {
-        throw new Error('Invalid call data');
-      }
-  
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-  
+
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-  
+
       peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate) {
+        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
             type: 'ice_candidate',
-            room_id: conversationId,
+            room_id: roomId,
             target_user_id: caller.id,
             candidate: event.candidate,
           }));
         }
       };
-  
+
       peerConnectionRef.current.ontrack = (event) => {
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
-        remoteAudio.play().catch(err => console.error('Audio play error:', err));
+        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
       };
-  
+
       await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(callOfferSdp));
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
-  
-      socketRef.current.send(JSON.stringify({
-        type: 'call_answer',
-        room_id: conversationId,
-        target_user_id: caller.id,
-        call_id: callId,
-        sdp: answer,
-      }));
-  
-      setCallState('active');
+
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'call_answer',
+          room_id: roomId,
+          target_user_id: caller.id,
+          call_id: callId,
+          sdp: answer,
+        }));
+        dispatch(setCallState('active'));
+      } else {
+        throw new Error('WebSocket not connected');
+      }
     } catch (error) {
       console.error('Error accepting call:', error);
       cleanupCall();
-      dispatch(showToast({ message: 'Failed to accept call', type: 'error' }));
+      dispatch(showToast({ message: error.message || 'Failed to accept call', type: 'error' }));
     }
   };
 
-  const endCall = async (status = 'completed', localInitiated = true) => {
-    // Clean up media streams
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
+  const handleEndCall = async (status = 'completed', duration = callDuration, localInitiated = true) => {
+    if (!callId || !roomId) return;
   
-    // Stop call timer
-    if (callTimerRef.current) {
-      clearInterval(callTimerRef.current);
-      callTimerRef.current = null;
-    }
+    const finalStatus = callState === 'active' ? 'completed' : status; // Ensure "completed" if call was active
   
-    // Notify server if we initiated the end
-    if (callId && localInitiated) {
+    if (localInitiated) {
       try {
-        await axiosInstance.post(`/chatrooms/${conversationId}/end-call/`, {
+        await axiosInstance.post(`/chatrooms/${roomId}/end-call/`, {
           call_id: callId,
-          call_status: status,
-          duration: callDurationRef.current,
+          call_status: finalStatus,
+          duration,
         });
   
-        const targetUserId = caller?.id || 
-          (selectedRoom?.users.find(u => String(u.id) !== String(user.id))?.id);
-        
-        if (targetUserId) {
+        const targetUserId = caller?.id === user.id
+          ? selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.id
+          : caller?.id;
+  
+        if (targetUserId && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
             type: 'call_ended',
-            room_id: conversationId,
+            room_id: roomId,
             target_user_id: targetUserId,
             call_id: callId,
-            call_status: status,
-            duration: callDurationRef.current,
+            call_status: finalStatus,
+            duration,
           }));
         }
       } catch (error) {
@@ -581,37 +586,65 @@ function Message() {
       }
     }
   
-    // Reset all call state
-    setCallState(null);
-    setCallId(null);
-    setCaller(null);
-    setCallOfferSdp(null);
-    setCallDuration(0);
-    callDurationRef.current = 0;
+    cleanupCall();
+    dispatch(endCall({ status: finalStatus, duration }));
+    if (String(roomId) === String(conversationId)) {
+      updateCallHistory(callId, finalStatus, duration);
+    }
   };
 
   const cleanupCall = () => {
-    if (callState) {
-      setCallState(null);
-      setCallId(null);
-      setCaller(null);
-      setCallOfferSdp(null);
-      setCallDuration(0);
-      callDurationRef.current = 0;
-      
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-      }
-      if (callTimerRef.current) {
-        clearInterval(callTimerRef.current);
-        callTimerRef.current = null;
-      }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
     }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+  };
+
+  const updateCallHistory = (callId, status, duration) => {
+    if (String(roomId) !== String(conversationId)) return;
+  
+    const callMessage = {
+      id: `call-${callId}`,
+      key: `call-${callId}-${new Date().toISOString()}-${Math.random().toString(36).substr(2, 5)}`,
+      sender: caller?.id === user.id ? user : (caller || selectedRoom?.users.find((u) => String(u.id) !== String(user.id)) || user),
+      content: `Call: audio - ${status}`,
+      sent_at: new Date().toISOString(),
+      is_call: true,
+      call_status: status,
+      call_duration: formatCallDuration(duration || 0),
+    };
+  
+    setMessages((prev) => {
+      const existingIndex = prev.findIndex((msg) => msg.id === `call-${callId}`);
+      if (existingIndex !== -1) {
+        // Update existing entry
+        return prev.map((msg, idx) => (idx === existingIndex ? callMessage : msg));
+      }
+      // Add new entry if not present
+      return [...prev.filter((msg) => msg.id !== callMessage.id), callMessage].sort(
+        (a, b) => new Date(a.sent_at) - new Date(b.sent_at)
+      );
+    });
+  
+    // Update cache to prevent duplicates on reload
+    setRoomCache((prev) => ({
+      ...prev,
+      [conversationId]: {
+        ...prev[conversationId],
+        messages:
+          prev[conversationId]?.messages.map((msg) =>
+            msg.id === `call-${callId}` ? callMessage : msg
+          ) || [callMessage],
+      },
+    }));
   };
 
   const formatCallDuration = (seconds) => {
@@ -619,20 +652,6 @@ function Message() {
     const secs = seconds % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
-
-
-  useEffect(() => {
-    console.log('Caller state updated:', caller);
-  }, [caller]);
-
-  useEffect(() => {
-    console.log('Call state changed:', {
-      state: callState,
-      caller: caller,
-      callId: callId
-    });
-  }, [callState, caller, callId]);
 
   const handlePostClick = async (postId) => {
     try {
@@ -645,7 +664,6 @@ function Message() {
   };
 
   const renderMessageContent = (msg) => {
-    // First check if it's a call
     if (msg.is_call) {
       return (
         <div className="flex items-center space-x-2">
@@ -657,11 +675,10 @@ function Message() {
         </div>
       );
     }
-  
-    // Then handle regular messages
+
     const postLinkRegex = /Shared post: (.*)\/post\/(\d+)/;
     const match = msg.content.match(postLinkRegex);
-    
+
     if (match && !msg.is_deleted) {
       const postId = match[2];
       return (
@@ -673,7 +690,7 @@ function Message() {
         </div>
       );
     }
-  
+
     return msg.is_deleted ? (
       <p className="italic text-gray-300">[Deleted]</p>
     ) : msg.file_url ? (
@@ -702,10 +719,7 @@ function Message() {
       mediaRecorderRef.current = new MediaRecorder(stream);
       const audioChunks = [];
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        audioChunks.push(event.data);
-      };
-
+      mediaRecorderRef.current.ondataavailable = (event) => audioChunks.push(event.data);
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
@@ -782,10 +796,7 @@ function Message() {
       const response = await axiosInstance.post('/chatrooms/start-chat/', { username });
       const newRoom = response.data;
       setSelectedRoom(newRoom);
-      setChatRooms((prev) => {
-        if (!prev.some((r) => String(r.id) === String(newRoom.id))) return [newRoom, ...prev];
-        return prev;
-      });
+      setChatRooms((prev) => (!prev.some((r) => String(r.id) === String(newRoom.id)) ? [newRoom, ...prev] : prev));
       navigate(`/messages/${newRoom.id}`);
       const msgs = await getMessages(newRoom.id);
       setMessages(msgs.map((msg) => ({
@@ -807,11 +818,8 @@ function Message() {
     }
 
     try {
-      const usernames = groupUsers.map(user => user.username);
-      const response = await axiosInstance.post('/chatrooms/create-group/', {
-        group_name: groupName,
-        usernames,
-      });
+      const usernames = groupUsers.map((user) => user.username);
+      const response = await axiosInstance.post('/chatrooms/create-group/', { group_name: groupName, usernames });
       const newRoom = response.data;
       setChatRooms((prev) => [newRoom, ...prev]);
       setSelectedRoom(newRoom);
@@ -899,7 +907,7 @@ function Message() {
         );
       }
     } catch (error) {
-      console.error('Error deleting message:', error.response?.data || error.message);
+      console.error('Error deleting message:', error);
       if (error.response?.status !== 404) {
         dispatch(showToast({ message: 'Failed to delete message', type: 'error' }));
       }
@@ -913,7 +921,7 @@ function Message() {
     }
     try {
       const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(term)}`);
-      const filteredUsers = response.data.filter(u => String(u.id) !== String(user.id));
+      const filteredUsers = response.data.filter((u) => String(u.id) !== String(user.id));
       isGroupSearch ? setGroupUserSuggestions(filteredUsers) : setSearchResults(filteredUsers);
     } catch (error) {
       console.error('Error searching users:', error);
@@ -923,7 +931,7 @@ function Message() {
   };
 
   const handleAddGroupUser = (user) => {
-    if (!groupUsers.some(u => u.id === user.id)) {
+    if (!groupUsers.some((u) => u.id === user.id)) {
       setGroupUsers([...groupUsers, user]);
     }
     setGroupUsernameInput('');
@@ -931,7 +939,7 @@ function Message() {
   };
 
   const handleRemoveGroupUser = (userId) => {
-    setGroupUsers(groupUsers.filter(u => u.id !== userId));
+    setGroupUsers(groupUsers.filter((u) => u.id !== userId));
   };
 
   const handleEmojiClick = (emoji) => {
@@ -977,6 +985,11 @@ function Message() {
     : null;
 
   const isAdmin = selectedRoom && selectedRoom.admin && String(selectedRoom.admin.id) === String(user?.id);
+
+  const getProfilePictureUrl = (picture) => {
+    if (!picture) return '/default-profile.png';
+    return picture.startsWith('http') ? picture : `${CLOUDINARY_ENDPOINT}${picture}`;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
@@ -1132,7 +1145,7 @@ function Message() {
                           {!selectedRoom.is_group && (
                             <>
                               <button
-                                onClick={startCall}
+                                onClick={startCallFn}
                                 className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
                                 title="Audio call"
                                 disabled={callState}
@@ -1172,12 +1185,13 @@ function Message() {
                                 <Link to={`/user/${msg?.sender?.username}`}>
                                   <img
                                     src={
-                                      msg?.sender?.profile_picture.startsWith('http')
+                                      msg?.sender?.profile_picture?.startsWith('http')
                                         ? `${msg?.sender?.profile_picture}`
-                                        : `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture}`
+                                        : `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture || 'default-profile.png'}`
                                     }
                                     alt={msg?.sender?.username || 'Unknown'}
                                     className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
+                                    onError={(e) => (e.target.src = '/default-profile.png')}
                                   />
                                 </Link>
                               )}
@@ -1289,7 +1303,7 @@ function Message() {
                               {isRecording ? <IoMicOff size={24} /> : <IoMic size={24} />}
                             </button>
                             {isRecording && (
-                              <span className="text-red-500 text-sm font-semibold">{formatRecordingTime(recordingTime)}</span>
+                              <span className="text-red-500 text-sm font-semibold">{formatCallDuration(recordingTime)}</span>
                             )}
                           </div>
                           <textarea
@@ -1333,9 +1347,8 @@ function Message() {
         </div>
       </div>
 
-      {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 bg-transparent bg-opacity-75 flex items-center justify-center z-50" onClick={closeImageModal}>
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" onClick={closeImageModal}>
           <div className="relative max-w-4xl w-full p-4 bg-white rounded-lg shadow-lg border-2 border-[#198754]">
             <img src={selectedImage} alt="Full view" className="w-full max-h-screen object-contain rounded-lg" />
             <button
@@ -1348,7 +1361,6 @@ function Message() {
         </div>
       )}
 
-      {/* Create Group Modal */}
       {showGroupModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowGroupModal(false)}>
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md" onClick={(e) => e.stopPropagation()}>
@@ -1413,7 +1425,6 @@ function Message() {
         </div>
       )}
 
-      {/* Manage Group Modal */}
       {showManageGroupModal && selectedRoom?.is_group && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowManageGroupModal(false)}>
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md" onClick={(e) => e.stopPropagation()}>
@@ -1468,14 +1479,18 @@ function Message() {
         </div>
       )}
 
-      {/* Call Modal */}
       {(callState === 'incoming' || callState === 'outgoing' || callState === 'active') && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md text-center">
             <img
-              src={callState === 'incoming' ? (caller?.profile_picture ? `${CLOUDINARY_ENDPOINT}${caller.profile_picture}` : '/default-profile.png') : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png')}
+              src={
+                callState === 'incoming'
+                  ? getProfilePictureUrl(caller?.profile_picture)
+                  : getProfilePictureUrl(otherUser?.profile_picture)
+              }
               alt={callState === 'incoming' ? caller?.username : otherUser?.username}
               className="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-4 border-blue-400"
+              onError={(e) => (e.target.src = '/default-profile.png')}
             />
             <h3 className="text-2xl font-bold text-gray-800">
               {callState === 'incoming' ? 'Incoming Call' : callState === 'outgoing' ? 'Calling...' : 'In Call'}
@@ -1487,16 +1502,16 @@ function Message() {
             <div className="flex justify-center mt-4 space-x-4">
               {callState === 'incoming' && (
                 <>
-                  <button onClick={acceptCall} className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" title="Accept call">
+                  <button onClick={acceptCallFn} className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" title="Accept call">
                     <IoCall size={24} />
                   </button>
-                  <button onClick={() => endCall('rejected')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="Reject call">
+                  <button onClick={() => handleEndCall('rejected')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="Reject call">
                     <IoCall size={24} className="transform rotate-135" />
                   </button>
                 </>
               )}
               {(callState === 'outgoing' || callState === 'active') && (
-                <button onClick={() => endCall(callState === 'outgoing' ? 'missed' : 'completed')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="End call">
+                <button onClick={() => handleEndCall(callState === 'outgoing' ? 'missed' : 'completed')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="End call">
                   <IoCall size={24} className="transform rotate-135" />
                 </button>
               )}
@@ -1514,6 +1529,8 @@ function Message() {
         />,
         document.body
       )}
+
+    {renderToasts()}
     </div>
   );
 }
