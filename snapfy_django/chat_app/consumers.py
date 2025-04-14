@@ -219,8 +219,9 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             
     async def connection_replace(self, event):
         if event.get("except_connection") != self.connection_id:
-            logger.info(f"Received connection_replace for user {self.user_id}, closing connection {self.connection_id}")
-            await self.close(code=1000, reason="Connection replaced by new session")
+            active_call = await self.check_active_call()
+            if not active_call:
+                await self.close(code=1000, reason="Connection replaced by new session")
 
     async def handle_mark_as_read(self, data):
         room_id = data.get('room_id')
@@ -345,10 +346,19 @@ class UserChatConsumer(AsyncWebsocketConsumer):
     async def forward_call_signal(self, data, signal_type):
         room_id = data.get('room_id')
         target_user_id = data.get('target_user_id')
+        call_type = data.get('call_type', 'audio')  # Default to audio if not provided
         
         if not target_user_id or not room_id or not await self.is_user_in_room(room_id):
             await self.send(text_data=json.dumps({"type": "error", "error": "Invalid call data"}))
             return
+        
+        # Prevent duplicate call_offer signals
+        if signal_type == "call_offer":
+            signal_key = f"call_offer:{data.get('call_id')}:{target_user_id}"
+            if await self.redis_client.get(signal_key):
+                logger.info(f"Skipping duplicate call_offer for call_id {data.get('call_id')}")
+                return
+            await self.redis_client.setex(signal_key, 60, "sent")
 
         payload = {
             "type": signal_type,
@@ -361,12 +371,14 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 "profile_picture": self.user.profile_picture.url if self.user.profile_picture else None,
             },
             "call_status": data.get('call_status', 'ongoing'),
+            "call_type": call_type,
         }
         
         if signal_type in ["call_offer", "call_answer"]:
             payload["sdp"] = data.get('sdp')
         elif signal_type == "ice_candidate":
             payload["candidate"] = data.get('candidate')
+            payload["call_id"] = data.get('call_id')
         elif signal_type == "call_ended":
             payload["duration"] = data.get('duration', 0)
 

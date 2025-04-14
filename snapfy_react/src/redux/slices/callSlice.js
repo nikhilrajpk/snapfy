@@ -32,7 +32,9 @@ const callSlice = createSlice({
       state.roomId = action.payload;
     },
     setCallType(state, action) {
-      state.callType = action.payload;
+      if (action.payload === 'video' || action.payload === 'audio') {
+        state.callType = action.payload;
+      }
     },
     resetCall(state) {
       if (state.callState === 'active') return; // Prevent reset during active call
@@ -65,7 +67,7 @@ export const startCall = ({ callId, roomId, caller, sdp, callType }) => async (d
   dispatch(setCaller(caller));
   dispatch(setRoomId(roomId));
   dispatch(setCallOfferSdp(sdp));
-  dispatch(setCallType(callType)); // Explicitly set call type (audio/video)
+  dispatch(setCallType(callType)); 
 };
 
 export const acceptCall = ({ callId, caller, sdp, roomId, callType }) => async (dispatch) => {
@@ -74,7 +76,7 @@ export const acceptCall = ({ callId, caller, sdp, roomId, callType }) => async (
   dispatch(setCaller(caller));
   dispatch(setCallOfferSdp(sdp));
   dispatch(setRoomId(roomId));
-  dispatch(setCallType(callType));
+  dispatch(setCallType(callType || 'audio'));
 };
 
 export const endCall = ({ status, duration }) => async (dispatch) => {

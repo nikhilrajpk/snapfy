@@ -216,6 +216,7 @@ function Message() {
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
     let shouldReconnect = true;
+    let pendingSignals = []; // Queue for critical signals
 
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
@@ -240,17 +241,22 @@ function Message() {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
         localStorage.setItem('session_id', sessionId);
-      
+  
+        // Send queued signals
+        while (pendingSignals.length > 0) {
+          socketRef.current.send(pendingSignals.shift());
+        }
+  
         // Restore call state if needed
         const savedCallState = localStorage.getItem('call_state');
         if (savedCallState) {
           const { callId, roomId, caller, sdp, state, callType, timestamp } = JSON.parse(savedCallState);
-          if (Date.now() - timestamp < 60000 && state === 'outgoing') { // Valid for 60 seconds, only for outgoing
+          if (Date.now() - timestamp < 60000 && state === 'outgoing') {
             dispatch(startCall({ callId, roomId, caller, sdp, callType }));
             dispatch(setCallState(state));
             if (state === 'outgoing' && caller.id === user.id) {
               const otherUserId = selectedRoom?.users.find(u => String(u.id) !== String(user.id))?.id;
-              socketRef.current.send(JSON.stringify({
+              const callOfferSignal = JSON.stringify({
                 type: 'call_offer',
                 call_id: callId,
                 room_id: roomId,
@@ -262,7 +268,12 @@ function Message() {
                   username: user.username,
                   profile_picture: user.profile_picture || null,
                 },
-              }));
+              });
+              if (socketRef.current.readyState === WebSocket.OPEN) {
+                socketRef.current.send(callOfferSignal);
+              } else {
+                pendingSignals.push(callOfferSignal);
+              }
             }
           } else {
             localStorage.removeItem('call_state');
@@ -396,9 +407,15 @@ function Message() {
             break;
 
           case 'call_offer':
+            console.log(`Processing call_offer: call_id=${data.call_id}, call_type=${data.call_type}, existing_callType=${callType}`);
             if (String(data.caller.id) !== String(user.id)) {
               if (!data.call_id || !data.room_id || !data.caller || !data.sdp || !data.call_type) {
                 dispatch(showToast({ message: 'Invalid call data received', type: 'error' }));
+                break;
+              }
+              // Ignore if already processing the same call_id
+              if (callId === data.call_id && callState) {
+                console.log(`Ignoring duplicate call_offer for call_id ${data.call_id}`);
                 break;
               }
               console.log('Received call_offer:', data);
@@ -407,7 +424,7 @@ function Message() {
                 caller: data.caller,
                 sdp: data.sdp,
                 roomId: data.room_id,
-                callType: data.call_type,
+                callType: data.call_type, // Trust incoming call_type
               }));
               dispatch(showToast({
                 message: `Incoming ${data.call_type} call from ${data.caller.username}`,
@@ -420,20 +437,27 @@ function Message() {
 
           case 'call_answer':
             if (
-              (String(data.caller.id) === String(user.id) && callState === 'outgoing') ||
-              (String(data.target_user_id) === String(user.id) && peerConnectionRef.current)
+              (String(data.target_user_id) === String(user.id) || String(data.caller.id) === String(user.id)) &&
+              peerConnectionRef.current
             ) {
-              await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              dispatch(setCallState('active'));
-              localStorage.setItem('call_state', JSON.stringify({
-                callId: data.call_id,
-                roomId: data.room_id,
-                caller: data.caller,
-                sdp: data.sdp,
-                state: 'active',
-                callType: data.call_type || callType,
-                timestamp: Date.now(),
-              }));
+              try {
+                const expectedCallType = callType || data.call_type || 'audio'; // Fallback to stored callType
+                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                dispatch(setCallState('active'));
+                dispatch(setCallType(expectedCallType)); // Reinforce callType
+                localStorage.setItem('call_state', JSON.stringify({
+                  callId: data.call_id,
+                  roomId: data.room_id,
+                  caller: data.caller,
+                  sdp: data.sdp,
+                  state: 'active',
+                  callType: expectedCallType,
+                  timestamp: Date.now(),
+                }));
+              } catch (error) {
+                console.error('Error processing call answer:', error);
+                dispatch(showToast({ message: 'Failed to connect call', type: 'error' }));
+              }
             }
             break;
 
@@ -476,7 +500,7 @@ function Message() {
         console.log('WebSocket closed:', event);
         if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts && shouldReconnect) {
           reconnectAttempts++;
-          const delay = Math.min(5000, 2000 * reconnectAttempts); // Max 5 seconds delay
+          const delay = Math.min(5000, 1000 * reconnectAttempts); // Max 5 seconds delay
           console.log(`Reconnecting WebSocket (attempt ${reconnectAttempts}/${maxReconnectAttempts}) in ${delay}ms`);
           setTimeout(() => connectWebSocket(), delay);
         } else if (reconnectAttempts >= maxReconnectAttempts && callState !== 'active') {
@@ -524,6 +548,8 @@ function Message() {
       return;
     }
   
+    let isCallOfferSent = false; // Prevent duplicate offers
+  
     try {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
@@ -537,7 +563,6 @@ function Message() {
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
         .catch(err => {
           console.error('Error getting media:', err);
-          // Fallback to audio if video permission denied
           if (callType === 'video') {
             dispatch(showToast({ 
               message: 'Video permission denied, switching to audio', 
@@ -550,7 +575,6 @@ function Message() {
   
       localStreamRef.current = stream;
   
-      // Add local video stream if video call
       if (callType === 'video' && localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
@@ -559,9 +583,10 @@ function Message() {
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
   
       peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
+        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN && !isCallOfferSent) {
           socketRef.current.send(JSON.stringify({
             type: 'ice_candidate',
+            call_id: response?.data?.call_id || callId, // Use call_id from response or state
             room_id: conversationId,
             target_user_id: otherUser.id,
             candidate: event.candidate,
@@ -610,7 +635,6 @@ function Message() {
         callType,
       }));
   
-      // Store call state in localStorage for recovery
       localStorage.setItem('call_state', JSON.stringify({
         callId: response.data.call_id,
         roomId: conversationId,
@@ -621,19 +645,22 @@ function Message() {
         timestamp: Date.now(),
       }));
   
-      socketRef.current.send(JSON.stringify({
-        type: 'call_offer',
-        call_id: response.data.call_id,
-        room_id: conversationId,
-        target_user_id: otherUser.id,
-        sdp: offer,
-        call_type: callType,
-        caller: {
-          id: user.id,
-          username: user.username,
-          profile_picture: user.profile_picture || null,
-        },
-      }));
+      if (!isCallOfferSent) {
+        isCallOfferSent = true;
+        socketRef.current.send(JSON.stringify({
+          type: 'call_offer',
+          call_id: response.data.call_id,
+          room_id: conversationId,
+          target_user_id: otherUser.id,
+          sdp: offer,
+          call_type: callType,
+          caller: {
+            id: user.id,
+            username: user.username,
+            profile_picture: user.profile_picture || null,
+          },
+        }));
+      }
     } catch (error) {
       console.error('Error starting call:', error);
       cleanupCall();
@@ -647,7 +674,7 @@ function Message() {
   };
 
   const acceptCallFn = async () => {
-    if (!callId || !caller?.id || !callOfferSdp || !roomId) {
+    if (!callId || !caller?.id || !callOfferSdp || !roomId || !callType) {
       dispatch(showToast({ message: 'Invalid call data', type: 'error' }));
       cleanupCall();
       dispatch(resetCall());
@@ -664,7 +691,6 @@ function Message() {
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
         .catch(err => {
           console.error('Error getting media:', err);
-          // Fallback to audio if video permission denied
           if (callType === 'video') {
             dispatch(showToast({ 
               message: 'Video permission denied, switching to audio', 
@@ -689,6 +715,7 @@ function Message() {
         if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
             type: 'ice_candidate',
+            call_id: callId, // Ensure call_id is included
             room_id: roomId,
             target_user_id: caller.id,
             candidate: event.candidate,
@@ -720,6 +747,7 @@ function Message() {
           target_user_id: caller.id,
           call_id: callId,
           sdp: answer,
+          call_type: callType, // Explicitly include call_type
           caller: {
             id: user.id,
             username: user.username,
@@ -727,6 +755,7 @@ function Message() {
           },
         }));
         dispatch(setCallState('active'));
+        dispatch(setCallType(callType)); // Reinforce callType
   
         // Store call state for active call
         localStorage.setItem('call_state', JSON.stringify({
@@ -735,7 +764,7 @@ function Message() {
           caller: caller,
           sdp: callOfferSdp,
           state: 'active',
-          callType,
+          callType: callType,
           timestamp: Date.now(),
         }));
   
