@@ -22,6 +22,7 @@ import {
   acceptCall,
   endCall,
   resetCall,
+  setCallType
 } from '../../redux/slices/callSlice';
 
 const Navbar = React.lazy(() => import('../../Components/Navbar/Navbar'));
@@ -35,7 +36,7 @@ function Message() {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.user);
   const toasts = useSelector((state) => state.toast);
-  const { callState, callId, caller, callOfferSdp, callDuration, roomId } = useSelector((state) => state.call);
+  const { callState, callId, caller, callOfferSdp, callDuration, roomId, callType } = useSelector((state) => state.call);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -69,6 +70,8 @@ function Message() {
   const [selectedPost, setSelectedPost] = useState(null);
   const [roomCache, setRoomCache] = useState({}); // Cache for room data and messages
   const callTimerRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   const RTC_CONFIG = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -212,6 +215,7 @@ function Message() {
     const processedCallIds = new Set(); // Track processed call IDs
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
+    let shouldReconnect = true;
 
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
@@ -225,6 +229,10 @@ function Message() {
         sessionId = crypto.randomUUID();
         localStorage.setItem('session_id', sessionId);
       }
+      // Close existing connection if it exists
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
 
       socketRef.current = new WebSocket(`ws://127.0.0.1:8000/ws/user/chat/?token=${accessToken}`);
 
@@ -232,13 +240,13 @@ function Message() {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
         localStorage.setItem('session_id', sessionId);
-  
-        // Restore call state if it exists and is still valid
+      
+        // Restore call state if needed
         const savedCallState = localStorage.getItem('call_state');
-        if (savedCallState && callState !== 'active') { // Only restore if not already in active call
-          const { callId, roomId, caller, sdp, state, timestamp } = JSON.parse(savedCallState);
-          if (Date.now() - timestamp < 60000) { // Valid for 60 seconds
-            dispatch(startCall({ callId, roomId, caller, sdp }));
+        if (savedCallState) {
+          const { callId, roomId, caller, sdp, state, callType, timestamp } = JSON.parse(savedCallState);
+          if (Date.now() - timestamp < 60000 && state === 'outgoing') { // Valid for 60 seconds, only for outgoing
+            dispatch(startCall({ callId, roomId, caller, sdp, callType }));
             dispatch(setCallState(state));
             if (state === 'outgoing' && caller.id === user.id) {
               const otherUserId = selectedRoom?.users.find(u => String(u.id) !== String(user.id))?.id;
@@ -247,8 +255,8 @@ function Message() {
                 call_id: callId,
                 room_id: roomId,
                 target_user_id: otherUserId,
-                sdp: sdp,
-                call_type: 'audio',
+                sdp,
+                call_type: callType,
                 caller: {
                   id: user.id,
                   username: user.username,
@@ -389,7 +397,7 @@ function Message() {
 
           case 'call_offer':
             if (String(data.caller.id) !== String(user.id)) {
-              if (!data.call_id || !data.room_id || !data.caller || !data.sdp) {
+              if (!data.call_id || !data.room_id || !data.caller || !data.sdp || !data.call_type) {
                 dispatch(showToast({ message: 'Invalid call data received', type: 'error' }));
                 break;
               }
@@ -399,9 +407,10 @@ function Message() {
                 caller: data.caller,
                 sdp: data.sdp,
                 roomId: data.room_id,
+                callType: data.call_type,
               }));
               dispatch(showToast({
-                message: `Incoming call from ${data.caller.username}`,
+                message: `Incoming ${data.call_type} call from ${data.caller.username}`,
                 type: 'info',
                 action: { label: 'Answer' },
               }));
@@ -410,12 +419,21 @@ function Message() {
             break;
 
           case 'call_answer':
-            if (String(data.target_user_id) === String(user.id) && peerConnectionRef.current) {
+            if (
+              (String(data.caller.id) === String(user.id) && callState === 'outgoing') ||
+              (String(data.target_user_id) === String(user.id) && peerConnectionRef.current)
+            ) {
               await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
               dispatch(setCallState('active'));
-            } else if (String(data.caller.id) === String(user.id) && callState === 'outgoing') {
-              await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              dispatch(setCallState('active'));
+              localStorage.setItem('call_state', JSON.stringify({
+                callId: data.call_id,
+                roomId: data.room_id,
+                caller: data.caller,
+                sdp: data.sdp,
+                state: 'active',
+                callType: data.call_type || callType,
+                timestamp: Date.now(),
+              }));
             }
             break;
 
@@ -456,10 +474,11 @@ function Message() {
 
       socketRef.current.onclose = (event) => {
         console.log('WebSocket closed:', event);
-        if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+        if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts && shouldReconnect) {
           reconnectAttempts++;
-          setTimeout(() => connectWebSocket(), 2000 * reconnectAttempts);
-          console.log(`Reconnecting WebSocket (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+          const delay = Math.min(5000, 2000 * reconnectAttempts); // Max 5 seconds delay
+          console.log(`Reconnecting WebSocket (attempt ${reconnectAttempts}/${maxReconnectAttempts}) in ${delay}ms`);
+          setTimeout(() => connectWebSocket(), delay);
         } else if (reconnectAttempts >= maxReconnectAttempts && callState !== 'active') {
           dispatch(showToast({ message: 'Failed to connect to chat server', type: 'error' }));
           handleEndCall('disconnected', callDuration, true);
@@ -489,7 +508,7 @@ function Message() {
     return () => clearInterval(callTimerRef.current);
   }, [callState, callDuration, dispatch]);
 
-  const startCallFn = async () => {
+  const startCallFn = async (callType = 'audio') => {
     if (callState) {
       dispatch(showToast({ message: 'Another call is in progress', type: 'warning' }));
       return;
@@ -509,8 +528,32 @@ function Message() {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
   
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Get media stream based on call type
+      const constraints = {
+        audio: true,
+        video: callType === 'video' ? true : false
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        .catch(err => {
+          console.error('Error getting media:', err);
+          // Fallback to audio if video permission denied
+          if (callType === 'video') {
+            dispatch(showToast({ 
+              message: 'Video permission denied, switching to audio', 
+              type: 'warning' 
+            }));
+            return navigator.mediaDevices.getUserMedia({ audio: true });
+          }
+          throw err;
+        });
+  
       localStreamRef.current = stream;
+  
+      // Add local video stream if video call
+      if (callType === 'video' && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
   
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
@@ -527,16 +570,23 @@ function Message() {
       };
   
       peerConnectionRef.current.ontrack = (event) => {
-        const remoteAudio = new Audio();
-        remoteAudio.srcObject = event.streams[0];
-        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+        const remoteStream = event.streams[0];
+        if (callType === 'video') {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream;
+          }
+        } else {
+          const remoteAudio = new Audio();
+          remoteAudio.srcObject = remoteStream;
+          remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+        }
       };
   
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
   
       const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
-        call_type: 'audio',
+        call_type: callType,
         sdp: offer,
       });
   
@@ -557,8 +607,8 @@ function Message() {
         roomId: conversationId,
         caller: user,
         sdp: offer,
+        callType,
       }));
-      dispatch(setCallState('outgoing'));
   
       // Store call state in localStorage for recovery
       localStorage.setItem('call_state', JSON.stringify({
@@ -567,6 +617,7 @@ function Message() {
         caller: user,
         sdp: offer,
         state: 'outgoing',
+        callType,
         timestamp: Date.now(),
       }));
   
@@ -576,7 +627,7 @@ function Message() {
         room_id: conversationId,
         target_user_id: otherUser.id,
         sdp: offer,
-        call_type: 'audio',
+        call_type: callType,
         caller: {
           id: user.id,
           username: user.username,
@@ -588,7 +639,10 @@ function Message() {
       cleanupCall();
       dispatch(resetCall());
       localStorage.removeItem('call_state');
-      dispatch(showToast({ message: error.message || 'Failed to start call', type: 'error' }));
+      dispatch(showToast({ 
+        message: error.message || `Failed to start ${callType} call`, 
+        type: 'error' 
+      }));
     }
   };
 
@@ -601,8 +655,32 @@ function Message() {
     }
   
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Get media stream based on call type
+      const constraints = {
+        audio: true,
+        video: callType === 'video' ? true : false
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        .catch(err => {
+          console.error('Error getting media:', err);
+          // Fallback to audio if video permission denied
+          if (callType === 'video') {
+            dispatch(showToast({ 
+              message: 'Video permission denied, switching to audio', 
+              type: 'warning' 
+            }));
+            return navigator.mediaDevices.getUserMedia({ audio: true });
+          }
+          throw err;
+        });
+  
       localStreamRef.current = stream;
+  
+      // Add local video stream if video call
+      if (callType === 'video' && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
   
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
       stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
@@ -619,9 +697,16 @@ function Message() {
       };
   
       peerConnectionRef.current.ontrack = (event) => {
-        const remoteAudio = new Audio();
-        remoteAudio.srcObject = event.streams[0];
-        remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+        const remoteStream = event.streams[0];
+        if (callType === 'video') {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream;
+          }
+        } else {
+          const remoteAudio = new Audio();
+          remoteAudio.srcObject = remoteStream;
+          remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+        }
       };
   
       await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(callOfferSdp));
@@ -650,6 +735,7 @@ function Message() {
           caller: caller,
           sdp: callOfferSdp,
           state: 'active',
+          callType,
           timestamp: Date.now(),
         }));
   
@@ -662,7 +748,10 @@ function Message() {
     } catch (error) {
       console.error('Error accepting call:', error);
       cleanupCall();
-      dispatch(showToast({ message: error.message || 'Failed to accept call', type: 'error' }));
+      dispatch(showToast({ 
+        message: error.message || 'Failed to accept call', 
+        type: 'error' 
+      }));
       dispatch(resetCall());
       localStorage.removeItem('call_state');
     }
@@ -717,6 +806,12 @@ function Message() {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
@@ -730,11 +825,12 @@ function Message() {
       id: `call-${callId}`,
       key: `call-${callId}-${new Date().toISOString()}-${Math.random().toString(36).substr(2, 5)}`,
       sender: caller?.id === user.id ? user : (caller || selectedRoom?.users.find((u) => String(u.id) !== String(user.id)) || user),
-      content: `Call: audio - ${status}`,
+      content: `Call: ${callType} - ${status}`,
       sent_at: new Date().toISOString(),
       is_call: true,
       call_status: status,
-      call_duration: formatCallDuration(duration || 0), // Use provided duration
+      call_duration: formatCallDuration(duration || 0),
+      call_type: callType
     };
   
     setMessages((prev) => {
@@ -1257,14 +1353,19 @@ function Message() {
                           {!selectedRoom.is_group && (
                             <>
                               <button
-                                onClick={startCallFn}
+                                onClick={() => startCallFn('audio')}
                                 className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
                                 title="Audio call"
                                 disabled={callState}
                               >
                                 <IoCall size={20} />
                               </button>
-                              <button className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100" title="Video call">
+                              <button 
+                                onClick={() => startCallFn('video')}
+                                className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+                                title="Video call"
+                                disabled={callState}
+                              >
                                 <IoVideocam size={20} />
                               </button>
                             </>
@@ -1593,19 +1694,49 @@ function Message() {
 
       {(callState === 'incoming' || callState === 'outgoing' || callState === 'active') && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md text-center">
-            <img
-              src={
-                callState === 'incoming'
-                  ? getProfilePictureUrl(caller?.profile_picture)
-                  : getProfilePictureUrl(otherUser?.profile_picture)
-              }
-              alt={callState === 'incoming' ? caller?.username : otherUser?.username}
-              className="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-4 border-blue-400"
-              onError={(e) => (e.target.src = '/default-profile.png')}
-            />
+          <div className={`${callType === 'video' ? 'w-full max-w-4xl' : 'w-full max-w-md'} bg-white rounded-xl p-6 text-center`}>
+            {callType === 'video' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="relative bg-black rounded-lg overflow-hidden h-64">
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute bottom-2 left-2 text-white text-sm">
+                    {callState === 'incoming' ? caller?.username : otherUser?.username}
+                  </div>
+                </div>
+                <div className="relative bg-gray-800 rounded-lg overflow-hidden h-64">
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute bottom-2 left-2 text-white text-sm">
+                    {user.username} (You)
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <img
+                src={
+                  callState === 'incoming'
+                    ? getProfilePictureUrl(caller?.profile_picture)
+                    : getProfilePictureUrl(otherUser?.profile_picture)
+                }
+                alt={callState === 'incoming' ? caller?.username : otherUser?.username}
+                className="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-4 border-blue-400"
+                onError={(e) => (e.target.src = '/default-profile.png')}
+              />
+            )}
+            
             <h3 className="text-2xl font-bold text-gray-800">
               {callState === 'incoming' ? 'Incoming Call' : callState === 'outgoing' ? 'Calling...' : 'In Call'}
+              {callType === 'video' && ' (Video)'}
             </h3>
             <p className="text-gray-600 mt-2">{callState === 'incoming' ? caller?.username : otherUser?.username}</p>
             {callState === 'active' && (
@@ -1614,17 +1745,65 @@ function Message() {
             <div className="flex justify-center mt-4 space-x-4">
               {callState === 'incoming' && (
                 <>
-                  <button onClick={acceptCallFn} className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" title="Accept call">
+                  <button 
+                    onClick={acceptCallFn} 
+                    className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" 
+                    title="Accept call"
+                  >
                     <IoCall size={24} />
                   </button>
-                  <button onClick={() => handleEndCall('rejected')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="Reject call">
+                  <button 
+                    onClick={() => handleEndCall('rejected')} 
+                    className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" 
+                    title="Reject call"
+                  >
                     <IoCall size={24} className="transform rotate-135" />
                   </button>
                 </>
               )}
               {(callState === 'outgoing' || callState === 'active') && (
-                <button onClick={() => handleEndCall(callState === 'outgoing' ? 'missed' : 'completed')} className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" title="End call">
+                <button 
+                  onClick={() => handleEndCall(callState === 'outgoing' ? 'missed' : 'completed')} 
+                  className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" 
+                  title="End call"
+                >
                   <IoCall size={24} className="transform rotate-135" />
+                </button>
+              )}
+              {callState === 'active' && callType === 'video' && (
+                <button
+                  onClick={() => {
+                    const videoTrack = localStreamRef.current?.getVideoTracks()[0];
+                    if (videoTrack) {
+                      videoTrack.enabled = !videoTrack.enabled;
+                      dispatch(showToast({ 
+                        message: videoTrack.enabled ? 'Video enabled' : 'Video disabled', 
+                        type: 'info' 
+                      }));
+                    }
+                  }}
+                  className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-4"
+                  title="Toggle video"
+                >
+                  <IoVideocam size={24} />
+                </button>
+              )}
+              {callState === 'active' && (
+                <button
+                  onClick={() => {
+                    const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+                    if (audioTrack) {
+                      audioTrack.enabled = !audioTrack.enabled;
+                      dispatch(showToast({ 
+                        message: audioTrack.enabled ? 'Unmuted' : 'Muted', 
+                        type: 'info' 
+                      }));
+                    }
+                  }}
+                  className="bg-gray-500 hover:bg-gray-600 text-white rounded-full p-4"
+                  title="Mute/unmute"
+                >
+                  <IoMic size={24} />
                 </button>
               )}
             </div>

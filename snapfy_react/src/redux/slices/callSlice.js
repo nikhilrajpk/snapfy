@@ -10,6 +10,7 @@ const callSlice = createSlice({
     callOfferSdp: null,
     callDuration: 0,
     roomId: null,
+    callType: null, // 'audio' or 'video'
   },
   reducers: {
     setCallState(state, action) {
@@ -30,6 +31,9 @@ const callSlice = createSlice({
     setRoomId(state, action) {
       state.roomId = action.payload;
     },
+    setCallType(state, action) {
+      state.callType = action.payload;
+    },
     resetCall(state) {
       if (state.callState === 'active') return; // Prevent reset during active call
       state.callState = null;
@@ -38,6 +42,7 @@ const callSlice = createSlice({
       state.callOfferSdp = null;
       state.callDuration = 0;
       state.roomId = null;
+      state.callType = null;
     },
   },
 });
@@ -49,29 +54,33 @@ export const {
   setCallOfferSdp,
   setCallDuration,
   setRoomId,
+  setCallType,
   resetCall,
 } = callSlice.actions;
 
 // Thunk actions
-export const startCall = (callData) => async (dispatch) => {
+export const startCall = ({ callId, roomId, caller, sdp, callType }) => async (dispatch) => {
   dispatch(setCallState('outgoing'));
-  dispatch(setCallId(callData.callId));
-  dispatch(setCaller(callData.caller));
-  dispatch(setRoomId(callData.roomId));
+  dispatch(setCallId(callId));
+  dispatch(setCaller(caller));
+  dispatch(setRoomId(roomId));
+  dispatch(setCallOfferSdp(sdp));
+  dispatch(setCallType(callType)); // Explicitly set call type (audio/video)
 };
 
-export const acceptCall = (callData) => async (dispatch) => {
+export const acceptCall = ({ callId, caller, sdp, roomId, callType }) => async (dispatch) => {
   dispatch(setCallState('incoming'));
-  dispatch(setCallId(callData.callId));
-  dispatch(setCaller(callData.caller));
-  dispatch(setCallOfferSdp(callData.sdp));
-  dispatch(setRoomId(callData.roomId));
+  dispatch(setCallId(callId));
+  dispatch(setCaller(caller));
+  dispatch(setCallOfferSdp(sdp));
+  dispatch(setRoomId(roomId));
+  dispatch(setCallType(callType));
 };
 
-export const endCall = (callData) => async (dispatch) => {
+export const endCall = ({ status, duration }) => async (dispatch) => {
   dispatch(setCallState(null));
-  dispatch(setCallDuration(0)); // Reset duration here
-  // Keep callId and roomId for history update, reset later if needed
+  dispatch(setCallDuration(0)); // Reset duration
+  dispatch(setCallType(null)); // Reset call type
 };
 
 export default callSlice.reducer;

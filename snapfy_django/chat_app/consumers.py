@@ -56,10 +56,8 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             active_call = await self.check_active_call()
             other_connections = [
                 conn for conn in connections
-                if conn.get('session_id') != self.session_id and
-                (not conn.get('timestamp') or
-                (timezone.now() - datetime.datetime.fromisoformat(conn.get('timestamp'))).total_seconds() > 300) and
-                not active_call  # Skip replacement if this connection is part of an active call
+                if conn.get('session_id') != self.session_id
+                and not active_call  # Skip replacement if this connection is part of an active call
             ]
             if other_connections and not active_call:
                 logger.info(f"User {self.user_id} has stale connections, notifying others")
@@ -171,7 +169,6 @@ class UserChatConsumer(AsyncWebsocketConsumer):
                 await self.update_user_status(False)
                 await self.broadcast_user_status(False)
 
-        logger.info(f"User {self.user_id} connection {self.connection_id} disconnected with code {close_code}")
         if self.redis_client:
             await self.redis_client.close()
 
@@ -390,7 +387,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             "room_id": event["room_id"],
             "caller": event["caller"],
             "sdp": event["sdp"],
-            "call_type": event.get("call_type", "audio"),
+            "call_type": event["call_type"],
             "target_user_id": event.get("target_user_id"),
         }))
 
