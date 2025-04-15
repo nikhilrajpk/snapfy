@@ -44,6 +44,7 @@ function Message() {
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -69,13 +70,61 @@ function Message() {
   const [showManageGroupModal, setShowManageGroupModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
   const [roomCache, setRoomCache] = useState({}); // Cache for room data and messages
+  const [pendingSignals, setPendingSignals] = useState([]);
   const callTimerRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const processedStreamIds = useRef(new Set());
 
   const RTC_CONFIG = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   };
+
+  // Debounce utility to prevent rapid srcObject assignments
+  const debounce = (func, wait) => {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  };
+
+  // Helper function to safely play video
+  const playVideoSafely = async (videoElement, stream) => {
+    if (!videoElement || !stream) return;
+    try {
+      if (videoElement.srcObject !== stream) {
+        videoElement.srcObject = stream;
+      }
+      await videoElement.play();
+      console.log(`Playing video on ${videoElement === localVideoRef.current ? 'local' : 'remote'} video element`);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error(`Error playing video on ${videoElement === localVideoRef.current ? 'local' : 'remote'} video:`, err);
+        dispatch(showToast({ message: `Failed to play ${videoElement === localVideoRef.current ? 'local' : 'remote'} video`, type: 'error' }));
+      }
+    }
+  };
+
+  // Debounced refreshVideoStreams to prevent race conditions
+  const refreshVideoStreams = debounce(() => {
+    if (callType !== 'video') return;
+    if (localStreamRef.current && localVideoRef.current) {
+      console.log('Refreshing local video stream');
+      playVideoSafely(localVideoRef.current, localStreamRef.current);
+      localVideoRef.current.muted = true;
+    }
+    if (remoteStreamRef.current && remoteVideoRef.current) {
+      console.log('Refreshing remote video stream');
+      playVideoSafely(remoteVideoRef.current, remoteStreamRef.current);
+    }
+  }, 500);
+
+  useEffect(() => {
+    if (callState === 'active') {
+      refreshVideoStreams();
+    }
+  }, [callState]);
 
   useEffect(() => {
     let timer;
@@ -216,7 +265,6 @@ function Message() {
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
     let shouldReconnect = true;
-    let pendingSignals = []; // Queue for critical signals
 
     const connectWebSocket = () => {
       const accessToken = document.cookie.split('; ').find(row => row.startsWith('access_token='))?.split('=')[1];
@@ -242,9 +290,15 @@ function Message() {
         reconnectAttempts = 0;
         localStorage.setItem('session_id', sessionId);
   
-        // Send queued signals
-        while (pendingSignals.length > 0) {
-          socketRef.current.send(pendingSignals.shift());
+        // Send pending signals
+        if (pendingSignals.length > 0) {
+          pendingSignals.forEach(signal => {
+            if (socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(signal);
+              console.log('Sent queued signal:', signal);
+            }
+          });
+          setPendingSignals([]); // Clear after sending
         }
   
         // Restore call state if needed
@@ -271,10 +325,13 @@ function Message() {
               });
               if (socketRef.current.readyState === WebSocket.OPEN) {
                 socketRef.current.send(callOfferSignal);
+                console.log('Restored and sent call_offer:', callOfferSignal);
               } else {
-                pendingSignals.push(callOfferSignal);
+                setPendingSignals(prev => [...prev, callOfferSignal]);
+                console.log('Queued restored call_offer:', callOfferSignal);
               }
             }
+            refreshVideoStreams(); // Refresh streams after reconnect
           } else {
             localStorage.removeItem('call_state');
           }
@@ -413,7 +470,6 @@ function Message() {
                 dispatch(showToast({ message: 'Invalid call data received', type: 'error' }));
                 break;
               }
-              // Ignore if already processing the same call_id
               if (callId === data.call_id && callState) {
                 console.log(`Ignoring duplicate call_offer for call_id ${data.call_id}`);
                 break;
@@ -424,7 +480,7 @@ function Message() {
                 caller: data.caller,
                 sdp: data.sdp,
                 roomId: data.room_id,
-                callType: data.call_type, // Trust incoming call_type
+                callType: data.call_type,
               }));
               dispatch(showToast({
                 message: `Incoming ${data.call_type} call from ${data.caller.username}`,
@@ -441,19 +497,19 @@ function Message() {
               peerConnectionRef.current
             ) {
               try {
-                const expectedCallType = callType || data.call_type || 'audio'; // Fallback to stored callType
                 await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
                 dispatch(setCallState('active'));
-                dispatch(setCallType(expectedCallType)); // Reinforce callType
+                dispatch(setCallType(data.call_type || callType || 'audio'));
                 localStorage.setItem('call_state', JSON.stringify({
                   callId: data.call_id,
                   roomId: data.room_id,
                   caller: data.caller,
                   sdp: data.sdp,
                   state: 'active',
-                  callType: expectedCallType,
+                  callType: data.call_type || callType || 'audio',
                   timestamp: Date.now(),
                 }));
+                refreshVideoStreams(); // Refresh streams after setting remote description
               } catch (error) {
                 console.error('Error processing call answer:', error);
                 dispatch(showToast({ message: 'Failed to connect call', type: 'error' }));
@@ -463,7 +519,12 @@ function Message() {
 
           case 'ice_candidate':
             if (String(data.target_user_id) === String(user.id) && peerConnectionRef.current) {
-              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+              console.log('Received ICE candidate:', data.candidate);
+              try {
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+              } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+              }
             }
             break;
 
@@ -498,6 +559,12 @@ function Message() {
 
       socketRef.current.onclose = (event) => {
         console.log('WebSocket closed:', event);
+        if (callState === 'active') {
+          console.log('Preserving active call during WebSocket reconnect');
+          refreshVideoStreams();
+          return;
+        }
+
         if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts && shouldReconnect) {
           reconnectAttempts++;
           const delay = Math.min(5000, 1000 * reconnectAttempts); // Max 5 seconds delay
@@ -506,7 +573,7 @@ function Message() {
         } else if (reconnectAttempts >= maxReconnectAttempts && callState !== 'active') {
           dispatch(showToast({ message: 'Failed to connect to chat server', type: 'error' }));
           handleEndCall('disconnected', callDuration, true);
-        }
+        } 
       };
     };
 
@@ -537,106 +604,138 @@ function Message() {
       dispatch(showToast({ message: 'Another call is in progress', type: 'warning' }));
       return;
     }
-  
+
     if (!selectedRoom || !conversationId) {
       dispatch(showToast({ message: 'No chat selected', type: 'error' }));
       return;
     }
-  
+
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
       dispatch(showToast({ message: 'Chat server not connected. Please try again.', type: 'error' }));
       return;
     }
-  
-    let isCallOfferSent = false; // Prevent duplicate offers
-  
+
+    let isCallOfferSent = false;
+    let callId = null;
+
     try {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
-  
-      // Get media stream based on call type
+
       const constraints = {
         audio: true,
-        video: callType === 'video' ? true : false
+        video: callType === 'video' ? { width: 1280, height: 720 } : false,
       };
-      
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
-        .catch(err => {
-          console.error('Error getting media:', err);
-          if (callType === 'video') {
-            dispatch(showToast({ 
-              message: 'Video permission denied, switching to audio', 
-              type: 'warning' 
-            }));
-            return navigator.mediaDevices.getUserMedia({ audio: true });
-          }
-          throw err;
-        });
-  
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
+        console.error('Error getting media:', err);
+        if (callType === 'video') {
+          dispatch(showToast({ message: 'Video permission denied, switching to audio', type: 'warning' }));
+          return navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+        throw err;
+      });
+
       localStreamRef.current = stream;
-  
-      if (callType === 'video' && localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-  
+      console.log('Local stream tracks:', stream.getTracks());
+
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
-      stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-  
+      stream.getTracks().forEach((track) => {
+        peerConnectionRef.current.addTrack(track, stream);
+        console.log(`Added ${track.kind} track to peer connection`, track);
+      });
+
       peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN && !isCallOfferSent) {
-          socketRef.current.send(JSON.stringify({
+        if (event.candidate && callId) {
+          const candidateSignal = JSON.stringify({
             type: 'ice_candidate',
-            call_id: response?.data?.call_id || callId, // Use call_id from response or state
+            call_id: callId,
             room_id: conversationId,
             target_user_id: otherUser.id,
             candidate: event.candidate,
-          }));
+          });
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(candidateSignal);
+            console.log('Sent ICE candidate:', event.candidate);
+          } else {
+            setPendingSignals(prev => [...prev, candidateSignal]);
+            console.log('Queued ICE candidate:', event.candidate);
+          }
         }
       };
-  
+
       peerConnectionRef.current.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        if (callType === 'video') {
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-          }
-        } else {
+        const [remoteStream] = event.streams;
+        console.log('Received remote stream:', remoteStream, 'Tracks:', remoteStream.getTracks());
+        if (remoteStream.getTracks().length === 0) {
+          console.warn('Remote stream has no tracks');
+          return;
+        }
+        if (processedStreamIds.current.has(remoteStream.id)) {
+          console.log('Skipping duplicate remote stream:', remoteStream.id);
+          return;
+        }
+        processedStreamIds.current.add(remoteStream.id);
+        remoteStreamRef.current = remoteStream;
+        if (callType === 'video' && remoteVideoRef.current) {
+          console.log('Assigning remote stream to video element:', remoteStream.id);
+          playVideoSafely(remoteVideoRef.current, remoteStream, 'remote');
+        } else if (callType === 'audio') {
           const remoteAudio = new Audio();
           remoteAudio.srcObject = remoteStream;
-          remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+          remoteAudio.play().catch((err) => {
+            console.error('Audio play error:', err);
+            if (err.name !== 'AbortError') {
+              dispatch(showToast({ message: 'Failed to play remote audio', type: 'error' }));
+            }
+          });
         }
       };
-  
+
+      peerConnectionRef.current.oniceconnectionstatechange = () => {
+        const state = peerConnectionRef.current.iceConnectionState;
+        console.log('ICE connection state:', state);
+        if (state === 'failed' || state === 'disconnected') {
+          dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
+          peerConnectionRef.current.restartIce();
+        } else if (state === 'connected' || state === 'completed') {
+          refreshVideoStreams();
+        }
+      };
+
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
-  
+      console.log('Created and set offer:', offer);
+
       const response = await axiosInstance.post(`/chatrooms/${conversationId}/start-call/`, {
         call_type: callType,
         sdp: offer,
       });
-  
+
       console.log('start-call response:', response.data);
+      callId = response.data.call_id;
+
       if (response.data.status === 'missed') {
         cleanupCall();
         dispatch(showToast({ message: `${otherUser.username} is offline`, type: 'info' }));
         updateCallHistory(response.data.call_id, 'missed', 0);
         return;
       }
-  
-      if (!response.data.call_id) {
+
+      if (!callId) {
         throw new Error('Invalid call_id from server');
       }
-  
+
       dispatch(startCall({
-        callId: response.data.call_id,
+        callId,
         roomId: conversationId,
         caller: user,
         sdp: offer,
         callType,
       }));
-  
+
       localStorage.setItem('call_state', JSON.stringify({
-        callId: response.data.call_id,
+        callId,
         roomId: conversationId,
         caller: user,
         sdp: offer,
@@ -644,12 +743,12 @@ function Message() {
         callType,
         timestamp: Date.now(),
       }));
-  
+
       if (!isCallOfferSent) {
         isCallOfferSent = true;
-        socketRef.current.send(JSON.stringify({
+        const callOfferSignal = JSON.stringify({
           type: 'call_offer',
-          call_id: response.data.call_id,
+          call_id: callId,
           room_id: conversationId,
           target_user_id: otherUser.id,
           sdp: offer,
@@ -659,17 +758,26 @@ function Message() {
             username: user.username,
             profile_picture: user.profile_picture || null,
           },
-        }));
+        });
+        if (socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(callOfferSignal);
+          console.log('Sent call_offer:', callOfferSignal);
+        } else {
+          setPendingSignals(prev => [...prev, callOfferSignal]);
+          console.log('Queued call_offer:', callOfferSignal);
+        }
+      }
+
+      if (callType === 'video' && localVideoRef.current) {
+        playVideoSafely(localVideoRef.current, stream, 'local');
+        localVideoRef.current.muted = true;
       }
     } catch (error) {
       console.error('Error starting call:', error);
       cleanupCall();
       dispatch(resetCall());
       localStorage.removeItem('call_state');
-      dispatch(showToast({ 
-        message: error.message || `Failed to start ${callType} call`, 
-        type: 'error' 
-      }));
+      dispatch(showToast({ message: error.message || `Failed to start ${callType} call`, type: 'error' }));
     }
   };
 
@@ -680,96 +788,133 @@ function Message() {
       dispatch(resetCall());
       return;
     }
-  
+
     try {
-      // Get media stream based on call type
       const constraints = {
         audio: true,
-        video: callType === 'video' ? true : false
+        video: callType === 'video' ? { width: 1280, height: 720 } : false,
       };
-      
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
-        .catch(err => {
-          console.error('Error getting media:', err);
-          if (callType === 'video') {
-            dispatch(showToast({ 
-              message: 'Video permission denied, switching to audio', 
-              type: 'warning' 
-            }));
-            return navigator.mediaDevices.getUserMedia({ audio: true });
-          }
-          throw err;
-        });
-  
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
+        console.error('Error getting media:', err);
+        if (callType === 'video') {
+          dispatch(showToast({ message: 'Video permission denied, switching to audio', type: 'warning' }));
+          return navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+        throw err;
+      });
+
       localStreamRef.current = stream;
-  
-      // Add local video stream if video call
-      if (callType === 'video' && localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-  
+      console.log('Local stream tracks:', stream.getTracks());
+
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
-      stream.getTracks().forEach((track) => peerConnectionRef.current.addTrack(track, stream));
-  
+      stream.getTracks().forEach((track) => {
+        peerConnectionRef.current.addTrack(track, stream);
+        console.log(`Added ${track.kind} track to peer connection`, track);
+      });
+
       peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({
+        if (event.candidate) {
+          const candidateSignal = JSON.stringify({
             type: 'ice_candidate',
-            call_id: callId, // Ensure call_id is included
+            call_id: callId,
             room_id: roomId,
             target_user_id: caller.id,
             candidate: event.candidate,
-          }));
+          });
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(candidateSignal);
+            console.log('Sent ICE candidate:', event.candidate);
+          } else {
+            setPendingSignals(prev => [...prev, candidateSignal]);
+            console.log('Queued ICE candidate:', event.candidate);
+          }
         }
       };
-  
+
       peerConnectionRef.current.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        if (callType === 'video') {
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-          }
-        } else {
+        const [remoteStream] = event.streams;
+        console.log('Received remote stream:', remoteStream, 'Tracks:', remoteStream.getTracks());
+        if (remoteStream.getTracks().length === 0) {
+          console.warn('Remote stream has no tracks');
+          return;
+        }
+        if (processedStreamIds.current.has(remoteStream.id)) {
+          console.log('Skipping duplicate remote stream:', remoteStream.id);
+          return;
+        }
+        processedStreamIds.current.add(remoteStream.id);
+        remoteStreamRef.current = remoteStream;
+        if (callType === 'video' && remoteVideoRef.current) {
+          console.log('Assigning remote stream to video element:', remoteStream.id);
+          playVideoSafely(remoteVideoRef.current, remoteStream, 'remote');
+        } else if (callType === 'audio') {
           const remoteAudio = new Audio();
           remoteAudio.srcObject = remoteStream;
-          remoteAudio.play().catch((err) => console.error('Audio play error:', err));
+          remoteAudio.play().catch((err) => {
+            console.error('Audio play error:', err);
+            if (err.name !== 'AbortError') {
+              dispatch(showToast({ message: 'Failed to play remote audio', type: 'error' }));
+            }
+          });
         }
       };
-  
+
+      peerConnectionRef.current.oniceconnectionstatechange = () => {
+        const state = peerConnectionRef.current.iceConnectionState;
+        console.log('ICE connection state:', state);
+        if (state === 'failed' || state === 'disconnected') {
+          dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
+          peerConnectionRef.current.restartIce();
+        } else if (state === 'connected' || state === 'completed') {
+          refreshVideoStreams();
+        }
+      };
+
       await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(callOfferSdp));
+      console.log('Set remote description:', callOfferSdp);
+
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
-  
+      console.log('Created and set answer:', answer);
+
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
+        const callAnswerSignal = JSON.stringify({
           type: 'call_answer',
           room_id: roomId,
           target_user_id: caller.id,
           call_id: callId,
           sdp: answer,
-          call_type: callType, // Explicitly include call_type
+          call_type: callType,
           caller: {
             id: user.id,
             username: user.username,
             profile_picture: user.profile_picture || null,
           },
-        }));
+        });
+        socketRef.current.send(callAnswerSignal);
+        console.log('Sent call_answer:', callAnswerSignal);
+
         dispatch(setCallState('active'));
-        dispatch(setCallType(callType)); // Reinforce callType
-  
-        // Store call state for active call
+        dispatch(setCallType(callType));
+
         localStorage.setItem('call_state', JSON.stringify({
-          callId: callId,
-          roomId: roomId,
-          caller: caller,
+          callId,
+          roomId,
+          caller,
           sdp: callOfferSdp,
           state: 'active',
-          callType: callType,
+          callType,
           timestamp: Date.now(),
         }));
-  
+
         if (conversationId !== roomId) {
           navigate(`/messages/${roomId}`);
+        }
+
+        if (callType === 'video' && localVideoRef.current) {
+          playVideoSafely(localVideoRef.current, stream, 'local');
+          localVideoRef.current.muted = true;
         }
       } else {
         throw new Error('WebSocket not connected');
@@ -777,10 +922,7 @@ function Message() {
     } catch (error) {
       console.error('Error accepting call:', error);
       cleanupCall();
-      dispatch(showToast({ 
-        message: error.message || 'Failed to accept call', 
-        type: 'error' 
-      }));
+      dispatch(showToast({ message: error.message || 'Failed to accept call', type: 'error' }));
       dispatch(resetCall());
       localStorage.removeItem('call_state');
     }
@@ -788,9 +930,9 @@ function Message() {
 
   const handleEndCall = async (status = 'completed', duration = callDuration, localInitiated = true) => {
     if (!callId || !roomId) return;
-  
+
     const finalStatus = callState === 'active' ? 'completed' : status;
-  
+
     if (localInitiated) {
       try {
         await axiosInstance.post(`/chatrooms/${roomId}/end-call/`, {
@@ -798,11 +940,11 @@ function Message() {
           call_status: finalStatus,
           duration,
         });
-  
+
         const targetUserId = caller?.id === user.id
           ? selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.id
           : caller?.id;
-  
+
         if (targetUserId && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
             type: 'call_ended',
@@ -817,34 +959,49 @@ function Message() {
         console.error('Error ending call:', error);
       }
     }
-  
+
     cleanupCall();
     dispatch(endCall({ status: finalStatus, duration: 0 }));
     localStorage.removeItem('call_state');
     if (String(roomId) === String(conversationId)) {
       updateCallHistory(callId, finalStatus, duration);
     }
+    processedStreamIds.current.clear(); // Reset stream IDs on call end
   };
 
   const cleanupCall = () => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
+      console.log('Closed peer connection');
     }
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        console.log(`Stopped ${track.kind} track`);
+      });
       localStreamRef.current = null;
+    }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        console.log(`Stopped remote ${track.kind} track`);
+      });
+      remoteStreamRef.current = null;
     }
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
+      localVideoRef.current.pause();
     }
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.pause();
     }
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
+    processedStreamIds.current.clear();
   };
 
   const updateCallHistory = (callId, status, duration) => {
@@ -1389,7 +1546,7 @@ function Message() {
                               >
                                 <IoCall size={20} />
                               </button>
-                              <button 
+                              <button
                                 onClick={() => startCallFn('video')}
                                 className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
                                 title="Video call"
@@ -1732,9 +1889,10 @@ function Message() {
                     autoPlay
                     playsInline
                     className="w-full h-full object-cover"
+                    onError={(e) => console.error('Remote video error:', e)}
                   />
                   <div className="absolute bottom-2 left-2 text-white text-sm">
-                    {callState === 'incoming' ? caller?.username : otherUser?.username}
+                    {callState === 'incoming' ? caller?.username : selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}
                   </div>
                 </div>
                 <div className="relative bg-gray-800 rounded-lg overflow-hidden h-64">
@@ -1744,6 +1902,7 @@ function Message() {
                     playsInline
                     muted
                     className="w-full h-full object-cover"
+                    onError={(e) => console.error('Local video error:', e)}
                   />
                   <div className="absolute bottom-2 left-2 text-white text-sm">
                     {user.username} (You)
@@ -1755,35 +1914,36 @@ function Message() {
                 src={
                   callState === 'incoming'
                     ? getProfilePictureUrl(caller?.profile_picture)
-                    : getProfilePictureUrl(otherUser?.profile_picture)
+                    : getProfilePictureUrl(selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.profile_picture)
                 }
-                alt={callState === 'incoming' ? caller?.username : otherUser?.username}
+                alt={callState === 'incoming' ? caller?.username : selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}
                 className="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-4 border-blue-400"
                 onError={(e) => (e.target.src = '/default-profile.png')}
               />
             )}
-            
             <h3 className="text-2xl font-bold text-gray-800">
               {callState === 'incoming' ? 'Incoming Call' : callState === 'outgoing' ? 'Calling...' : 'In Call'}
               {callType === 'video' && ' (Video)'}
             </h3>
-            <p className="text-gray-600 mt-2">{callState === 'incoming' ? caller?.username : otherUser?.username}</p>
+            <p className="text-gray-600 mt-2">
+              {callState === 'incoming' ? caller?.username : selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}
+            </p>
             {callState === 'active' && (
               <div className="text-xl font-mono mt-4">{formatCallDuration(callDuration)}</div>
             )}
             <div className="flex justify-center mt-4 space-x-4">
               {callState === 'incoming' && (
                 <>
-                  <button 
-                    onClick={acceptCallFn} 
-                    className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4" 
+                  <button
+                    onClick={acceptCallFn}
+                    className="bg-green-500 hover:bg-green-600 text-white rounded-full p-4"
                     title="Accept call"
                   >
                     <IoCall size={24} />
                   </button>
-                  <button 
-                    onClick={() => handleEndCall('rejected')} 
-                    className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" 
+                  <button
+                    onClick={() => handleEndCall('rejected')}
+                    className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4"
                     title="Reject call"
                   >
                     <IoCall size={24} className="transform rotate-135" />
@@ -1791,9 +1951,9 @@ function Message() {
                 </>
               )}
               {(callState === 'outgoing' || callState === 'active') && (
-                <button 
-                  onClick={() => handleEndCall(callState === 'outgoing' ? 'missed' : 'completed')} 
-                  className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4" 
+                <button
+                  onClick={() => handleEndCall(callState === 'outgoing' ? 'missed' : 'completed')}
+                  className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4"
                   title="End call"
                 >
                   <IoCall size={24} className="transform rotate-135" />
@@ -1805,9 +1965,9 @@ function Message() {
                     const videoTrack = localStreamRef.current?.getVideoTracks()[0];
                     if (videoTrack) {
                       videoTrack.enabled = !videoTrack.enabled;
-                      dispatch(showToast({ 
-                        message: videoTrack.enabled ? 'Video enabled' : 'Video disabled', 
-                        type: 'info' 
+                      dispatch(showToast({
+                        message: videoTrack.enabled ? 'Video enabled' : 'Video disabled',
+                        type: 'info'
                       }));
                     }
                   }}
@@ -1823,16 +1983,16 @@ function Message() {
                     const audioTrack = localStreamRef.current?.getAudioTracks()[0];
                     if (audioTrack) {
                       audioTrack.enabled = !audioTrack.enabled;
-                      dispatch(showToast({ 
-                        message: audioTrack.enabled ? 'Unmuted' : 'Muted', 
-                        type: 'info' 
+                      dispatch(showToast({
+                        message: audioTrack.enabled ? 'Unmuted' : 'Muted',
+                        type: 'info'
                       }));
                     }
                   }}
                   className="bg-gray-500 hover:bg-gray-600 text-white rounded-full p-4"
                   title="Mute/unmute"
                 >
-                  <IoMic size={24} />
+                  {localStreamRef.current?.getAudioTracks()[0]?.enabled ? <IoMic size={24} /> : <IoMicOff size={24} />}
                 </button>
               )}
             </div>
