@@ -114,9 +114,9 @@ function Message() {
       playVideoSafely(localVideoRef.current, localStreamRef.current);
       localVideoRef.current.muted = true;
     }
-    if (remoteStreamRef.current && remoteVideoRef.current) {
+    if (localStreamRef.current && remoteVideoRef.current) {
       console.log('Refreshing remote video stream');
-      playVideoSafely(remoteVideoRef.current, remoteStreamRef.current);
+      playVideoSafely(remoteVideoRef.current, localStreamRef.current);
     }
   }, 500);
 
@@ -677,10 +677,7 @@ function Message() {
         }
         processedStreamIds.current.add(remoteStream.id);
         remoteStreamRef.current = remoteStream;
-        if (callType === 'video' && remoteVideoRef.current) {
-          console.log('Assigning remote stream to video element:', remoteStream.id);
-          playVideoSafely(remoteVideoRef.current, remoteStream, 'remote');
-        } else if (callType === 'audio') {
+        if (callType === 'audio') {
           const remoteAudio = new Audio();
           remoteAudio.srcObject = remoteStream;
           remoteAudio.play().catch((err) => {
@@ -696,7 +693,7 @@ function Message() {
         const state = peerConnectionRef.current.iceConnectionState;
         console.log('ICE connection state:', state);
         if (state === 'failed' || state === 'disconnected') {
-          dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
+          // dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
           peerConnectionRef.current.restartIce();
         } else if (state === 'connected' || state === 'completed') {
           refreshVideoStreams();
@@ -768,10 +765,10 @@ function Message() {
         }
       }
 
-      if (callType === 'video' && localVideoRef.current) {
-        playVideoSafely(localVideoRef.current, stream, 'local');
-        localVideoRef.current.muted = true;
-      }
+      // if (callType === 'video' && localVideoRef.current) {
+      //   // playVideoSafely(localVideoRef.current, stream, 'local');
+      //   localVideoRef.current.muted = true;
+      // }
     } catch (error) {
       console.error('Error starting call:', error);
       cleanupCall();
@@ -845,10 +842,7 @@ function Message() {
         }
         processedStreamIds.current.add(remoteStream.id);
         remoteStreamRef.current = remoteStream;
-        if (callType === 'video' && remoteVideoRef.current) {
-          console.log('Assigning remote stream to video element:', remoteStream.id);
-          playVideoSafely(remoteVideoRef.current, remoteStream, 'remote');
-        } else if (callType === 'audio') {
+        if (callType === 'audio') {
           const remoteAudio = new Audio();
           remoteAudio.srcObject = remoteStream;
           remoteAudio.play().catch((err) => {
@@ -864,7 +858,7 @@ function Message() {
         const state = peerConnectionRef.current.iceConnectionState;
         console.log('ICE connection state:', state);
         if (state === 'failed' || state === 'disconnected') {
-          dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
+          // dispatch(showToast({ message: 'Connection lost, attempting to reconnect', type: 'warning' }));
           peerConnectionRef.current.restartIce();
         } else if (state === 'connected' || state === 'completed') {
           refreshVideoStreams();
@@ -1884,30 +1878,42 @@ function Message() {
             {callType === 'video' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div className="relative bg-black rounded-lg overflow-hidden h-64">
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                    onError={(e) => console.error('Remote video error:', e)}
-                  />
-                  <div className="absolute bottom-2 left-2 text-white text-sm">
-                    {callState === 'incoming' ? caller?.username : selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}
-                  </div>
+                  {(callState === 'active' || callState === 'incoming') && (
+                    <video
+                      ref={remoteVideoRef}
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover"
+                      onError={(e) => console.error('Remote video error:', e)}
+                    />
+                  )}
+                  {(callState === 'active' || callState === 'incoming') && (
+                    <div className="absolute bottom-2 left-2 text-white text-sm">
+                      {callState === 'incoming'
+                        ? caller?.username
+                        : selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}
+                    </div>
+                  )}
                 </div>
-                <div className="relative bg-gray-800 rounded-lg overflow-hidden h-64">
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                    onError={(e) => console.error('Local video error:', e)}
-                  />
-                  <div className="absolute bottom-2 left-2 text-white text-sm">
-                    {user.username} (You)
+                {(callState === 'active' || callState === 'incoming' || callState === 'outgoing') && (
+                  <div className="relative bg-gray-800 rounded-lg overflow-hidden h-64">
+                    {callState === 'active' && (
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        onError={(e) => console.error('Local video error:', e)}
+                      />
+                    )}
+                    {callState === 'active' && (
+                      <div className="absolute bottom-2 left-2 text-white text-sm">
+                        {user.username} (You)
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
               </div>
             ) : (
               <img
