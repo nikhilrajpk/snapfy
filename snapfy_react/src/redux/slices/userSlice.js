@@ -16,7 +16,7 @@ const userSlice = createSlice({
     logout: (state) => {
       state.user = null;
       state.isAuthenticated = false;
-      localStorage.removeItem('reduxState'); // Clear persisted state on logout
+      localStorage.removeItem('reduxState');
     },
     setUser: (state, action) => {
       state.user = action.payload;

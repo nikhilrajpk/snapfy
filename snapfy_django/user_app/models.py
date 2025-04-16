@@ -54,6 +54,7 @@ class Report(models.Model):
     reported_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reports_received")
     reason = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    resolved = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Report by {self.reporter.username} against {self.reported_user.username}"

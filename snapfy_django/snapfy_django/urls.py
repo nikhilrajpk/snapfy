@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/',include('post_app.urls')),
     path('api/',include('notification_app.urls')),
     path('api/',include('chat_app.urls')),
+    path('api/admin/',include('admin_app.urls')),
     
     # path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     # path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

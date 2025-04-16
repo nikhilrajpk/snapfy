@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { userLogout } from '../../API/authAPI'; // Import userLogout
 import { logout } from '../../redux/slices/userSlice';
 import { useDispatch } from 'react-redux';
+import Loader from '../Loader/Loader'
 
 function ProtectedRoute({ children, authentication = true }) {
   const navigate = useNavigate();
@@ -19,7 +20,7 @@ function ProtectedRoute({ children, authentication = true }) {
           navigate('/');
         } else if (!authentication && isAuthenticated) {
           if (user?.is_staff) {
-            navigate('/admin-dashboard');
+            navigate('/admin');
           } else {
             navigate('/home');
           }
@@ -46,7 +47,7 @@ function ProtectedRoute({ children, authentication = true }) {
 
   // Show loading state while checking authentication
   if (isChecking) {
-    return <div>Loading...</div>; // Or your Loader component
+    return <Loader/>
   }
 
   return children;

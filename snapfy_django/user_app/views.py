@@ -263,7 +263,8 @@ class LoginView(APIView):
             response = Response({
                 "user": UserSerializer(user).data,
                 "access": str(refresh.access_token),
-                "refresh": str(refresh)
+                "refresh": str(refresh),
+                "is_admin": user.is_staff or user.is_superuser
             }, status=status.HTTP_200_OK)
             response.set_cookie(
                 key='access_token',
@@ -331,7 +332,8 @@ class GoogleLoginView(APIView):
                     first_name=first_name,
                     last_name=last_name,
                     profile_picture=picture,
-                    is_google_signIn=True
+                    is_google_signIn=True,
+                    is_verified=True
                 )
             refresh = RefreshToken.for_user(user)
             user.is_online = True
@@ -469,3 +471,86 @@ class ProxyProfilePictureView(APIView):
         except requests.RequestException as e:
             print(f"Failed to fetch image: {e}")
             return HttpResponse(status=502)
+        
+        
+class ReportUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        reported_username = request.data.get('reported_username')
+        reason = request.data.get('reason')
+
+        if not reported_username or not reason:
+            return Response(
+                {'error': 'Reported username and reason are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            reported_user = User.objects.get(username=reported_username)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Reported user not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if reported_user == request.user:
+            return Response(
+                {'error': 'You cannot report yourself'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if a report already exists
+        existing_report = Report.objects.filter(
+            reporter=request.user,
+            reported_user=reported_user
+        ).exists()
+
+        if existing_report:
+            return Response(
+                {'error': 'You have already reported this user'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create the report
+        Report.objects.create(
+            reporter=request.user,
+            reported_user=reported_user,
+            reason=reason,
+            created_at=timezone.now(),
+            resolved=False
+        )
+
+        return Response(
+            {'success': True, 'message': 'Report submitted successfully'},
+            status=status.HTTP_201_CREATED
+        )
+
+class CheckReportStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        reported_username = request.query_params.get('reported_username')
+        if not reported_username:
+            return Response(
+                {'error': 'Reported username is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            reported_user = User.objects.get(username=reported_username)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        has_reported = Report.objects.filter(
+            reporter=request.user,
+            reported_user=reported_user
+        ).exists()
+
+        return Response(
+            {'has_reported': has_reported},
+            status=status.HTTP_200_OK
+        )

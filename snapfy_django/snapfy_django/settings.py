@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'notification_app',
     'story_app',
     'chat_app',
+    'admin_app',
     # Rest framework
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',

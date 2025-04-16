@@ -30,11 +30,16 @@ const Login = () => {
       const response = await userLogin(data);
       console.log('Login response:', response);
       dispatch(login({ user: response.user }));
-      // Manually set cookies if needed (as backup)
+      
       document.cookie = `access_token=${response.access}; path=/; max-age=${3600 * 24}; SameSite=Lax`;
       document.cookie = `refresh_token=${response.refresh}; path=/; max-age=${3600 * 24 * 7}; SameSite=Lax`;
-      dispatch(showToast({ message: "User logged in", type: "success" }));
-      navigate('/home');
+      if (response.is_admin) {
+        dispatch(showToast({ message: "Admin logged in", type: "success" }));
+        navigate('/admin');
+      } else {
+        dispatch(showToast({ message: "User logged in", type: "success" }));
+        navigate('/home');
+      }
     } catch (error) {
       const errorResponse = error.response?.data;
 

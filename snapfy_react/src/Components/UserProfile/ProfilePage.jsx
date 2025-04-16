@@ -159,6 +159,9 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
   const [followerCount, setFollowerCount] = useState(userData?.followerCount || userData?.follower_count || 0);
   const [isBlocked, setIsBlocked] = useState(false); // Logged-in user blocked profile owner
   const [isBlockedByUser, setIsBlockedByUser] = useState(false); // Profile owner blocked logged-in user
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [hasReported, setHasReported] = useState(false);
   const { user } = useSelector((state) => state.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -169,6 +172,23 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
 
   useEffect(() => {
     let isMounted = true;
+
+    const checkReportStatus = async () => {
+      if (user && userData) {
+        try {
+          const response = await axiosInstance.get('/check-report-status/', {
+            params: { reported_username: userData?.username }
+          });
+          if (isMounted) {
+            setHasReported(response.data.has_reported);
+          }
+        } catch (error) {
+          console.error('Error checking report status:', error);
+        }
+      }
+    };
+
+    checkReportStatus();
   
     const syncFollowStatus = async () => {
       if (user && userData && isMounted) {
@@ -310,6 +330,36 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
     }
   };
 
+  const handleReportClick = () => {
+    setShowReportModal(true);
+  };
+
+  const handleReportSubmit = async () => {
+    if (!reportReason.trim()) {
+      dispatch(showToast({ message: 'Please provide a reason for the report', type: 'error' }));
+      return;
+    }
+
+    try {
+      await axiosInstance.post('/report-user/', {
+        reported_username: userData?.username,
+        reason: reportReason
+      });
+      dispatch(showToast({ message: `Reported ${userData?.username} successfully`, type: 'success' }));
+      setHasReported(true); // Disable the report button
+      setShowReportModal(false);
+      setReportReason('');
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      dispatch(showToast({ message: error.response?.data?.error || 'Failed to submit report', type: 'error' }));
+    }
+  };
+
+  const handleReportCancel = () => {
+    setShowReportModal(false);
+    setReportReason('');
+  };
+
   const fullName = `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim();
 
   const renderMutualFollowers = () => {
@@ -402,9 +452,17 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
                 <MessageCircle size={16} className="mr-1" />
                 Message
               </button>
-              <button className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition duration-200">
+
+              <button
+                onClick={handleReportClick}
+                className={`bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition duration-200 ${
+                  hasReported ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'
+                }`}
+                disabled={hasReported}
+              >
                 <Flag size={16} />
               </button>
+
               <button
                 onClick={handleBlockToggle}
                 className={`${
@@ -447,6 +505,58 @@ const OtherUserProfile = ({ userData, onUserUpdate, fetchFollowList }) => {
         userData={userData}
         type={activeTab.toLowerCase()}
       />
+      {showReportModal && (
+        <ReportModal
+          username={userData?.username}
+          onSubmit={handleReportSubmit}
+          onCancel={handleReportCancel}
+          reportReason={reportReason}
+          setReportReason={setReportReason}
+        />
+      )}
+    </div>
+  );
+};
+
+const ReportModal = ({ username, onSubmit, onCancel, reportReason, setReportReason }) => {
+  return (
+    <div className="fixed inset-0 backdrop-blur-md bg-transparent bg-opacity-30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white border-2 border-[#157347] rounded-2xl shadow-xl p-6 w-full max-w-md ">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-gray-800">Report {username}</h2>
+          <button
+            onClick={onCancel}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        <div className="mb-4">
+          <textarea
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            placeholder="Please describe why you are reporting this user..."
+            className="w-full p-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#198754] bg-gray-50 resize-none"
+            rows={5}
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition duration-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            className="px-4 py-2 bg-[#198754] text-white rounded-lg hover:bg-[#157347] transition duration-200"
+          >
+            Submit Report
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

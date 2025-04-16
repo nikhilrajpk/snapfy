@@ -17,6 +17,8 @@ urlpatterns = [
     path('users/id/<uuid:id>/', views.get_user_by_id, name='get_user_by_id'),
     path('block/<str:username>/', views.BlockUserView.as_view(), name='block_user'),
     path('unblock/<str:username>/', views.UnblockUserView.as_view(), name='unblock_user'),
+    path('report-user/', views.ReportUserView.as_view(), name='report_user'),
+    path('check-report-status/', views.CheckReportStatusView.as_view(), name='check_report_status'),
 ]
 
 router = DefaultRouter()

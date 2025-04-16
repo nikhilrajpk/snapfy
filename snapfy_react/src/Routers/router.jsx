@@ -2,6 +2,8 @@ import React from 'react'
 import { createBrowserRouter} from 'react-router-dom'
 
 import ProtectedRoute from '../utils/ProtectedRoute/ProtectedRoute'
+import {AdminProtectedRoute} from '../utils/ProtectedRoute/AdminProtectRoute'
+
 const Error404 = React.lazy(()=> import('../ErrorPage/Error404'))
 const SignUp = React.lazy(()=> import('../Components/Auth/SignUp'))
 const Login = React.lazy(()=> import('../Components/Auth/Login'))
@@ -22,6 +24,13 @@ const ExplorePage = React.lazy(()=> import('../Pages/ExplorePage'))
 const Shorts = React.lazy(()=> import('../Features/Shorts/Shorts'))
 const Message = React.lazy(()=> import('../Features/Messages/Message'))
 const Notification = React.lazy(()=> import('../Features/Notification/Notification'))
+
+const AdminLayout = React.lazy(() => import('../Components/Admin/AdminLayout'));
+const Dashboard = React.lazy(() => import('../Components/Admin/Dashboard'));
+const Reports = React.lazy(()=> import('../Components/Admin/Reports'))
+const Users = React.lazy(()=> import('../Components/Admin/Users'))
+const BlockedUsers = React.lazy(()=> import('../Components/Admin/BlockedUsers'))
+
 
 const router = createBrowserRouter([
     {
@@ -164,6 +173,48 @@ const router = createBrowserRouter([
                         <Notification/>
                     </ProtectedRoute>
                 )
+            },
+            {
+                path: '/admin',
+                element: (
+                  <AdminProtectedRoute>
+                    <AdminLayout />
+                  </AdminProtectedRoute>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: <Dashboard />,
+                  },
+                  {
+                    path: 'users',
+                    element: <Users />,
+                  },
+                  {
+                    path: 'blocked-users',
+                    element: <BlockedUsers />,
+                  },
+                  {
+                    path: 'reports',
+                    element: <Reports />,
+                  },
+                //   {
+                //     path: 'trending',
+                //     element: <TrendingSongs />,
+                //   },
+                //   {
+                //     path: 'analytics',
+                //     element: <Analytics />,
+                //   },
+                //   {
+                //     path: 'export',
+                //     element: <ExportReports />,
+                //   },
+                //   {
+                //     path: 'notifications',
+                //     element: <AdminNotifications />,
+                //   },
+                ],
             },
 
 
