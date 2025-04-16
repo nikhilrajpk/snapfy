@@ -49,6 +49,9 @@ const Navbar = () => {
   const { user } = useSelector((state) => state.user);
 
   const handleLogout = async () => {
+    // Set a flag to indicate logout is in progress
+    window.isLoggingOut = true;
+
     try {
       await userLogout();
       document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
@@ -63,6 +66,9 @@ const Navbar = () => {
       dispatch(logout());
       dispatch(showToast({ message: 'Logged out successfully', type: 'warning' }));
       navigate('/');
+    } finally {
+      // Clear the flag after logout completes
+      window.isLoggingOut = false;
     }
   };
 

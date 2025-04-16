@@ -29,6 +29,11 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // Skip token refresh for logout requests
+    if (originalRequest.url.includes('/logout/') || window.isLoggingOut) {
+      return Promise.reject(error);
+    }
     
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -61,7 +66,10 @@ axiosInstance.interceptors.response.use(
         console.error('Token refresh failed:', refreshError);
         // await axios.post('http://127.0.0.1:8000/api/logout/')
         // store.dispatch(logout());
-        store.dispatch(showToast({'message':'Please Logout due to token refresh failed', 'type':'warning'}))
+        // store.dispatch(showToast({
+        //   message: 'Session expired. Please log in again.',
+        //   type: 'warning'
+        // }));
         // window.location.href = '/';
         return Promise.reject(refreshError);
       }
