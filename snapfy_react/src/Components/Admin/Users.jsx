@@ -42,8 +42,12 @@ const Users = () => {
       setTotalPages(response.data.total_pages);
       setTotalUsers(response.data.total);
     } catch (error) {
-      console.error('Error fetching users:', error);
-      dispatch(showToast({ message: 'Failed to load users', type: 'error' }));
+      if (error.response?.status === 401){
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      }else{
+        console.error('Error fetching users:', error);
+        dispatch(showToast({ message: 'Failed to load users', type: 'error' }));
+      }
     } finally {
       setLoading(false);
     }
@@ -77,7 +81,7 @@ const Users = () => {
   const handleSearch = (e) => {
     e.preventDefault();
     setCurrentPage(1);
-    // The actual search is triggered by the useEffect
+    
   };
 
   const formatDate = (dateString) => {

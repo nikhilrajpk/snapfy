@@ -8,16 +8,26 @@ User = get_user_model()
 
 class AnalyticsReport(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    report_type = models.CharField(max_length=50, choices=[
-        ('daily', 'Daily Report'),
-        ('weekly', 'Weekly Report'),
-        ('monthly', 'Monthly Report'),
-    ])
-    generated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    generated_at = models.DateTimeField(auto_now_add=True)
+    REPORT_TYPES = (
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+    )
+    DATA_TYPES = (
+        ('users', 'Users'),
+        ('posts', 'Posts'),
+        ('likes', 'Likes'),
+        ('comments', 'Comments'),
+        ('hashtags', 'Hashtags'),
+    )
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPES)
+    data_type = models.CharField(max_length=20, choices=DATA_TYPES)
+    generated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='generated_reports')
     report_data = models.JSONField()
     start_date = models.DateField()
     end_date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    file_path = models.CharField(max_length=255, blank=True, null=True)
     
     def __str__(self):
         return f"{self.report_type} Report ({self.start_date} to {self.end_date})"

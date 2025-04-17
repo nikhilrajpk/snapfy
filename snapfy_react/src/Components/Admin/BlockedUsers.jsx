@@ -41,8 +41,12 @@ const BlockedUsers = () => {
       setTotalPages(response.data.total_pages);
       setTotalUsers(response.data.total);
     } catch (error) {
-      console.error('Error fetching blocked users:', error);
-      dispatch(showToast({ message: 'Failed to load blocked users', type: 'error' }));
+      if (error.response?.status === 401){
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      }else{
+        console.error('Error fetching blocked users:', error);
+        dispatch(showToast({ message: 'Failed to load blocked users', type: 'error' }));
+      }
     } finally {
       setLoading(false);
     }

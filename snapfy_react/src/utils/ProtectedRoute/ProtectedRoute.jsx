@@ -10,7 +10,7 @@ function ProtectedRoute({ children, authentication = true }) {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { user, isAuthenticated } = useSelector((state) => state.user);
-  const [isChecking, setIsChecking] = useState(true); // Add loading state
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
     const checkAuthStatus = async () => {
@@ -24,6 +24,8 @@ function ProtectedRoute({ children, authentication = true }) {
           } else {
             navigate('/home');
           }
+        } else if (authentication && isAuthenticated && user?.is_staff){
+          navigate('/admin')
         }
       } catch (error) {
         if (error.response?.status === 401) {

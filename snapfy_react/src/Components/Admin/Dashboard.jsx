@@ -1,27 +1,23 @@
-// src/components/admin/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { 
   User, 
   UserCheck, 
   UserX, 
   Users as UsersIcon, 
-  TrendingUp, 
   Flag,
   AlertCircle
 } from 'lucide-react';
 import { 
-  LineChart, 
-  Line, 
+  AreaChart, 
+  Area, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer, 
-  AreaChart, 
-  Area 
+  ResponsiveContainer 
 } from 'recharts';
-
-import axiosInstance from '../../axiosInstance'
+import axiosInstance from '../../axiosInstance';
+import { useDispatch } from 'react-redux';
 
 const StatCard = ({ title, value, icon: Icon, color }) => {
   return (
@@ -38,6 +34,7 @@ const StatCard = ({ title, value, icon: Icon, color }) => {
 };
 
 const Dashboard = () => {
+  const dispatch = useDispatch();
   const [stats, setStats] = useState({
     total_users: 0,
     blocked_users: 0,
@@ -47,10 +44,10 @@ const Dashboard = () => {
     active_users: 0,
     online_users: 0,
     reports_count: 0,
-    unhandled_reports: 0
+    unhandled_reports: 0,
   });
-  
   const [userGrowth, setUserGrowth] = useState([]);
+  const [postGrowth, setPostGrowth] = useState([]);
   const [selectedPeriod, setSelectedPeriod] = useState('weekly');
   const [loading, setLoading] = useState(true);
 
@@ -58,15 +55,18 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [statsResponse, growthResponse] = await Promise.all([
+        const [statsResponse, userGrowthResponse, postGrowthResponse] = await Promise.all([
           axiosInstance.get(`/admin/dashboard-stats/`),
-          axiosInstance.get(`/admin/user-growth/?period=${selectedPeriod}`)
+          axiosInstance.get(`/admin/user-growth/?period=${selectedPeriod}`),
+          axiosInstance.get(`/admin/post-growth/?period=${selectedPeriod}`),
         ]);
         
         setStats(statsResponse.data);
-        setUserGrowth(growthResponse.data);
+        setUserGrowth(userGrowthResponse.data);
+        setPostGrowth(postGrowthResponse.data);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
+        dispatch(showToast({ message: 'Failed to load dashboard data', type: 'error' }));
       } finally {
         setLoading(false);
       }
@@ -77,13 +77,29 @@ const Dashboard = () => {
 
   const formattedUserGrowth = userGrowth.map(item => ({
     date: item.date,
-    'New Users': item.count
+    'New Users': item.count,
+  }));
+
+  const formattedPostGrowth = postGrowth.map(item => ({
+    date: item.date,
+    'New Posts': item.count,
   }));
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+        <div className="flex space-x-2">
+          {['daily', 'weekly', 'monthly'].map((period) => (
+            <button
+              key={period}
+              onClick={() => setSelectedPeriod(period)}
+              className={`px-3 py-1 rounded ${selectedPeriod === period ? 'bg-[#198754] text-white' : 'bg-gray-100'}`}
+            >
+              {period.charAt(0).toUpperCase() + period.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -152,51 +168,72 @@ const Dashboard = () => {
         />
       </div>
 
-      {/* Charts */}
+      {/* User Growth Chart */}
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-bold">User Growth</h2>
-          <div className="flex space-x-2">
-            <button 
-              onClick={() => setSelectedPeriod('daily')}
-              className={`px-3 py-1 rounded ${selectedPeriod === 'daily' ? 'bg-[#198754] text-white' : 'bg-gray-100'}`}
-            >
-              Daily
-            </button>
-            <button 
-              onClick={() => setSelectedPeriod('weekly')}
-              className={`px-3 py-1 rounded ${selectedPeriod === 'weekly' ? 'bg-[#198754] text-white' : 'bg-gray-100'}`}
-            >
-              Weekly
-            </button>
-            <button 
-              onClick={() => setSelectedPeriod('monthly')}
-              className={`px-3 py-1 rounded ${selectedPeriod === 'monthly' ? 'bg-[#198754] text-white' : 'bg-gray-100'}`}
-            >
-              Monthly
-            </button>
-          </div>
         </div>
-        
         <div className="h-80">
           {loading ? (
             <div className="h-full flex items-center justify-center">
-              <p>Loading chart data...</p>
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={formattedUserGrowth}>
                 <defs>
                   <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#198754" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#198754" stopOpacity={0.1}/>
+                    <stop offset="5%" stopColor="#198754" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#198754" stopOpacity={0.1} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                 <XAxis dataKey="date" />
                 <YAxis />
                 <Tooltip />
-                <Area type="monotone" dataKey="New Users" stroke="#198754" fillOpacity={1} fill="url(#colorUsers)" />
+                <Area
+                  type="monotone"
+                  dataKey="New Users"
+                  stroke="#198754"
+                  fillOpacity={1}
+                  fill="url(#colorUsers)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Post Growth Chart */}
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-bold">Post Growth</h2>
+        </div>
+        <div className="h-80">
+          {loading ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={formattedPostGrowth}>
+                <defs>
+                  <linearGradient id="colorPosts" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#198754" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#198754" stopOpacity={0.1} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Area
+                  type="monotone"
+                  dataKey="New Posts"
+                  stroke="#198754"
+                  fillOpacity={1}
+                  fill="url(#colorPosts)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           )}

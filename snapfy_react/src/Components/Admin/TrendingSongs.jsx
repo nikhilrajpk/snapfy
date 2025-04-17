@@ -58,9 +58,13 @@ const TrendingSongs = () => {
       setTotalPages(response.data.total_pages);
       setTotalTracks(response.data.total);
     } catch (error) {
-      console.error('Error fetching music tracks:', error);
-      dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
-    } finally {
+      if (error.response?.status === 401){
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      }else{
+        console.error('Error fetching music tracks:', error);
+        dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
+      }
+      } finally {
       setLoading(false);
     }
   };
@@ -115,8 +119,12 @@ const TrendingSongs = () => {
       setTotalTracks(prev => prev - 1);
       dispatch(showToast({ message: 'Track deleted successfully', type: 'success' }));
     } catch (error) {
-      console.error('Error deleting music track:', error);
-      dispatch(showToast({ message: 'Failed to delete music track', type: 'error' }));
+      if (error.response?.status === 401){
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+      }else{
+        console.error('Error deleting music track:', error);
+        dispatch(showToast({ message: 'Failed to delete music track', type: 'error' }));
+      }
     }
   };
 

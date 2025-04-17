@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from .models import AnalyticsReport, AdminActionLog, UserStatistics
 from user_app.models import User, Report 
 from story_app.models import MusicTrack
+from post_app.models import *
 from .serializers import MusicTrackSerializer
 from django.db.models import Count
 from django.utils import timezone
@@ -19,7 +20,14 @@ import cloudinary.uploader
 import tempfile
 import os
 import logging
+import csv
 from moviepy.editor import AudioFileClip
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+import io
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
@@ -39,6 +47,9 @@ def dashboard_stats(request):
         'online_users': User.objects.filter(is_online=True).count(),
         'reports_count': Report.objects.count(),
         'unhandled_reports': Report.objects.filter(resolved=False).count(),
+        'total_posts': Post.objects.count(),
+        'total_likes': Like.objects.count(),
+        'total_comments': Comment.objects.count(),
     }
     
     return Response(stats)
@@ -65,6 +76,120 @@ def user_growth(request):
     data = UserStatistics.get_user_count_by_date_range(start_date, end_date)
     
     return Response(data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def post_growth(request):
+    """Get post growth data for charts"""
+    period = request.query_params.get('period', 'weekly')
+    today = timezone.now().date()
+    
+    if period == 'daily':
+        start_date = today - datetime.timedelta(days=6)
+    elif period == 'weekly':
+        start_date = today - datetime.timedelta(days=28)
+    elif period == 'monthly':
+        start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+    else:
+        return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Count posts by date
+    date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+    result = []
+    
+    for date in date_range:
+        count = Post.objects.filter(created_at__date=date).count()
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'count': count
+        })
+    
+    return Response(result)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def like_growth(request):
+    """Get like growth data for charts"""
+    period = request.query_params.get('period', 'weekly')
+    today = timezone.now().date()
+    
+    if period == 'daily':
+        start_date = today - datetime.timedelta(days=6)
+    elif period == 'weekly':
+        start_date = today - datetime.timedelta(days=28)
+    elif period == 'monthly':
+        start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+    else:
+        return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+    result = []
+    
+    for date in date_range:
+        count = Like.objects.filter(created_at__date=date).count()
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'count': count
+        })
+    
+    return Response(result)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def comment_growth(request):
+    """Get comment growth data for charts"""
+    period = request.query_params.get('period', 'weekly')
+    today = timezone.now().date()
+    
+    if period == 'daily':
+        start_date = today - datetime.timedelta(days=6)
+    elif period == 'weekly':
+        start_date = today - datetime.timedelta(days=28)
+    elif period == 'monthly':
+        start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+    else:
+        return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+    result = []
+    
+    for date in date_range:
+        count = Comment.objects.filter(created_at__date=date).count()
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'count': count
+        })
+    
+    return Response(result)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def hashtag_trends(request):
+    """Get top hashtag usage trends"""
+    period = request.query_params.get('period', 'weekly')
+    today = timezone.now().date()
+    
+    if period == 'daily':
+        start_date = today - datetime.timedelta(days=6)
+    elif period == 'weekly':
+        start_date = today - datetime.timedelta(days=28)
+    elif period == 'monthly':
+        start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+    else:
+        return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    hashtags = Hashtag.objects.annotate(post_count=Count('hashtags_posts')).order_by('-post_count')[:5]
+    result = []
+    
+    date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+    for date in date_range:
+        entry = {'date': date.strftime('%Y-%m-%d')}
+        for hashtag in hashtags:
+            count = hashtag.hashtags_posts.filter(created_at__date=date).count()
+            entry[hashtag.name] = count
+        result.append(entry)
+    
+    return Response(result)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
@@ -182,48 +307,190 @@ def block_user(request, user_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def generate_report(request):
-    """Generate and download a CSV report"""
-    report_type = request.query_params.get('type', 'users')
+    """Generate and download a PDF report"""
+    report_type = request.query_params.get('type', 'users')  # users, posts, likes, comments, hashtags
     period = request.query_params.get('period', 'weekly')
     
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="{report_type}_{period}_report.csv"'
-    
-    writer = csv.writer(response)
-    
+    if report_type not in ['users', 'posts', 'likes', 'comments', 'hashtags']:
+        return Response({'error': 'Invalid report type'}, status=status.HTTP_400_BAD_REQUEST)
+    if period not in ['daily', 'weekly', 'monthly']:
+        return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Prepare PDF response
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'Title',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.HexColor('#198754')
+    )
+    normal_style = styles['Normal']
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.grey
+    )
+
+    # Header
+    title = f"{report_type.capitalize()} {period.capitalize()} Report"
+    elements.append(Paragraph(title, title_style))
+    elements.append(Paragraph(f"Generated on {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} by {request.user.username}", normal_style))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Data preparation
+    today = timezone.now().date()
+    if period == 'daily':
+        start_date = today - datetime.timedelta(days=6)
+    elif period == 'weekly':
+        start_date = today - datetime.timedelta(days=28)
+    elif period == 'monthly':
+        start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+
+    date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+    report_data = []
+
+    # Table data
     if report_type == 'users':
-        writer.writerow(['Date', 'New Users', 'Cumulative Users'])
-        
-        today = timezone.now().date()
-        if period == 'daily':
-            start_date = today - datetime.timedelta(days=7)
-        elif period == 'weekly':
-            start_date = today - datetime.timedelta(days=28)
-        else:  # monthly
-            start_date = today - datetime.timedelta(days=180)
-            
+        table_data = [['Date', 'New Users', 'Cumulative Users']]
         data = UserStatistics.get_user_count_by_date_range(start_date, today)
         cumulative = 0
-        
         for entry in data:
             cumulative += entry['count']
-            writer.writerow([entry['date'], entry['count'], cumulative])
-            
-        # Save report to database
-        report_data = {
-            'data': data,
-            'cumulative': cumulative
-        }
-        
-        AnalyticsReport.objects.create(
-            report_type=period,
-            generated_by=request.user,
-            report_data=report_data,
-            start_date=start_date,
-            end_date=today
-        )
-    
+            table_data.append([entry['date'], str(entry['count']), str(cumulative)])
+            report_data.append({'date': str(entry['date']), 'count': entry['count'], 'cumulative': cumulative})
+
+    elif report_type == 'posts':
+        table_data = [['Date', 'New Posts', 'Cumulative Posts']]
+        cumulative = 0
+        for date in date_range:
+            count = Post.objects.filter(created_at__date=date).count()
+            cumulative += count
+            table_data.append([str(date), str(count), str(cumulative)])
+            report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+    elif report_type == 'likes':
+        table_data = [['Date', 'New Likes', 'Cumulative Likes']]
+        cumulative = 0
+        for date in date_range:
+            count = Like.objects.filter(created_at__date=date).count()
+            cumulative += count
+            table_data.append([str(date), str(count), str(cumulative)])
+            report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+    elif report_type == 'comments':
+        table_data = [['Date', 'New Comments', 'Cumulative Comments']]
+        cumulative = 0
+        for date in date_range:
+            count = Comment.objects.filter(created_at__date=date).count()
+            cumulative += count
+            table_data.append([str(date), str(count), str(cumulative)])
+            report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+    elif report_type == 'hashtags':
+        table_data = [['Date', 'Hashtag', 'Post Count']]
+        hashtags = Hashtag.objects.annotate(post_count=Count('hashtags_posts')).order_by('-post_count')[:5]
+        for date in date_range:
+            for hashtag in hashtags:
+                count = hashtag.hashtags_posts.filter(created_at__date=date).count()
+                if count > 0:
+                    table_data.append([str(date), hashtag.name, str(count)])
+                    report_data.append({'date': str(date), 'hashtag': hashtag.name, 'count': count})
+
+    # Create table
+    table = Table(table_data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#198754')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    elements.append(table)
+
+    # Footer (added via build)
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        footer_text = f"Page {doc.page} | Generated by Snapfy Admin"
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawString(inch, 0.5 * inch, footer_text)
+        canvas.restoreState()
+
+    # Build PDF
+    doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
+
+    # Save report to database
+    AnalyticsReport.objects.create(
+        report_type=period,
+        data_type=report_type,
+        generated_by=request.user,
+        report_data=report_data,
+        start_date=start_date,
+        end_date=today
+    )
+
+    # Log admin action
+    AdminActionLog.objects.create(
+        admin=request.user,
+        action_type='generate_report',
+        action_detail=f"Generated {report_type} PDF report for {period} period",
+        affected_user=None
+    )
+
+    # Return PDF response
+    buffer.seek(0)
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{report_type}_{period}_report.pdf"'
     return response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def list_analytics_reports(request):
+    """List all generated analytics reports with pagination"""
+    page = int(request.query_params.get('page', 1))
+    limit = int(request.query_params.get('limit', 10))
+    data_type = request.query_params.get('data_type', '')  # Filter by users, posts, etc.
+
+    reports = AnalyticsReport.objects.all()
+    if data_type:
+        reports = reports.filter(data_type=data_type)
+
+    total = reports.count()
+    start_idx = (page - 1) * limit
+    end_idx = page * limit
+
+    reports_page = reports[start_idx:end_idx]
+
+    data = {
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'total_pages': (total + limit - 1) // limit,
+        'reports': [{
+            'id': str(report.id),
+            'data_type': report.data_type,
+            'report_type': report.report_type,
+            'generated_by': report.generated_by.username,
+            'start_date': report.start_date,
+            'end_date': report.end_date,
+            'created_at': report.created_at,
+            'report_data': report.report_data
+        } for report in reports_page]
+    }
+    return Response(data)
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsAdminUser])

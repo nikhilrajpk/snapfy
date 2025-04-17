@@ -412,7 +412,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             )
             
             return Response({
-                "call_id": str(call_log.id),  # Ensure string ID
+                "call_id": str(call_log.id),
                 "room_id": str(chat_room.id),
                 "caller": caller_data,
                 "call_type": call_type,
@@ -444,7 +444,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             )
             
         return Response({
-            "call_id": str(call_log.id),  # Ensure string ID
+            "call_id": str(call_log.id),
             "room_id": str(chat_room.id),
             "caller": caller_data,
             "call_type": call_type,
@@ -496,7 +496,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                         }
                     )
                     
-                # Send missed call notification if applicable
+                # Send missed call notification
                 if call_status == 'missed':
                     create_call_notification(
                         to_user=target_user,

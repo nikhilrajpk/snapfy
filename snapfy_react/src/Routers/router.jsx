@@ -31,6 +31,8 @@ const Reports = React.lazy(()=> import('../Components/Admin/Reports'))
 const Users = React.lazy(()=> import('../Components/Admin/Users'))
 const BlockedUsers = React.lazy(()=> import('../Components/Admin/BlockedUsers'))
 const TrendingSongs = React.lazy(()=> import('../Components/Admin/TrendingSongs'))
+const Analytics = React.lazy(()=> import('../Components/Admin/Analytics'))
+const ExportReports = React.lazy(()=> import('../Components/Admin/ExportReports'))
 
 
 const router = createBrowserRouter([
@@ -203,14 +205,14 @@ const router = createBrowserRouter([
                     path: 'trending',
                     element: <TrendingSongs />,
                   },
-                //   {
-                //     path: 'analytics',
-                //     element: <Analytics />,
-                //   },
-                //   {
-                //     path: 'export',
-                //     element: <ExportReports />,
-                //   },
+                  {
+                    path: 'analytics',
+                    element: <Analytics />,
+                  },
+                  {
+                    path: 'export',
+                    element: <ExportReports />,
+                  },
                 //   {
                 //     path: 'notifications',
                 //     element: <AdminNotifications />,
