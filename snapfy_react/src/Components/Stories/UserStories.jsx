@@ -400,6 +400,8 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const tracksPerPage = 10;
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const audioPreviewRef = useRef(null);
@@ -408,10 +410,10 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   useEffect(() => {
     const fetchMusic = async () => {
       try {
+        setLoading(true);
         const tracks = await getMusicTracks();
         const updatedTracks = tracks.map(track => {
           let file = track.file;
-          // Ensure proper URL format
           if (file.includes('res.cloudinary.com') && !file.includes('video/upload')) {
             const parts = file.split('/');
             const cloudName = parts[2];
@@ -425,6 +427,8 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
       } catch (error) {
         console.error('Error fetching music tracks:', error);
         dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
+      } finally {
+        setLoading(false);
       }
     };
     fetchMusic();
@@ -435,13 +439,12 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
       track.title.toLowerCase().includes(searchQuery.toLowerCase())
     );
     setFilteredMusicTracks(filtered);
+    setCurrentPage(1);
   }, [searchQuery, musicTracks]);
 
   const playPreview = (track) => {
     if (audioPreviewRef.current) {
       let fullAudioUrl = track.file;
-      
-      // Fix the URL if needed
       if (fullAudioUrl.includes('res.cloudinary.com') && !fullAudioUrl.includes('video/upload')) {
         const parts = fullAudioUrl.split('/');
         const cloudName = parts[2];
@@ -578,13 +581,74 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
       setLoading(false);
     }
   };
-  
+
+  // Pagination logic
+  const indexOfLastTrack = currentPage * tracksPerPage;
+  const indexOfFirstTrack = indexOfLastTrack - tracksPerPage;
+  const currentTracks = filteredMusicTracks.slice(indexOfFirstTrack, indexOfLastTrack);
+  const totalPages = Math.ceil(filteredMusicTracks.length / tracksPerPage);
+
+  const handlePageChange = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
+  // Generate pagination items with ellipses
+  const getPaginationItems = () => {
+    const items = [];
+    const maxPagesToShow = 5; // Show up to 5 page numbers at a time
+    let startPage, endPage;
+
+    if (totalPages <= maxPagesToShow) {
+      startPage = 1;
+      endPage = totalPages;
+    } else {
+      const maxPagesBeforeCurrent = Math.floor(maxPagesToShow / 2);
+      const maxPagesAfterCurrent = Math.ceil(maxPagesToShow / 2) - 1;
+
+      startPage = Math.max(currentPage - maxPagesBeforeCurrent, 1);
+      endPage = Math.min(currentPage + maxPagesAfterCurrent, totalPages);
+
+      if (endPage - startPage < maxPagesToShow - 1) {
+        if (currentPage <= maxPagesBeforeCurrent) {
+          endPage = startPage + maxPagesToShow - 1;
+        } else {
+          startPage = endPage - maxPagesToShow + 1;
+        }
+      }
+    }
+
+    // Add first page and ellipsis
+    if (startPage > 1) {
+      items.push(1);
+      if (startPage > 2) {
+        items.push('...');
+      }
+    }
+
+    // Add page numbers
+    for (let i = startPage; i <= endPage; i++) {
+      items.push(i);
+    }
+
+    // Add last page and ellipsis
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) {
+        items.push('...');
+      }
+      items.push(totalPages);
+    }
+
+    return items;
+  };
+
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-start justify-center p-6 overflow-y-auto">
       <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto my-6">
         <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10">
-          <h3 className="text-lg font-semibold">Create New Story</h3>
-          <X size={20} className="text-gray-500 cursor-pointer" onClick={onClose} />
+          <h3 className="text-lg font-semibold text-gray-800">Create New Story</h3>
+          <X size={20} className="text-gray-500 cursor-pointer hover:text-gray-700" onClick={onClose} />
         </div>
         
         <form onSubmit={handleSubmit}>
@@ -597,7 +661,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
             
             {!previewMedia ? (
               <div 
-                className="w-full h-64 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#198754]"
+                className="w-full h-64 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#198754] transition"
                 onClick={() => fileInputRef.current.click()}
               >
                 <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
@@ -607,21 +671,21 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                     <Film size={24} className="text-gray-500" />
                   )}
                 </div>
-                <p className="text-gray-500">Click to upload {mediaType === 'image' ? 'an image' : 'a video'}</p>
+                <p className="text-gray-500 font-medium">Click to upload {mediaType === 'image' ? 'an image' : 'a video'}</p>
                 <p className="text-gray-400 text-sm mt-2">{mediaType === 'image' ? 'JPG, PNG (max 10MB)' : 'MP4, MOV (max 30s, 50MB)'}</p>
                 
                 <div className="flex mt-4 gap-2">
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setMediaType('image'); }}
-                    className={`px-4 py-2 rounded-lg ${mediaType === 'image' ? 'bg-[#198754] text-white' : 'bg-gray-200 text-gray-700'}`}
+                    className={`px-4 py-2 rounded-lg font-medium ${mediaType === 'image' ? 'bg-[#198754] text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                   >
                     Image
                   </button>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setMediaType('video'); }}
-                    className={`px-4 py-2 rounded-lg ${mediaType === 'video' ? 'bg-[#198754] text-white' : 'bg-gray-200 text-gray-700'}`}
+                    className={`px-4 py-2 rounded-lg font-medium ${mediaType === 'video' ? 'bg-[#198754] text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                   >
                     Video
                   </button>
@@ -662,7 +726,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                                 setVideoStartTime(newStart);
                                 setVideoEndTime(Math.max(minEnd, Math.min(maxEnd, videoEndTime)));
                               }}
-                              className="w-full"
+                              className="w-full accent-[#198754]"
                             />
                           </div>
                           <div className="flex-1">
@@ -674,14 +738,14 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                               step="0.1"
                               value={videoEndTime}
                               onChange={(e) => setVideoEndTime(parseFloat(e.target.value))}
-                              className="w-full"
+                              className="w-full accent-[#198754]"
                             />
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={updateVideoPlayback}
-                          className="bg-[#198754] text-white px-3 py-1 rounded-lg flex items-center gap-1 mx-auto"
+                          className="bg-[#198754] text-white px-3 py-1 rounded-lg flex items-center gap-1 mx-auto hover:bg-[#157347] transition"
                         >
                           <Scissors size={14} /> Preview Trim
                         </button>
@@ -694,13 +758,13 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                   <button
                     type="button"
                     onClick={() => setShowMusicPicker(true)}
-                    className="w-full flex items-center justify-between p-2 bg-gray-100 rounded-lg"
+                    className="w-full flex items-center justify-between p-3 bg-gray-100 rounded-lg hover:bg-gray-200 transition"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2 text-gray-700">
                       <Music size={16} />
                       {selectedMusic ? selectedMusic.title : 'Add Music'}
                     </span>
-                    <ChevronRight size={16} />
+                    <ChevronRight size={16} className="text-gray-500" />
                   </button>
                 </div>
 
@@ -708,7 +772,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
                   placeholder="Add a caption..."
-                  className="w-full mt-4 p-2 border rounded-lg resize-none"
+                  className="w-full mt-4 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-[#198754] focus:border-[#198754] transition"
                   rows="3"
                   maxLength="200"
                 />
@@ -717,7 +781,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current.click()}
-                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 flex items-center gap-2"
+                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 flex items-center gap-2 transition"
                   >
                     <Camera size={16} />
                     Change
@@ -732,7 +796,7 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
                       setVideoDuration(0);
                       setSelectedMusic(null);
                     }}
-                    className="bg-red-100 text-red-600 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2"
+                    className="bg-red-100 text-red-600 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2 transition"
                   >
                     <X size={16} />
                     Remove
@@ -749,98 +813,157 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
               onChange={handleMediaChange}
             />
             {showMusicPicker && (
-              <div className="absolute inset-0 bg-white z-20 p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Select Music</h3>
-                  <X size={20} className="cursor-pointer" onClick={() => {
-                    setShowMusicPicker(false);
-                    setPreviewPlaying(null);
-                    setSearchQuery('');
-                    if (audioPreviewRef.current) audioPreviewRef.current.pause();
-                  }} />
-                </div>
-                <div className="mb-4 relative">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search music..."
-                    className="w-full p-2 pl-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#198754]"
+              <div className="fixed inset-0 bg-white z-20 flex flex-col">
+                <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10 shadow-sm">
+                  <h3 className="text-lg font-semibold text-gray-800">Select Music</h3>
+                  <X 
+                    size={20} 
+                    className="text-gray-500 cursor-pointer hover:text-gray-700 transition" 
+                    onClick={() => {
+                      setShowMusicPicker(false);
+                      setPreviewPlaying(null);
+                      setSearchQuery('');
+                      if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                    }} 
+                    aria-label="Close music picker"
                   />
-                  <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 </div>
-                <div className="max-h-[40vh] overflow-y-auto">
-                  {filteredMusicTracks.length > 0 ? (
-                    filteredMusicTracks.map(track => (
-                      <div
-                        key={track.id}
-                        className={`p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 ${
-                          selectedMusic?.id === track.id ? 'bg-gray-200' : ''
-                        }`}
-                      >
-                        <div 
-                          className="flex items-center gap-2 flex-1"
-                          onClick={() => {
-                            setSelectedMusic(track);
-                            setShowMusicPicker(false);
-                            setPreviewPlaying(null);
-                            setSearchQuery('');
-                            if (audioPreviewRef.current) audioPreviewRef.current.pause();
-                          }}
+                <div className="p-4 flex-1 overflow-y-auto">
+                  <div className="mb-4 relative">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search music..."
+                      className="w-full p-3 pl-11 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#198754] focus:border-[#198754] transition text-gray-700"
+                      aria-label="Search music tracks"
+                    />
+                    <Search size={22} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  </div>
+                  {loading ? (
+                    <div className="flex justify-center items-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
+                    </div>
+                  ) : currentTracks.length > 0 ? (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                      {currentTracks.map(track => (
+                        <div
+                          key={track.id}
+                          className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition bg-white shadow-sm ${
+                            selectedMusic?.id === track.id ? 'border-2 border-[#198754] bg-[#198754]/5' : 'border border-gray-200 hover:bg-gray-50'
+                          }`}
                         >
-                          <Music size={16} />
-                          <span>{track.title}</span>
+                          <div 
+                            className="flex items-center gap-3 flex-1"
+                            onClick={() => {
+                              setSelectedMusic(track);
+                              setShowMusicPicker(false);
+                              setPreviewPlaying(null);
+                              setSearchQuery('');
+                              if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                            }}
+                            aria-label={`Select ${track.title}`}
+                          >
+                            <Music size={20} className="text-gray-600" />
+                            <span className="text-gray-800 truncate font-medium">{track.title}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {track.is_trending && (
+                              <span className="text-xs bg-[#198754] text-white px-2 py-1 rounded-full font-medium">Trending</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playPreview(track);
+                              }}
+                              className="p-2 rounded-full hover:bg-gray-200 transition"
+                              aria-label={previewPlaying === track.id ? `Pause ${track.title}` : `Play ${track.title}`}
+                            >
+                              {previewPlaying === track.id ? (
+                                <Pause size={20} className="text-[#198754]" />
+                              ) : (
+                                <Play size={20} className="text-[#198754]" />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playPreview(track);
-                          }}
-                          className="ml-2 p-1 rounded-full hover:bg-gray-200"
-                        >
-                          {previewPlaying === track.id ? (
-                            <Pause size={16} />
-                          ) : (
-                            <Play size={16} />
-                          )}
-                        </button>
-                        {track.is_trending && (
-                          <span className="text-xs text-[#198754] ml-2">Trending</span>
-                        )}
-                      </div>
-                    ))
+                      ))}
+                    </div>
                   ) : (
-                    <p className="text-center text-gray-500 py-4">No music tracks found</p>
+                    <p className="text-center text-gray-500 py-8">No music tracks found</p>
                   )}
+                  {totalPages > 1 && (
+                    <div className="mt-4 p-4 bg-white border-t sticky bottom-0 z-10 flex items-center justify-center space-x-2">
+                      <button
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className={`w-10 h-10 flex items-center justify-center rounded-full transition ${
+                          currentPage === 1 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#198754] text-white hover:bg-[#157347]'
+                        }`}
+                        aria-label="Previous page"
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                      {getPaginationItems().map((item, index) => (
+                        <button
+                          key={index}
+                          onClick={() => typeof item === 'number' && handlePageChange(item)}
+                          disabled={item === '...'}
+                          className={`w-10 h-10 flex items-center justify-center rounded-full transition ${
+                            item === currentPage
+                              ? 'bg-[#198754] text-white'
+                              : item === '...' 
+                                ? 'bg-white text-gray-500 cursor-default' 
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                          aria-label={typeof item === 'number' ? `Page ${item}` : undefined}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className={`w-10 h-10 flex items-center justify-center rounded-full transition ${
+                          currentPage === totalPages ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#198754] text-white hover:bg-[#157347]'
+                        }`}
+                        aria-label="Next page"
+                      >
+                        <ChevronRight size={20} />
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMusic(null);
+                      setShowMusicPicker(false);
+                      setPreviewPlaying(null);
+                      setSearchQuery('');
+                      if (audioPreviewRef.current) audioPreviewRef.current.pause();
+                    }}
+                    className="w-full mt-3 p-3 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition font-medium"
+                    aria-label="Remove music"
+                  >
+                    Remove Music
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedMusic(null);
-                    setShowMusicPicker(false);
-                    setPreviewPlaying(null);
-                    setSearchQuery('');
-                    if (audioPreviewRef.current) audioPreviewRef.current.pause();
-                  }}
-                  className="w-full mt-4 p-2 bg-red-100 text-red-600 rounded-lg"
-                >
-                  Remove Music
-                </button>
+                <audio ref={audioPreviewRef} />
               </div>
             )}
-            <audio ref={audioPreviewRef} />
           </div>
           
           <div className="p-4 border-t sticky bottom-0 bg-white z-10">
             <button
               type="submit"
               disabled={!selectedFile || loading || validationError}
-              className={`w-full py-3 px-6 ${
+              className={`w-full py-3 px-6 rounded-xl font-medium transition-all duration-200 flex items-center justify-center ${
                 selectedFile && !loading && !validationError
-                  ? 'bg-[#198754] hover:bg-[#157347] transform hover:scale-105'
-                  : 'bg-gray-300 cursor-not-allowed'
-              } text-white rounded-xl transition-all duration-200 flex items-center justify-center`}
+                  ? 'bg-[#198754] hover:bg-[#157347] hover:scale-105 text-white'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              aria-label="Share story"
             >
               {loading ? (
                 <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-white"></div>

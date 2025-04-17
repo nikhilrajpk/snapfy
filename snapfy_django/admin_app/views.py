@@ -4,13 +4,22 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from .models import AnalyticsReport, AdminActionLog, UserStatistics
-from user_app.models import User, Report  # Import User and Report
+from user_app.models import User, Report 
+from story_app.models import MusicTrack
+from .serializers import MusicTrackSerializer
 from django.db.models import Count
 from django.utils import timezone
 import datetime
+from django.utils.timezone import now
 import csv
 from django.http import HttpResponse
 from .permissions import IsAdminUser
+from django.db.models import Q
+import cloudinary.uploader
+import tempfile
+import os
+import logging
+from moviepy.editor import AudioFileClip
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
@@ -276,3 +285,217 @@ def manage_reports(request):
             return Response({'success': True, 'message': 'Report marked as resolved'})
         except Report.DoesNotExist:
             return Response({'error': 'Report not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        
+
+logger = logging.getLogger(__name__)
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def music_track_list(request):
+    """List all music tracks with pagination and search, or create a new track"""
+    if request.method == 'GET':
+        page = int(request.query_params.get('page', 1))
+        limit = int(request.query_params.get('limit', 10))
+        query = request.query_params.get('query', '')
+        trending_only = request.query_params.get('trending', 'false').lower() == 'true'
+
+        tracks = MusicTrack.objects.all()
+        if query:
+            tracks = tracks.filter(title__icontains=query)
+        if trending_only:
+            tracks = tracks.filter(is_trending=True)
+
+        total = tracks.count()
+        start_idx = (page - 1) * limit
+        end_idx = page * limit
+
+        tracks_page = tracks[start_idx:end_idx]
+
+        serializer = MusicTrackSerializer(tracks_page, many=True)
+        return Response({
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'total_pages': (total + limit - 1) // limit,
+            'tracks': serializer.data
+        })
+
+    elif request.method == 'POST':
+        file = request.FILES.get('file')
+        title = request.data.get('title')
+        is_trending = request.data.get('is_trending', 'false').lower() == 'true'
+        start_time = float(request.data.get('start_time', 0))
+        end_time = float(request.data.get('end_time', 30))
+
+        if not file or not title:
+            return Response({"error": "Title and file are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        temp_path = None
+        trimmed_path = None
+        try:
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file.name) as temp_file:
+                temp_path = temp_file.name
+                for chunk in file.chunks():
+                    temp_file.write(chunk)
+
+            # Load audio and calculate duration
+            audio = AudioFileClip(temp_path)
+            original_duration = audio.duration
+
+            # Validate and adjust trimming times
+            if start_time < 0 or start_time >= original_duration:
+                audio.close()
+                return Response({"error": "Invalid start time"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            trimmed_duration = min(end_time, original_duration) - start_time
+            if trimmed_duration > 30:
+                end_time = start_time + 30
+                trimmed_duration = 30
+            elif trimmed_duration < 3:
+                audio.close()
+                return Response({"error": "Trimmed duration must be at least 3 seconds"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Trim audio if necessary
+            if trimmed_duration != original_duration or start_time != 0:
+                trimmed_audio = audio.subclip(start_time, end_time)
+                trimmed_path = tempfile.mktemp(suffix='.mp3')
+                trimmed_audio.write_audiofile(trimmed_path, codec='mp3', logger=None)
+                audio.close()
+                trimmed_audio.close()
+                upload_file_path = trimmed_path
+            else:
+                audio.close()
+                upload_file_path = temp_path
+
+            # Upload to Cloudinary
+            upload_result = cloudinary.uploader.upload(
+                upload_file_path,
+                resource_type="video",
+                public_id=f"music_tracks/{title}_{now().strftime('%Y%m%d%H%M%S')}"
+            )
+            file_url = upload_result['secure_url']
+
+            # Create MusicTrack
+            track = MusicTrack.objects.create(
+                title=title,
+                file=file_url,
+                duration=trimmed_duration,
+                is_trending=is_trending
+            )
+            serializer = MusicTrackSerializer(track)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Error uploading music track: {e}")
+            return Response({"error": f"Failed to upload track: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file {temp_path}: {e}")
+            if trimmed_path and os.path.exists(trimmed_path):
+                try:
+                    os.unlink(trimmed_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete trimmed file {trimmed_path}: {e}")
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def music_track_detail(request, track_id):
+    """Retrieve, update, or delete a music track"""
+    try:
+        track = MusicTrack.objects.get(id=track_id)
+    except MusicTrack.DoesNotExist:
+        return Response({"error": "Music track not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = MusicTrackSerializer(track)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        file = request.FILES.get('file')
+        title = request.data.get('title', track.title)
+        is_trending = request.data.get('is_trending', track.is_trending)
+        start_time = float(request.data.get('start_time', 0)) if file else track.start_time
+        end_time = float(request.data.get('end_time', 30)) if file else track.start_time + track.duration
+        if isinstance(is_trending, str):
+            is_trending = is_trending.lower() == 'true'
+
+        temp_path = None
+        trimmed_path = None
+        try:
+            if file:
+                # Save uploaded file temporarily
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file.name) as temp_file:
+                    temp_path = temp_file.name
+                    for chunk in file.chunks():
+                        temp_file.write(chunk)
+
+                # Load audio and calculate duration
+                audio = AudioFileClip(temp_path)
+                original_duration = audio.duration
+
+                # Validate and adjust trimming times
+                if start_time < 0 or start_time >= original_duration:
+                    audio.close()
+                    return Response({"error": "Invalid start time"}, status=status.HTTP_400_BAD_REQUEST)
+                
+                trimmed_duration = min(end_time, original_duration) - start_time
+                if trimmed_duration > 30:
+                    end_time = start_time + 30
+                    trimmed_duration = 30
+                elif trimmed_duration < 3:
+                    audio.close()
+                    return Response({"error": "Trimmed duration must be at least 3 seconds"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Trim audio if necessary
+                if trimmed_duration != original_duration or start_time != 0:
+                    trimmed_audio = audio.subclip(start_time, end_time)
+                    trimmed_path = tempfile.mktemp(suffix='.mp3')
+                    trimmed_audio.write_audiofile(trimmed_path, codec='mp3', logger=None)
+                    audio.close()
+                    trimmed_audio.close()
+                    upload_file_path = trimmed_path
+                else:
+                    audio.close()
+                    upload_file_path = temp_path
+
+                # Upload to Cloudinary
+                upload_result = cloudinary.uploader.upload(
+                    upload_file_path,
+                    resource_type="video",
+                    public_id=f"music_tracks/{title}_{now().strftime('%Y%m%d%H%M%S')}"
+                )
+                track.file = upload_result['secure_url']
+                track.duration = trimmed_duration
+
+            track.title = title
+            track.is_trending = is_trending
+            track.save()
+            serializer = MusicTrackSerializer(track)
+            return Response(serializer.data)
+
+        except Exception as e:
+            logger.error(f"Error updating music track: {e}")
+            return Response({"error": f"Failed to update track: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file {temp_path}: {e}")
+            if trimmed_path and os.path.exists(trimmed_path):
+                try:
+                    os.unlink(trimmed_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete trimmed file {trimmed_path}: {e}")
+
+    elif request.method == 'DELETE':
+        track.delete()
+        return Response({"message": "Music track deleted"}, status=status.HTTP_204_NO_CONTENT)

@@ -8,6 +8,7 @@ class MusicTrack(models.Model):
     title = models.CharField(max_length=100)
     file = CloudinaryField('audio', resource_type='video')  # Using video type for audio support
     duration = models.FloatField()  # Duration in seconds
+    start_time = models.FloatField(default=0)
     is_trending = models.BooleanField(default=False)
 
     def __str__(self):

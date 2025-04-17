@@ -30,6 +30,7 @@ const Dashboard = React.lazy(() => import('../Components/Admin/Dashboard'));
 const Reports = React.lazy(()=> import('../Components/Admin/Reports'))
 const Users = React.lazy(()=> import('../Components/Admin/Users'))
 const BlockedUsers = React.lazy(()=> import('../Components/Admin/BlockedUsers'))
+const TrendingSongs = React.lazy(()=> import('../Components/Admin/TrendingSongs'))
 
 
 const router = createBrowserRouter([
@@ -198,10 +199,10 @@ const router = createBrowserRouter([
                     path: 'reports',
                     element: <Reports />,
                   },
-                //   {
-                //     path: 'trending',
-                //     element: <TrendingSongs />,
-                //   },
+                  {
+                    path: 'trending',
+                    element: <TrendingSongs />,
+                  },
                 //   {
                 //     path: 'analytics',
                 //     element: <Analytics />,

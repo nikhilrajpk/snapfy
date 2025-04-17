@@ -10,4 +10,6 @@ urlpatterns = [
     path('block-user/<uuid:user_id>/', views.block_user, name='block_user'),
     path('reports/', views.manage_reports, name='manage_reports'),
     path('generate-report/', views.generate_report, name='generate_report'),
+    path('music-tracks/', views.music_track_list, name='music_track_list'),
+    path('music-tracks/<int:track_id>/', views.music_track_detail, name='music_track_detail'),
 ]
