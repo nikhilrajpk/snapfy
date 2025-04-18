@@ -304,10 +304,371 @@ def block_user(request, user_id):
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
+
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.platypus.flowables import HRFlowable
+from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.charts.lineplots import LinePlot
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.widgets.markers import makeMarker
+import io
+import datetime
+from django.utils import timezone
+
+def generate_enhanced_report(request, report_type, period, report_data, start_date, end_date):
+    """Generate an enhanced PDF report with better design and visualizations"""
+    # Prepare PDF response
+    buffer = io.BytesIO()
+    
+    # Set up the document with margins
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=letter,
+        leftMargin=0.5*inch,
+        rightMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
+    )
+    
+    # Define brand colors
+    brand_green = colors.HexColor('#198754')
+    brand_light_green = colors.HexColor('#e8f5e9')
+    brand_gray = colors.HexColor('#6c757d')
+    
+    elements = []
+    
+    # Set up styles
+    styles = getSampleStyleSheet()
+    
+    # Create custom styles
+    title_style = ParagraphStyle(
+        'Title',
+        parent=styles['Heading1'],
+        fontSize=24,
+        fontName='Helvetica-Bold',
+        textColor=brand_green,
+        spaceAfter=12,
+        alignment=1,  # Center alignment
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Heading2'],
+        fontSize=14,
+        fontName='Helvetica',
+        textColor=brand_gray,
+        spaceAfter=24,
+        alignment=1,  # Center alignment
+    )
+    
+    heading_style = ParagraphStyle(
+        'Heading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        fontName='Helvetica-Bold',
+        textColor=brand_green,
+        spaceBefore=12,
+        spaceAfter=6,
+    )
+    
+    normal_style = ParagraphStyle(
+        'Normal',
+        parent=styles['Normal'],
+        fontSize=10,
+        fontName='Helvetica',
+        leading=14,
+    )
+    
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        fontName='Helvetica',
+        textColor=brand_gray,
+        alignment=1,  # Center alignment
+    )
+    
+    # Title and subtitle section
+    elements.append(Spacer(1, 0.5*inch))
+    elements.append(Paragraph(f"Snapfy Analytics", title_style))
+    elements.append(Paragraph(f"{report_type.capitalize()} {period.capitalize()} Report", subtitle_style))
+    
+    # Horizontal rule
+    elements.append(HRFlowable(width="100%", thickness=1, color=brand_green, spaceBefore=12, spaceAfter=12))
+    
+    # Report metadata
+    date_range_text = f"Period: {start_date.strftime('%B %d, %Y')} to {end_date.strftime('%B %d, %Y')}"
+    generated_text = f"Generated on {timezone.now().strftime('%B %d, %Y at %I:%M %p')} by {request.user.username}"
+    
+    elements.append(Paragraph(date_range_text, normal_style))
+    elements.append(Paragraph(generated_text, normal_style))
+    elements.append(Spacer(1, 0.25*inch))
+    
+    # Executive summary section
+    elements.append(Paragraph("Executive Summary", heading_style))
+    
+    # Calculate summary metrics based on report_data
+    if report_data and len(report_data) > 0:
+        total_count = sum(item.get('count', 0) for item in report_data)
+        avg_count = total_count / len(report_data) if len(report_data) > 0 else 0
+        
+        if len(report_data) >= 2:
+            latest_count = report_data[-1].get('count', 0)
+            previous_count = report_data[-2].get('count', 0)
+            percent_change = ((latest_count - previous_count) / previous_count * 100) if previous_count > 0 else 0
+            trend_direction = "increased" if percent_change > 0 else "decreased" if percent_change < 0 else "remained stable"
+            
+            summary_text = f"""
+            This report provides an analysis of {report_type} data over the selected {period} period. 
+            The total {report_type} count for this period was <b>{total_count}</b>, with a daily average of <b>{avg_count:.1f}</b>.
+            Most recently, the {report_type} count has {trend_direction} by <b>{abs(percent_change):.1f}%</b> compared to the previous period.
+            """
+        else:
+            summary_text = f"""
+            This report provides an analysis of {report_type} data over the selected {period} period. 
+            The total {report_type} count for this period was <b>{total_count}</b>, with a daily average of <b>{avg_count:.1f}</b>.
+            """
+    else:
+        summary_text = f"This report provides an analysis of {report_type} data over the selected {period} period. No data is available for this period."
+    
+    elements.append(Paragraph(summary_text, normal_style))
+    elements.append(Spacer(1, 0.25*inch))
+    
+    # Add data visualization
+    if report_data and len(report_data) > 1:
+        elements.append(Paragraph("Data Visualization", heading_style))
+        
+        # Create line plot using LinePlot instead of LineChart
+        drawing = Drawing(500, 250)
+        lp = LinePlot()
+        lp.x = 50
+        lp.y = 50
+        lp.height = 150
+        lp.width = 400
+        
+        # Extract data
+        dates = [item.get('date', '') for item in report_data]
+        counts = [item.get('count', 0) for item in report_data]
+        
+        # Format x-axis labels (dates)
+        formatted_dates = []
+        for date_str in dates:
+            try:
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+                formatted_dates.append(date_obj.strftime('%m/%d'))
+            except (ValueError, TypeError):
+                formatted_dates.append(date_str)
+        
+        # Prepare data for LinePlot - needs x and y coordinates
+        x_values = list(range(len(counts)))
+        data = [(x_values, counts)]
+        lp.data = data
+        
+        # Style the plot
+        lp.joinedLines = 1
+        lp.lines[0].strokeColor = brand_green
+        lp.lines[0].strokeWidth = 2
+        lp.lines[0].symbol = makeMarker('FilledCircle')
+        lp.lines[0].symbol.fillColor = brand_green
+        lp.lines[0].symbol.size = 5
+        
+        # Add grid
+        lp.xValueAxis.gridStrokeColor = colors.lightgrey
+        lp.xValueAxis.gridStrokeWidth = 0.5
+        lp.yValueAxis.gridStrokeColor = colors.lightgrey
+        lp.yValueAxis.gridStrokeWidth = 0.5
+        
+        # Add labels
+        for i, label in enumerate(formatted_dates):
+            if i % max(1, len(formatted_dates) // 10) == 0:  # Show every Nth label to avoid crowding
+                s = String(lp.x + (i * lp.width / (len(formatted_dates) - 1)), lp.y - 20, label)
+                s.fontName = 'Helvetica'
+                s.fontSize = 8
+                drawing.add(s)
+        
+        # Add chart title
+        title = String(lp.x + lp.width/2, lp.y + lp.height + 20, f"{report_type.capitalize()} Trend")
+        title.fontName = 'Helvetica-Bold'
+        title.fontSize = 12
+        title.textAnchor = 'middle'
+        drawing.add(title)
+        
+        drawing.add(lp)
+        elements.append(drawing)
+        elements.append(Spacer(1, 0.25*inch))
+    
+    # Data table
+    elements.append(Paragraph("Detailed Data", heading_style))
+    
+    if report_type == 'users':
+        table_data = [['Date', 'New Users', 'Cumulative Users']]
+        for item in report_data:
+            table_data.append([item.get('date', ''), str(item.get('count', 0)), str(item.get('cumulative', 0))])
+    
+    elif report_type == 'posts':
+        table_data = [['Date', 'New Posts', 'Cumulative Posts']]
+        for item in report_data:
+            table_data.append([item.get('date', ''), str(item.get('count', 0)), str(item.get('cumulative', 0))])
+    
+    elif report_type == 'likes':
+        table_data = [['Date', 'New Likes', 'Cumulative Likes']]
+        for item in report_data:
+            table_data.append([item.get('date', ''), str(item.get('count', 0)), str(item.get('cumulative', 0))])
+    
+    elif report_type == 'comments':
+        table_data = [['Date', 'New Comments', 'Cumulative Comments']]
+        for item in report_data:
+            table_data.append([item.get('date', ''), str(item.get('count', 0)), str(item.get('cumulative', 0))])
+    
+    elif report_type == 'hashtags':
+        table_data = [['Date', 'Hashtag', 'Post Count']]
+        for item in report_data:
+            table_data.append([item.get('date', ''), item.get('hashtag', ''), str(item.get('count', 0))])
+    
+    # Create and style the table
+    table = Table(table_data, repeatRows=1)
+    table.setStyle(TableStyle([
+        # Header style
+        ('BACKGROUND', (0, 0), (-1, 0), brand_green),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        
+        # Data rows style - zebra striping
+        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, brand_light_green]),
+        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+        ('TOPPADDING', (0, 1), (-1, -1), 4),
+        
+        # Borders
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('BOX', (0, 0), (-1, -1), 1, brand_green),
+    ]))
+    elements.append(table)
+    
+    # Add key insights section
+    if report_data and len(report_data) > 1:
+        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Paragraph("Key Insights", heading_style))
+        
+        # Calculate some basic insights
+        avg = sum(item.get('count', 0) for item in report_data) / len(report_data)
+        max_count = max(item.get('count', 0) for item in report_data)
+        max_date = next((item.get('date', '') for item in report_data if item.get('count', 0) == max_count), '')
+        
+        # Calculate growth rate
+        first_count = report_data[0].get('count', 0)
+        last_count = report_data[-1].get('count', 0)
+        growth_rate = ((last_count - first_count) / first_count * 100) if first_count > 0 else 0
+        
+        insights_text = f"""
+        <b>Peak Activity:</b> The highest {report_type} activity was recorded on {max_date} with {max_count} new {report_type}.
+        
+        <b>Average Activity:</b> During this period, the average daily {report_type} activity was {avg:.1f}.
+        
+        <b>Growth Rate:</b> From the beginning to the end of this period, {report_type} activity has 
+        {"increased" if growth_rate > 0 else "decreased"} by {abs(growth_rate):.1f}%.
+        """
+        
+        elements.append(Paragraph(insights_text, normal_style))
+    
+    # Add recommendations section
+    elements.append(Spacer(1, 0.3*inch))
+    elements.append(Paragraph("Recommendations", heading_style))
+    
+    recommendations = {
+        'users': """
+        Based on the user growth patterns observed:
+        
+        • Consider targeted engagement campaigns during periods of slower growth
+        • Analyze user retention metrics alongside acquisition rates
+        • Implement referral programs to accelerate user growth
+        • Review onboarding flow to improve conversion rates
+        """,
+        'posts': """
+        To optimize post engagement and creation:
+        
+        • Encourage content creation during periods of lower activity
+        • Highlight trending content to inspire more posts
+        • Consider content challenges or prompts to boost creation
+        • Analyze post types that generate the most engagement
+        """,
+        'likes': """
+        To improve like engagement:
+        
+        • Review content surfacing algorithms to ensure quality content reaches users
+        • Consider implementing reaction options beyond just likes
+        • Analyze which content types receive the most likes
+        • Examine the correlation between likes and other engagement metrics
+        """,
+        'comments': """
+        To enhance comment activity:
+        
+        • Consider prompts that encourage meaningful discussions
+        • Review comment notification systems to increase engagement
+        • Implement features that reward quality comments
+        • Analyze what types of content generate the most discussion
+        """,
+        'hashtags': """
+        To optimize hashtag usage and discovery:
+        
+        • Feature trending hashtags more prominently
+        • Consider creating platform-specific hashtag campaigns
+        • Provide better hashtag suggestions when users create content
+        • Analyze correlations between hashtag usage and content performance
+        """
+    }
+    
+    elements.append(Paragraph(recommendations.get(report_type, "No specific recommendations available for this report type."), normal_style))
+    
+    # Add horizontal rule before footer
+    elements.append(Spacer(1, 0.3*inch))
+    elements.append(HRFlowable(width="100%", thickness=1, color=brand_gray, spaceBefore=12, spaceAfter=12))
+    
+    # Add footer with page number function
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(brand_gray)
+        
+        footer_text = f"Snapfy Analytics Report | Page {doc.page} | Generated for {request.user.username} | Confidential"
+        footer_width = canvas.stringWidth(footer_text, 'Helvetica', 8)
+        page_width = letter[0]
+        x_position = (page_width - footer_width) / 2
+        
+        canvas.drawString(x_position, 0.5 * inch, footer_text)
+        
+        # Add watermark style branding with logo text
+        canvas.setFont('Helvetica-Bold', 60)
+        canvas.setFillColor(colors.HexColor('#f5f5f5'))  # Very light gray
+        canvas.drawCentredString(letter[0]/2, letter[1]/2, "SNAPFY")
+        
+        canvas.restoreState()
+    
+    # Build PDF
+    doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
+    
+    # Return the buffer
+    buffer.seek(0)
+    return buffer
+
+
+# Example of how to update your generate_report view to use this enhanced template
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def generate_report(request):
-    """Generate and download a PDF report"""
+    """Generate and download an enhanced PDF report"""
     report_type = request.query_params.get('type', 'users')  # users, posts, likes, comments, hashtags
     period = request.query_params.get('period', 'weekly')
     
@@ -316,35 +677,7 @@ def generate_report(request):
     if period not in ['daily', 'weekly', 'monthly']:
         return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Prepare PDF response
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    elements = []
-
-    # Styles
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'Title',
-        parent=styles['Heading1'],
-        fontSize=16,
-        spaceAfter=12,
-        textColor=colors.HexColor('#198754')
-    )
-    normal_style = styles['Normal']
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.grey
-    )
-
-    # Header
-    title = f"{report_type.capitalize()} {period.capitalize()} Report"
-    elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Generated on {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} by {request.user.username}", normal_style))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Data preparation
+    # Determine date range for report
     today = timezone.now().date()
     if period == 'daily':
         start_date = today - datetime.timedelta(days=6)
@@ -353,85 +686,46 @@ def generate_report(request):
     elif period == 'monthly':
         start_date = (today - datetime.timedelta(days=180)).replace(day=1)
 
+    # Generate report data (as in your original code)
     date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
     report_data = []
 
     # Table data
     if report_type == 'users':
-        table_data = [['Date', 'New Users', 'Cumulative Users']]
         data = UserStatistics.get_user_count_by_date_range(start_date, today)
         cumulative = 0
         for entry in data:
             cumulative += entry['count']
-            table_data.append([entry['date'], str(entry['count']), str(cumulative)])
             report_data.append({'date': str(entry['date']), 'count': entry['count'], 'cumulative': cumulative})
-
     elif report_type == 'posts':
-        table_data = [['Date', 'New Posts', 'Cumulative Posts']]
         cumulative = 0
         for date in date_range:
             count = Post.objects.filter(created_at__date=date).count()
             cumulative += count
-            table_data.append([str(date), str(count), str(cumulative)])
             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
-
     elif report_type == 'likes':
-        table_data = [['Date', 'New Likes', 'Cumulative Likes']]
         cumulative = 0
         for date in date_range:
             count = Like.objects.filter(created_at__date=date).count()
             cumulative += count
-            table_data.append([str(date), str(count), str(cumulative)])
             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
-
     elif report_type == 'comments':
-        table_data = [['Date', 'New Comments', 'Cumulative Comments']]
         cumulative = 0
         for date in date_range:
             count = Comment.objects.filter(created_at__date=date).count()
             cumulative += count
-            table_data.append([str(date), str(count), str(cumulative)])
             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
-
     elif report_type == 'hashtags':
-        table_data = [['Date', 'Hashtag', 'Post Count']]
         hashtags = Hashtag.objects.annotate(post_count=Count('hashtags_posts')).order_by('-post_count')[:5]
         for date in date_range:
             for hashtag in hashtags:
                 count = hashtag.hashtags_posts.filter(created_at__date=date).count()
                 if count > 0:
-                    table_data.append([str(date), hashtag.name, str(count)])
                     report_data.append({'date': str(date), 'hashtag': hashtag.name, 'count': count})
 
-    # Create table
-    table = Table(table_data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#198754')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    elements.append(table)
-
-    # Footer (added via build)
-    def add_footer(canvas, doc):
-        canvas.saveState()
-        footer_text = f"Page {doc.page} | Generated by Snapfy Admin"
-        canvas.setFont('Helvetica', 8)
-        canvas.setFillColor(colors.grey)
-        canvas.drawString(inch, 0.5 * inch, footer_text)
-        canvas.restoreState()
-
-    # Build PDF
-    doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
-
+    # Generate enhanced PDF
+    buffer = generate_enhanced_report(request, report_type, period, report_data, start_date, today)
+    
     # Save report to database
     AnalyticsReport.objects.create(
         report_type=period,
@@ -446,15 +740,166 @@ def generate_report(request):
     AdminActionLog.objects.create(
         admin=request.user,
         action_type='generate_report',
-        action_detail=f"Generated {report_type} PDF report for {period} period",
+        action_detail=f"Generated enhanced {report_type} PDF report for {period} period",
         affected_user=None
     )
 
     # Return PDF response
-    buffer.seek(0)
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{report_type}_{period}_report.pdf"'
     return response
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated, IsAdminUser])
+# def generate_report(request):
+#     """Generate and download a PDF report"""
+#     report_type = request.query_params.get('type', 'users')  # users, posts, likes, comments, hashtags
+#     period = request.query_params.get('period', 'weekly')
+    
+#     if report_type not in ['users', 'posts', 'likes', 'comments', 'hashtags']:
+#         return Response({'error': 'Invalid report type'}, status=status.HTTP_400_BAD_REQUEST)
+#     if period not in ['daily', 'weekly', 'monthly']:
+#         return Response({'error': 'Invalid period'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     # Prepare PDF response
+#     buffer = io.BytesIO()
+#     doc = SimpleDocTemplate(buffer, pagesize=letter)
+#     elements = []
+
+#     # Styles
+#     styles = getSampleStyleSheet()
+#     title_style = ParagraphStyle(
+#         'Title',
+#         parent=styles['Heading1'],
+#         fontSize=16,
+#         spaceAfter=12,
+#         textColor=colors.HexColor('#198754')
+#     )
+#     normal_style = styles['Normal']
+#     footer_style = ParagraphStyle(
+#         'Footer',
+#         parent=styles['Normal'],
+#         fontSize=8,
+#         textColor=colors.grey
+#     )
+
+#     # Header
+#     title = f"{report_type.capitalize()} {period.capitalize()} Report"
+#     elements.append(Paragraph(title, title_style))
+#     elements.append(Paragraph(f"Generated on {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} by {request.user.username}", normal_style))
+#     elements.append(Spacer(1, 0.2 * inch))
+
+#     # Data preparation
+#     today = timezone.now().date()
+#     if period == 'daily':
+#         start_date = today - datetime.timedelta(days=6)
+#     elif period == 'weekly':
+#         start_date = today - datetime.timedelta(days=28)
+#     elif period == 'monthly':
+#         start_date = (today - datetime.timedelta(days=180)).replace(day=1)
+
+#     date_range = [start_date + datetime.timedelta(days=x) for x in range((today - start_date).days + 1)]
+#     report_data = []
+
+#     # Table data
+#     if report_type == 'users':
+#         table_data = [['Date', 'New Users', 'Cumulative Users']]
+#         data = UserStatistics.get_user_count_by_date_range(start_date, today)
+#         cumulative = 0
+#         for entry in data:
+#             cumulative += entry['count']
+#             table_data.append([entry['date'], str(entry['count']), str(cumulative)])
+#             report_data.append({'date': str(entry['date']), 'count': entry['count'], 'cumulative': cumulative})
+
+#     elif report_type == 'posts':
+#         table_data = [['Date', 'New Posts', 'Cumulative Posts']]
+#         cumulative = 0
+#         for date in date_range:
+#             count = Post.objects.filter(created_at__date=date).count()
+#             cumulative += count
+#             table_data.append([str(date), str(count), str(cumulative)])
+#             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+#     elif report_type == 'likes':
+#         table_data = [['Date', 'New Likes', 'Cumulative Likes']]
+#         cumulative = 0
+#         for date in date_range:
+#             count = Like.objects.filter(created_at__date=date).count()
+#             cumulative += count
+#             table_data.append([str(date), str(count), str(cumulative)])
+#             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+#     elif report_type == 'comments':
+#         table_data = [['Date', 'New Comments', 'Cumulative Comments']]
+#         cumulative = 0
+#         for date in date_range:
+#             count = Comment.objects.filter(created_at__date=date).count()
+#             cumulative += count
+#             table_data.append([str(date), str(count), str(cumulative)])
+#             report_data.append({'date': str(date), 'count': count, 'cumulative': cumulative})
+
+#     elif report_type == 'hashtags':
+#         table_data = [['Date', 'Hashtag', 'Post Count']]
+#         hashtags = Hashtag.objects.annotate(post_count=Count('hashtags_posts')).order_by('-post_count')[:5]
+#         for date in date_range:
+#             for hashtag in hashtags:
+#                 count = hashtag.hashtags_posts.filter(created_at__date=date).count()
+#                 if count > 0:
+#                     table_data.append([str(date), hashtag.name, str(count)])
+#                     report_data.append({'date': str(date), 'hashtag': hashtag.name, 'count': count})
+
+#     # Create table
+#     table = Table(table_data)
+#     table.setStyle(TableStyle([
+#         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#198754')),
+#         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+#         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+#         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+#         ('FONTSIZE', (0, 0), (-1, 0), 12),
+#         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+#         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+#         ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+#         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+#         ('FONTSIZE', (0, 1), (-1, -1), 10),
+#         ('GRID', (0, 0), (-1, -1), 1, colors.black),
+#     ]))
+#     elements.append(table)
+
+#     # Footer (added via build)
+#     def add_footer(canvas, doc):
+#         canvas.saveState()
+#         footer_text = f"Page {doc.page} | Generated by Snapfy Admin"
+#         canvas.setFont('Helvetica', 8)
+#         canvas.setFillColor(colors.grey)
+#         canvas.drawString(inch, 0.5 * inch, footer_text)
+#         canvas.restoreState()
+
+#     # Build PDF
+#     doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
+
+#     # Save report to database
+#     AnalyticsReport.objects.create(
+#         report_type=period,
+#         data_type=report_type,
+#         generated_by=request.user,
+#         report_data=report_data,
+#         start_date=start_date,
+#         end_date=today
+#     )
+
+#     # Log admin action
+#     AdminActionLog.objects.create(
+#         admin=request.user,
+#         action_type='generate_report',
+#         action_detail=f"Generated {report_type} PDF report for {period} period",
+#         affected_user=None
+#     )
+
+#     # Return PDF response
+#     buffer.seek(0)
+#     response = HttpResponse(buffer, content_type='application/pdf')
+#     response['Content-Disposition'] = f'attachment; filename="{report_type}_{period}_report.pdf"'
+#     return response
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
