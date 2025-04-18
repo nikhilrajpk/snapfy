@@ -18,6 +18,7 @@ import { showToast } from '../../redux/slices/toastSlice';
 const TrendingSongs = () => {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [formLoading, setFormLoading] = useState(false); // New state for create/update
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingOnly, setTrendingOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,13 +59,13 @@ const TrendingSongs = () => {
       setTotalPages(response.data.total_pages);
       setTotalTracks(response.data.total);
     } catch (error) {
-      if (error.response?.status === 401){
+      if (error.response?.status === 401) {
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-      }else{
+      } else {
         console.error('Error fetching music tracks:', error);
         dispatch(showToast({ message: 'Failed to load music tracks', type: 'error' }));
       }
-      } finally {
+    } finally {
       setLoading(false);
     }
   };
@@ -83,6 +84,7 @@ const TrendingSongs = () => {
       return;
     }
 
+    setFormLoading(true); // Start loading
     const data = new FormData();
     data.append('title', title);
     data.append('is_trending', is_trending);
@@ -108,23 +110,28 @@ const TrendingSongs = () => {
     } catch (error) {
       console.error('Error saving music track:', error);
       dispatch(showToast({ message: 'Failed to save music track', type: 'error' }));
+    } finally {
+      setFormLoading(false); // Stop loading
     }
   };
 
   const handleDeleteTrack = async (trackId) => {
     if (!window.confirm('Are you sure you want to delete this track?')) return;
+    setLoading(true); // Start loading
     try {
       await axiosInstance.delete(`/admin/music-tracks/${trackId}/`);
       setTracks(tracks.filter(track => track.id !== trackId));
       setTotalTracks(prev => prev - 1);
       dispatch(showToast({ message: 'Track deleted successfully', type: 'success' }));
     } catch (error) {
-      if (error.response?.status === 401){
+      if (error.response?.status === 401) {
         dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-      }else{
+      } else {
         console.error('Error deleting music track:', error);
         dispatch(showToast({ message: 'Failed to delete music track', type: 'error' }));
       }
+    } finally {
+      setLoading(false); // Stop loading
     }
   };
 
@@ -286,6 +293,7 @@ const TrendingSongs = () => {
           <button
             onClick={() => openModal()}
             className="px-4 py-2 bg-[#198754] text-white rounded-lg hover:bg-[#157347] transition duration-200 flex items-center"
+            disabled={formLoading || loading}
           >
             <Plus size={18} className="mr-2" />
             Add New Track
@@ -306,11 +314,13 @@ const TrendingSongs = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-[#198754] focus:border-[#198754]"
               placeholder="Search by track title..."
+              disabled={formLoading || loading}
             />
           </div>
           <button
             type="submit"
             className="ml-3 px-4 py-2 bg-[#198754] text-white rounded-lg hover:bg-[#157347] transition duration-200"
+            disabled={formLoading || loading}
           >
             Search
           </button>
@@ -344,7 +354,9 @@ const TrendingSongs = () => {
               {loading ? (
                 <tr>
                   <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
-                    Loading...
+                    <div className="flex justify-center items-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
+                    </div>
                   </td>
                 </tr>
               ) : tracks.length === 0 ? (
@@ -384,14 +396,20 @@ const TrendingSongs = () => {
                       <button
                         onClick={() => openModal(track)}
                         className="mr-2 text-blue-600 hover:text-blue-800"
+                        disabled={formLoading || loading}
                       >
                         <Edit size={16} />
                       </button>
                       <button
                         onClick={() => handleDeleteTrack(track.id)}
-                        className="text-red-600 hover:text-red-800"
+                        className="text-red-600 hover:text-red-800 flex items-center"
+                        disabled={formLoading || loading}
                       >
-                        <Trash2 size={16} />
+                        {loading ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-red-600"></div>
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -407,14 +425,14 @@ const TrendingSongs = () => {
             <div className="flex-1 flex justify-between sm:hidden">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
+                disabled={currentPage === 1 || formLoading || loading}
                 className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Previous
               </button>
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
+                disabled={currentPage === totalPages || formLoading || loading}
                 className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next
@@ -432,7 +450,7 @@ const TrendingSongs = () => {
                 <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
                   <button
                     onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1}
+                    disabled={currentPage === 1 || formLoading || loading}
                     className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={16} />
@@ -445,14 +463,15 @@ const TrendingSongs = () => {
                         currentPage === page
                           ? 'z-10 bg-[#198754] border-[#198754] text-white'
                           : 'bg-white text-gray-500 hover:bg-gray-50'
-                      }`}
+                      } ${formLoading || loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={formLoading || loading}
                     >
                       {page}
                     </button>
                   ))}
                   <button
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages}
+                    disabled={currentPage === totalPages || formLoading || loading}
                     className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <ChevronRight size={16} />
@@ -472,7 +491,11 @@ const TrendingSongs = () => {
               <h2 className="text-xl font-bold">
                 {editingTrack ? 'Edit Track' : 'Add New Track'}
               </h2>
-              <button onClick={closeModal} className="text-gray-500 hover:text-gray-700">
+              <button 
+                onClick={closeModal} 
+                className="text-gray-500 hover:text-gray-700"
+                disabled={formLoading}
+              >
                 <X size={24} />
               </button>
             </div>
@@ -485,6 +508,7 @@ const TrendingSongs = () => {
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   className="mt-1 block w-full border border-gray-300 rounded-lg p-2 focus:ring-[#198754] focus:border-[#198754]"
                   required
+                  disabled={formLoading}
                 />
               </div>
               <div>
@@ -495,6 +519,7 @@ const TrendingSongs = () => {
                   onChange={handleFileChange}
                   className="mt-1 block w-full border border-gray-300 rounded-lg p-2"
                   required={!editingTrack}
+                  disabled={formLoading}
                 />
               </div>
               <div>
@@ -514,7 +539,7 @@ const TrendingSongs = () => {
                           value={formData.start_time}
                           onChange={(e) => handleTimeChange('start_time', e.target.value)}
                           className="mt-1 block w-full border border-gray-300 rounded-lg p-2 focus:ring-[#198754] focus:border-[#198754]"
-                          disabled={!formData.file && editingTrack}
+                          disabled={(!formData.file && editingTrack) || formLoading}
                         />
                       </div>
                       <div className="flex-1">
@@ -527,7 +552,7 @@ const TrendingSongs = () => {
                           value={formData.end_time}
                           onChange={(e) => handleTimeChange('end_time', e.target.value)}
                           className="mt-1 block w-full border border-gray-300 rounded-lg p-2 focus:ring-[#198754] focus:border-[#198754]"
-                          disabled={!formData.file && editingTrack}
+                          disabled={(!formData.file && editingTrack) || formLoading}
                         />
                       </div>
                     </div>
@@ -539,7 +564,7 @@ const TrendingSongs = () => {
                         type="button"
                         onClick={togglePlayPause}
                         className="flex items-center px-3 py-1 bg-[#198754] text-white rounded-lg hover:bg-[#157347]"
-                        disabled={!formData.file}
+                        disabled={!formData.file || formLoading}
                       >
                         {isPlaying ? <Pause size={16} className="mr-1" /> : <Play size={16} className="mr-1" />}
                         {isPlaying ? 'Pause' : 'Play'}
@@ -564,6 +589,7 @@ const TrendingSongs = () => {
                     checked={formData.is_trending}
                     onChange={(e) => setFormData({ ...formData, is_trending: e.target.checked })}
                     className="mr-2"
+                    disabled={formLoading}
                   />
                   Trending
                 </label>
@@ -573,13 +599,18 @@ const TrendingSongs = () => {
                   type="button"
                   onClick={closeModal}
                   className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+                  disabled={formLoading}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-[#198754] text-white rounded-lg hover:bg-[#157347]"
+                  className="px-4 py-2 bg-[#198754] text-white rounded-lg hover:bg-[#157347] flex items-center"
+                  disabled={formLoading}
                 >
+                  {formLoading ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white mr-2"></div>
+                  ) : null}
                   {editingTrack ? 'Update' : 'Create'}
                 </button>
               </div>
