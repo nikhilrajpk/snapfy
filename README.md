@@ -5,35 +5,51 @@ Snapfy is a modern, full-stack social media platform built with Django and React
 ✅ User Management & Authentication
 
 User Registration: /api/register/ with OTP email verification.
+
 OTP Verification: Email sent via Celery and Gmail SMTP.
+
 User Profiles: View/edit with media support.
+
 User Retrieval: /api/users/<id>/
+
 Follow/Unfollow & Block: Manage user interactions.
+
 Suggested Users: Smart suggestions using mutual connections.
+
 
 📸 Content Creation & Interaction
 
 Posts & Stories: Create, view, and interact with content.
+
 Reels: Upload short videos with music (3–30s).
+
 Explore Page: Trending content and user discovery.
+
 Media Uploads: Handled via Cloudinary.
+
 
 ⚙️ Asynchronous Task Handling
 
 Celery + Redis: Background jobs and email delivery.
+
 Windows Support: Using worker_pool='solo'.
 
 💬 Real-Time Features
 
 Chat System: Real-time private and group messaging via Django Channels and Redis.
+
 WebSockets: Instant message delivery with message history, online status indicators, read receipts, typing indicators, and media attachments (images, videos).
 
 🛡️ Admin Panel
 
 Dashboard: Active users, growth, online users, blocked users.
+
 Analytics: Track growth, engagement, hashtags, PDF reports.
+
 Trending Songs Management: CRUD operations with audio trimming.
+
 Export Reports: Paginated and downloadable PDF analytics.
+
 
 
 🔗 API Endpoints
@@ -77,7 +93,6 @@ GET/POST
 Retrieve or send chat messages
 
 
-👉 Full API docs coming soon at /docs/api.
 
 💠 Logging
 
@@ -132,7 +147,7 @@ Daphne (ASGI)
 
 
 Database
-PostgreSQL / SQLite (dev)
+PostgreSQL
 
 
 
