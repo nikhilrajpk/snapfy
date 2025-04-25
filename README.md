@@ -1,4 +1,4 @@
-🌟 # Snapfy - A Social Media Platform
+# Snapfy - A Social Media Platform
 Snapfy is a modern, full-stack social media platform built with Django and React, offering a rich feature set including real-time messaging, content sharing (posts, stories, reels), background task handling, cloud media storage, and advanced admin analytics.
 
 🚀 Features
