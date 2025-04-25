@@ -159,18 +159,30 @@ source env/bin/activate  # Windows: env\Scripts\activate
 pip install -r requirements.txt
 
 Create a .env file:
+
 EMAIL_HOST_USER=yourname@gmail.com
+
 EMAIL_HOST_PASSWORD=your-app-password
+
 CLOUD_NAME=your-cloudinary-cloud-name
+
 API_KEY=your-cloudinary-api-key
+
 API_SECRET=your-cloudinary-api-secret
+
 GOOGLE_CLIENT_ID=your-google-client-id  # optional
 
+
 Run migrations and services:
+
 python manage.py migrate
+
 redis-server
+
 daphne -b 0.0.0.0 -p 8000 snapfy_django.asgi:application
+
 celery -A snapfy_django worker -l info
+
 
 Frontend Setup
 # Go to Frontend Directory
