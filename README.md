@@ -1,150 +1,230 @@
 # Snapfy - A Social Media Platform
+Snapfy is a modern, full-stack social media platform built with Django and React, offering a rich feature set including real-time messaging, content sharing (posts, stories, reels), background task handling, cloud media storage, and advanced admin analytics.
 
-Snapfy is a feature-rich social media platform built with **Django** and **React**, designed to connect users through posts, stories, reels, and real-time interactions. It combines a robust backend with asynchronous task processing, cloud-based media storage, and a dynamic frontend to deliver a scalable and engaging user experience.
+🚀 Features
+✅ User Management & Authentication
 
-## Features
+User Registration: /api/register/ with OTP email verification.
 
-### ✅ **User Management & Authentication**
-- **User Registration:** Sign up via `/api/register/` with email verification using a 4-digit OTP.
-- **OTP Verification:** Sends verification email using **Celery** and **Gmail SMTP**.
-- **User Profiles:** View and edit user details with media support.
-- **User Retrieval:** Fetch user data by ID via `/api/users/<id>/`.
-- **Follow/Unfollow:** Curate your feed by following or unfollowing users.
-- **Block Users:** Restrict unwanted interactions.
-- **Suggested Users:** Algorithm-based user suggestions.
+OTP Verification: Email sent via Celery and Gmail SMTP.
 
-### 📸 **Content Creation & Interaction**
-- **Posts:** Create, view, and engage with text/image posts.
-- **Stories:** Share temporary stories that auto-delete after 24 hours.
-- **Reels:** Upload and watch short video content.
-- **Explore Page:** Discover trending content and users.
-- **Media Storage:** Secure media uploads via **Cloudinary**.
+User Profiles: View/edit with media support.
 
-### ⚙️ **Task Queue**
-- **Celery with Redis:** Asynchronous task handling for emails and background jobs.
-- **Windows Compatibility:** Uses `worker_pool='solo'` for **Celery** on Windows.
+User Retrieval: /api/users/<id>/
 
-### 💬 **Real-Time Features (In Progress)**
-- **Chat System:** Real-time messaging with **Django Channels** and **Redis**.
-- **WebSocket Support:** Enables instant message delivery.
+Follow/Unfollow & Block: Manage user interactions.
 
-## 🔗 **API Endpoints**
-Built with **Django REST Framework (DRF)** for full functionality.
+Suggested Users: Smart suggestions using mutual connections.
 
-**Examples:**
-- `POST /api/register/` — Register a new user.
-- `GET /api/users/<id>/` — Retrieve user details.
 
-## 🛠️ **Logging**
-- **Custom Logging:** INFO-level logs for debugging and monitoring.
+📸 Content Creation & Interaction
 
-## 🌍 **Deployment**
-- **ASGI Server:** Powered by **Daphne** for HTTP and WebSocket support.
-- **Environment Variables:** Secure management of sensitive data.
+Posts & Stories: Create, view, and interact with content.
 
-## 🏗️ **Tech Stack**
-- **Backend:** Django, Django REST Framework
-- **Frontend:** React with Axios
-- **Task Queue:** Celery with Redis
-- **Real-Time:** Django Channels with Redis
-- **Media Storage:** Cloudinary
-- **Email:** Django Email with Gmail SMTP
-- **Server:** Daphne (ASGI)
-- **Database:** PostgreSQL/SQLite (Specify as applicable)
+Reels: Upload short videos with music (3–30s).
 
-## 🛑 **Prerequisites**
-- Python 3.8+
-- Node.js and npm
-- Redis Server (127.0.0.1:6379)
-- Cloudinary Account
-- Gmail Account with App Password
+Explore Page: Trending content and user discovery.
 
-## 🔨 **Installation**
+Media Uploads: Handled via Cloudinary.
 
-### Backend Setup
-```bash
-# Clone the Repository
+
+⚙️ Asynchronous Task Handling
+
+Celery + Redis: Background jobs and email delivery.
+
+Windows Support: Using worker_pool='solo'.
+
+💬 Real-Time Features
+
+Chat System: Real-time private and group messaging via Django Channels and Redis.
+
+WebSockets: Instant message delivery with message history, online status indicators, read receipts, typing indicators, and media attachments (images, videos).
+
+🛡️ Admin Panel
+
+Dashboard: Active users, growth, online users, blocked users.
+
+Analytics: Track growth, engagement, hashtags, PDF reports.
+
+Trending Songs Management: CRUD operations with audio trimming.
+
+Export Reports: Paginated and downloadable PDF analytics.
+
+
+
+🔗 API Endpoints
+Built using Django REST Framework (DRF).
+
+
+
+Method
+Endpoint
+Description
+
+
+
+POST
+/api/register/
+Register a new user
+
+
+GET
+/api/users/<id>/
+Fetch user details
+
+
+GET
+/api/admin/dashboard-stats/
+Get admin dashboard metrics
+
+
+GET
+/api/admin/generate-report/
+Generate PDF report
+
+
+POST
+/api/admin/music-tracks/
+Create music track
+
+
+GET/POST
+/api/chat/messages/
+Retrieve or send chat messages
+
+
+
+💠 Logging
+
+Custom INFO-level logging for monitoring and debugging.
+
+
+🌍 Deployment
+
+ASGI Server: Powered by Daphne.
+Secure Config: Uses environment variables for sensitive data.
+
+
+🧱 Tech Stack
+
+
+
+Layer
+Technologies
+
+
+
+Backend
+Django, Django REST Framework
+
+
+Frontend
+React, Axios, Tailwind CSS, Recharts
+
+
+Task Queue
+Celery with Redis
+
+
+Real-Time
+Django Channels + Redis
+
+
+Media
+Cloudinary
+
+
+Email
+Django Email (Gmail SMTP)
+
+
+Reports
+ReportLab (PDF generation)
+
+
+Server
+Daphne (ASGI)
+
+
+Database
+PostgreSQL
+
+
+
+🪠 Prerequisites
+
+Python 3.8+
+Node.js & npm
+Redis (localhost:6379)
+Cloudinary Account
+Gmail App Password (for SMTP)
+
+
+👷️ Installation
+Backend Setup
+# Clone Repository
 git clone https://github.com/nikhilrajpk/snapfy.git
 cd snapfy
 
-# Set Up Virtual Environment
+# Create Virtual Environment
 python -m venv env
-source env/bin/activate  # On Windows: env\Scripts\activate
+source env/bin/activate  # Windows: env\Scripts\activate
 
-# Install Backend Dependencies
+# Install Dependencies
 pip install -r requirements.txt
 
-# Configure Environment Variables
-# Create a .env file in the root
-touch .env
-```
-**.env File Example:**
-```env
+Create a .env file:
+
 EMAIL_HOST_USER=yourname@gmail.com
+
 EMAIL_HOST_PASSWORD=your-app-password
+
 CLOUD_NAME=your-cloudinary-cloud-name
+
 API_KEY=your-cloudinary-api-key
+
 API_SECRET=your-cloudinary-api-secret
-GOOGLE_CLIENT_ID=your-google-client-id  # Optional
-```
 
-### Apply Migrations
-```bash
+GOOGLE_CLIENT_ID=your-google-client-id  # optional
+
+
+Run migrations and services:
+
 python manage.py migrate
-```
 
-### Run Redis
-```bash
 redis-server
-```
 
-### Start Backend
-```bash
-# Run ASGI server
 daphne -b 0.0.0.0 -p 8000 snapfy_django.asgi:application
 
-# Start Celery worker
 celery -A snapfy_django worker -l info
-```
 
-### Frontend Setup
-```bash
-# Navigate to Frontend Directory
+
+Frontend Setup
+# Go to Frontend Directory
 cd frontend
 
-# Install Frontend Dependencies
+# Install Dependencies
 npm install
 
-# Start the Frontend
+# Run React App
 npm start
-```
-Access the app at **http://localhost:3000**.
 
-## 🔍 **Testing the API**
-1. Register a user via the React frontend.
-2. Monitor backend logs for OTP and email status.
+App runs on: http://localhost:5173
 
-## 📈 **Current Status**
-- **Completed:**
-  - User authentication and profiles.
-  - Posts, stories, and reels.
-  - Follow/block functionality.
-  - Explore page with suggested users.
-  - React frontend with Axios.
+🔍 Testing the API
 
-- **In Progress:**
-  - Real-time chat system with **Django Channels**.
+Register a new user from the frontend.
+Check backend logs to capture the OTP.
+Complete email verification and explore features like posting, exploring, real-time messaging (private/group chats, read receipts, typing indicators, media attachments), and admin tools.
 
-- **Next Steps:**
-  - Finalize chat system.
-  - Enhance React UI/UX.
-  - Optimize email deliverability (e.g., **SendGrid**).
-  - Implement notifications.
 
-## 🤝 **Contributing**
-Contributions are welcome! Fork the repo, submit issues, or send pull requests to help improve Snapfy.
+✨ Acknowledgments
 
-## 📫 **Contact**
-- **Author:** Nikhilraj PK
-- **GitHub:** [nikhilrajpk](https://github.com/nikhilrajpk)
+Cloudinary
+Redis
+Django Channels
+ReportLab
+Tailwind CSS
 
+
+Made with ❤️ by Nikhil Raj
