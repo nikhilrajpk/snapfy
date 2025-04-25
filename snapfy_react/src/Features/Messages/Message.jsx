@@ -233,9 +233,18 @@ function Message() {
         setSelectedRoom(roomCache[conversationId].room);
         setMessages(roomCache[conversationId].messages);
         setIsLoading(false);
+        // Send or queue mark_as_read
+        const markAsReadSignal = JSON.stringify({ type: 'mark_as_read', room_id: conversationId });
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(markAsReadSignal);
+          console.log('Sent mark_as_read for room:', conversationId);
+        } else {
+          setPendingSignals((prev) => [...prev, markAsReadSignal]);
+          console.log('Queued mark_as_read for room:', conversationId);
+        }
         return;
       }
-  
+    
       setIsLoading(true);
       try {
         const [roomResponse, messagesResponse, callHistoryResponse] = await Promise.all([
@@ -243,17 +252,17 @@ function Message() {
           axiosInstance.get(`/chatrooms/${conversationId}/messages/`),
           axiosInstance.get(`/chatrooms/${conversationId}/call-history/`),
         ]);
-  
+    
         const roomData = roomResponse.data;
         setSelectedRoom(roomData);
-  
+    
         const messageItems = (messagesResponse.data || []).map((msg) => ({
           ...msg,
           sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
           key: `${msg.id}-${msg.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
           file_url: msg.file_url || null,
         }));
-  
+    
         const callItems = (callHistoryResponse.data || []).map((call) => ({
           id: `call-${call.id}`,
           key: `call-${call.id}-${call.call_start_time}-${Math.random().toString(36).substr(2, 5)}`,
@@ -264,16 +273,22 @@ function Message() {
           call_status: call.call_status,
           call_duration: call.duration ? formatCallDuration(call.duration) : null,
         }));
-  
+    
         const combinedMessages = [...messageItems, ...callItems].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
         setMessages(combinedMessages);
         setRoomCache((prev) => ({
           ...prev,
           [conversationId]: { room: roomData, messages: combinedMessages },
         }));
-  
+    
+        // Send or queue mark_as_read
+        const markAsReadSignal = JSON.stringify({ type: 'mark_as_read', room_id: conversationId });
         if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+          socketRef.current.send(markAsReadSignal);
+          console.log('Sent mark_as_read for room:', conversationId);
+        } else {
+          setPendingSignals((prev) => [...prev, markAsReadSignal]);
+          console.log('Queued mark_as_read for room:', conversationId);
         }
       } catch (error) {
         console.error('Error fetching room/messages:', error);
@@ -285,6 +300,14 @@ function Message() {
   
     fetchRoomAndMessages();
   }, [conversationId, dispatch, user, navigate]);
+
+  useEffect(() => {
+    if (conversationId && socketRef.current?.readyState === WebSocket.OPEN) {
+      const markAsReadSignal = JSON.stringify({ type: 'mark_as_read', room_id: conversationId });
+      socketRef.current.send(markAsReadSignal);
+      console.log('Sent mark_as_read on room change for room:', conversationId);
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     if (initialLoad && messages.length) {
@@ -370,6 +393,12 @@ function Message() {
           } else {
             localStorage.removeItem('call_state');
           }
+        }
+
+        if (conversationId) {
+          const markAsReadSignal = JSON.stringify({ type: 'mark_as_read', room_id: conversationId });
+          socketRef.current.send(markAsReadSignal);
+          console.log('Sent mark_as_read on WebSocket open for room:', conversationId);
         }
       };
 
@@ -480,6 +509,7 @@ function Message() {
           }
 
           case 'mark_as_read':
+            console.log('Received mark_as_read for room:', data.room_id, 'Updated IDs:', data.updated_ids);
             if (String(data.room_id) === String(conversationId)) {
               setMessages((prev) =>
                 prev.map((msg) =>
