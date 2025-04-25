@@ -170,6 +170,14 @@ const router = createBrowserRouter([
                 )
             },
             {
+                path: '/messages/new/:username',
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <Message/>
+                    </ProtectedRoute>
+                )
+            },
+            {
                 path: '/notifications',
                 element: (
                     <ProtectedRoute authentication={true}>

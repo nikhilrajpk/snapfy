@@ -71,10 +71,39 @@ function Message() {
   const [selectedPost, setSelectedPost] = useState(null);
   const [roomCache, setRoomCache] = useState({}); // Cache for room data and messages
   const [pendingSignals, setPendingSignals] = useState([]);
+  const [recipientUser, setRecipientUser] = useState(null); // Track selected user without a room
   const callTimerRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const processedStreamIds = useRef(new Set());
+
+
+  useEffect(() => {
+    if (conversationId && !selectedRoom && chatRooms) {
+      const cachedRecipient = chatRooms.find?.(room => 
+        room && String(room.id) === String(conversationId) && 
+        !room.is_group
+      )?.users?.find?.(u => String(u?.id) !== String(user?.id));
+      
+      if (cachedRecipient) {
+        setRecipientUser(cachedRecipient);
+      }
+    }
+  }, [conversationId, chatRooms, selectedRoom, user?.id]);
+
+  useEffect(() => {
+    if (conversationId && chatRooms.length) {
+      const room = chatRooms.find((room) => String(room.id) === String(conversationId));
+      if (room) {
+        setSelectedRoom(room);
+        setRecipientUser(null); // Clear recipient when a room is selected
+      } else {
+        setSelectedRoom(null);
+      }
+    } else {
+      setSelectedRoom(null);
+    }
+  }, [conversationId, chatRooms]);
 
   const RTC_CONFIG = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -192,6 +221,12 @@ function Message() {
 
   useEffect(() => {
     if (!conversationId || !user) return;
+  
+    // Reset state when switching rooms
+    setMessages([]);
+    setSelectedRoom(null);
+    setRecipientUser(null);
+    setInitialLoad(true);
   
     const fetchRoomAndMessages = async () => {
       if (roomCache[conversationId] && roomCache[conversationId].room.id === conversationId) {
@@ -356,57 +391,90 @@ function Message() {
             socketRef.current.close(1000, 'Replaced by new connection');
               break;
 
-          case 'chat_message': {
-            const message = data.message;
-            if (!message?.sender?.id) break;
-
-            const newMessage = {
-              ...message,
-              file_url: message.file_url || null,
-              sent_at: message.sent_at || new Date().toISOString(),
-              is_read: message.is_read || false,
-              is_deleted: message.is_deleted || false,
-              sender: {
-                id: message.sender.id,
-                username: message.sender.username || 'Unknown',
-                profile_picture: message.sender.profile_picture || null,
-              },
-              key: `${message.id}-${message.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
-              file_type: message.file_type || 'other',
-            };
-
-            setChatRooms((prev) =>
-              prev.map((room) => {
-                if (String(room.id) === String(data.room_id)) {
-                  const isOwnMessage = String(newMessage.sender.id) === String(user?.id);
-                  const isCurrentRoom = String(data.room_id) === String(conversationId);
-                  return {
-                    ...room,
-                    last_message: {
-                      content: newMessage.is_deleted ? '[Deleted]' : newMessage.content,
-                      file_url: newMessage.file_url,
-                      is_deleted: newMessage.is_deleted,
-                    },
-                    last_message_at: newMessage.sent_at,
-                    unread_count: isOwnMessage || isCurrentRoom ? 0 : data.unread_count,
-                  };
+              case 'chat_message': {
+                const message = data.message;
+                if (!message?.sender?.id || !data.room_id) {
+                  console.warn('Invalid message data:', data);
+                  break;
                 }
-                return room;
-              }).sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
-            );
-
-            if (String(data.room_id) === String(conversationId)) {
-              setMessages((prev) => {
-                const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);
-                if (tempIdMatch) return prev.map((msg) => (msg.tempId === message.tempId ? newMessage : msg));
-                const existingIndex = prev.findIndex((msg) => String(msg.id) === String(message.id));
-                if (existingIndex !== -1) return prev.map((msg, idx) => (idx === existingIndex ? newMessage : msg));
-                return [...prev, newMessage];
-              });
-
-              if (String(newMessage.sender.id) !== String(user?.id)) {
-                socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+          
+                console.log(`Received chat_message for room ${data.room_id}, current room: ${conversationId}`);
+          
+                // Only update messages if it's for the current room
+                if (String(data.room_id) === String(conversationId)) {
+                  const newMessage = {
+                    ...message,
+                    file_url: message.file_url || null,
+                    sent_at: message.sent_at || new Date().toISOString(),
+                    is_read: message.is_read || false,
+                    is_deleted: message.is_deleted || false,
+                    sender: {
+                      id: message.sender.id,
+                      username: message.sender.username || 'Unknown',
+                      profile_picture: message.sender.profile_picture || null,
+                    },
+                    key: `${message.id}-${message.sent_at}-${Math.random().toString(36).substr(2, 5)}`,
+                    file_type: message.file_type || 'other',
+                  };
+          
+                  setMessages((prev) => {
+                    // Check for tempId match to replace optimistic message
+                    const tempIdMatch = message.tempId && prev.some((msg) => msg.tempId === message.tempId);
+                    if (tempIdMatch) {
+                      console.log(`Replacing optimistic message with tempId: ${message.tempId}`);
+                      return prev.map((msg) => (msg.tempId === message.tempId ? newMessage : msg));
+                    }
+                    // Check for existing message to prevent duplicates
+                    const existingIndex = prev.findIndex((msg) => String(msg.id) === String(message.id));
+                    if (existingIndex !== -1) {
+                      console.log(`Updating existing message with id: ${message.id}`);
+                      return prev.map((msg, idx) => (idx === existingIndex ? newMessage : msg));
+                    }
+                    console.log(`Adding new message with id: ${message.id}`);
+                    return [...prev.filter((msg) => String(msg.id) !== String(message.id)), newMessage];
+                  });
+          
+                  // Mark as read if not the sender
+                  if (String(newMessage.sender.id) !== String(user?.id)) {
+                    socketRef.current.send(JSON.stringify({ type: 'mark_as_read', room_id: conversationId }));
+                  }
+                }
+          
+                // Update chat list for all rooms
+                setChatRooms((prev) =>
+                  prev.map((room) => {
+                    if (String(room.id) === String(data.room_id)) {
+                      const isOwnMessage = String(message.sender.id) === String(user?.id);
+                      const isCurrentRoom = String(data.room_id) === String(conversationId);
+                      return {
+                        ...room,
+                        last_message: {
+                          content: message.is_deleted ? '[Deleted]' : message.content,
+                          file_url: message.file_url,
+                          is_deleted: message.is_deleted,
+                        },
+                        last_message_at: message.sent_at,
+                        unread_count: isOwnMessage || isCurrentRoom ? 0 : (room.unread_count || 0) + 1,
+                      };
+                    }
+                    return room;
+                  }).sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
+                );
+                break;
               }
+  
+          case 'chat_list_update': {
+            if (String(data.room_id) !== String(conversationId)) {
+              const fetchChatRooms = async () => {
+                try {
+                  const response = await axiosInstance.get('/chatrooms/my-chats/');
+                  setChatRooms(response.data);
+                } catch (error) {
+                  console.error('Error fetching chat rooms:', error);
+                  dispatch(showToast({ message: 'Failed to load chats', type: 'error' }));
+                }
+              };
+              fetchChatRooms();
             }
             break;
           }
@@ -1136,13 +1204,28 @@ function Message() {
 
   const handleSendMessage = async () => {
     if (!message.trim() && !selectedFile) return;
-    if (!selectedRoom?.id) return;
-
+  
+    let currentRoomId = selectedRoom?.id;
+    let isNewChat = !selectedRoom && recipientUser;
+  
+    if (isNewChat && !recipientUser) {
+      dispatch(showToast({ message: 'No recipient selected', type: 'error' }));
+      return;
+    }
+  
     setIsSending(true);
     const tempId = `${user.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
+  
+    let formData = new FormData();
+    if (message.trim()) formData.append('content', message.trim());
+    if (selectedFile) formData.append('file', selectedFile);
+    formData.append('tempId', tempId);
+    if (isNewChat) formData.append('recipient_username', recipientUser.username);
+    if (!isNewChat) formData.append('room_id', currentRoomId);
+  
     const optimisticMessage = {
       tempId,
+      id: tempId,
       content: message.trim(),
       sender: user,
       sent_at: new Date().toISOString(),
@@ -1152,19 +1235,27 @@ function Message() {
       file_url: selectedFile ? URL.createObjectURL(selectedFile) : null,
       file_type: selectedFile && selectedFile.type.startsWith('audio/') ? 'audio' : 'other',
     };
-
+  
     setMessages((prev) => [...prev.filter((msg) => msg.tempId !== tempId), optimisticMessage]);
-
+  
     try {
-      const formData = new FormData();
-      if (message.trim()) formData.append('content', message.trim());
-      if (selectedFile) formData.append('file', selectedFile);
-      formData.append('tempId', tempId);
-
-      await axiosInstance.post(`/chatrooms/${selectedRoom.id}/send-message/`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
+      const response = await axiosInstance.post(
+        '/chatrooms/send-message/',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+  
+      console.log('Server response for sent message:', response.data);
+  
+      if (isNewChat) {
+        // Update chat rooms and navigate to the new room
+        const newRoom = response.data.room;
+        setChatRooms((prev) => [newRoom, ...prev]);
+        setSelectedRoom(newRoom);
+        setRecipientUser(null);
+        navigate(`/messages/${newRoom.id}`);
+      }
+  
       setMessage('');
       setSelectedFile(null);
       setFilePreview(null);
@@ -1172,7 +1263,11 @@ function Message() {
       setShowEmojiPicker(false);
     } catch (error) {
       console.error('Error sending message:', error);
-      dispatch(showToast({ message: 'Failed to send message', type: 'error' }));
+      let errorMessage = 'Failed to send message';
+      if (error.response) {
+        errorMessage = error.response.data.error || errorMessage;
+      }
+      dispatch(showToast({ message: errorMessage, type: 'error' }));
       setMessages((prev) => prev.filter((msg) => msg.tempId !== tempId));
     } finally {
       setIsSending(false);
@@ -1180,21 +1275,30 @@ function Message() {
   };
 
   const handleStartChat = async (username) => {
-    try {
-      const response = await axiosInstance.post('/chatrooms/start-chat/', { username });
-      const newRoom = response.data;
-      setSelectedRoom(newRoom);
-      setChatRooms((prev) => (!prev.some((r) => String(r.id) === String(newRoom.id)) ? [newRoom, ...prev] : prev));
-      navigate(`/messages/${newRoom.id}`);
-      const msgs = await getMessages(newRoom.id);
-      setMessages(msgs.map((msg) => ({
-        ...msg,
-        sender: { ...msg.sender, profile_picture: msg.sender.profile_picture || null },
-        key: `${msg.id}-${msg.sent_at}`,
-        file_url: msg.file_url || null,
-      })) || []);
+  try {
+      const response = await axiosInstance.get(`/chatrooms/search-users/?q=${encodeURIComponent(username)}`);
+      const userData = response.data.find((u) => u.username === username);
+      if (!userData) {
+        dispatch(showToast({ message: 'User not found', type: 'error' }));
+        return;
+      }
+      // Check if a chat room already exists
+      const existingRoom = chatRooms.find((room) =>
+        !room.is_group && room.users.some((u) => u.username === username)
+      );
+      if (existingRoom) {
+        setRecipientUser(null);
+        setSelectedRoom(existingRoom);
+        navigate(`/messages/${existingRoom.id}`);
+      } else {
+        setRecipientUser(userData); // Set recipient without creating a room
+        setSelectedRoom(null);
+        navigate(`/messages/new/${username}`); // Navigate to a temporary route
+      }
+      setSearchTerm('');
+      setSearchResults([]);
     } catch (error) {
-      console.error('Error starting chat:', error);
+      console.error('Error searching user:', error);
       dispatch(showToast({ message: 'Failed to start chat', type: 'error' }));
     }
   };
@@ -1376,7 +1480,10 @@ function Message() {
 
   const getProfilePictureUrl = (picture) => {
     if (!picture) return '/default-profile.png';
-    return picture.startsWith('http') ? picture : `${CLOUDINARY_ENDPOINT}${picture}`;
+    if (typeof picture !== 'string') return '/default-profile.png';
+    if (picture.startsWith('http')) return picture;
+    const cleanPath = picture.replace(/^\/+/, '');
+    return `${CLOUDINARY_ENDPOINT}/${cleanPath}`;
   };
 
   return (
@@ -1390,352 +1497,361 @@ function Message() {
             </Suspense>
           </div>
           <div className="lg:col-span-10">
-            <div className="bg-white rounded-xl shadow-lg h-[85vh] flex">
-              <div className="grid grid-cols-1 md:grid-cols-3 w-full h-full">
-                <div className="md:col-span-1 border-r border-gray-200 overflow-y-auto bg-white">
-                  <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-                    <h2 className="text-xl font-bold text-gray-800 mb-3">Messages</h2>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Enter username to chat..."
-                        className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
-                        value={searchTerm}
-                        onChange={(e) => {
-                          setSearchTerm(e.target.value);
-                          handleSearchUsers(e.target.value);
-                        }}
-                      />
-                      <IoSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                      {searchResults.length > 0 && (
-                        <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
-                          {searchResults.map((u) => (
-                            <div
-                              key={u.id}
-                              className="p-2 hover:bg-gray-100 cursor-pointer flex justify-between"
-                              onClick={() => {
-                                handleStartChat(u.username);
-                                setSearchResults([]);
-                                setSearchTerm('');
-                              }}
-                            >
-                              <img src={`${CLOUDINARY_ENDPOINT}${u?.profile_picture}`} className='w-5 object-contain rounded-full'/>
-                              {u.username}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => setShowGroupModal(true)}
-                      className="mt-2 w-full bg-[#198754] text-white py-2 rounded-full hover:bg-[#157a47]"
-                    >
-                      Create Group
-                    </button>
-                  </div>
-                  <div className="overflow-y-auto h-[calc(85vh-160px)]">
-                    {isLoading ? (
-                      <Loader />
-                    ) : chatRooms.length ? (
-                      chatRooms.map((room) => {
-                        const otherUser = !room.is_group
-                          ? room.users.find((u) => String(u.id) !== String(user?.id))
-                          : null;
-                        const lastMessage = room.last_message?.is_deleted
-                          ? '[Deleted]'
-                          : room.last_message?.file_url
-                          ? '[Media]'
-                          : room.last_message?.content || 'No messages yet';
-                        const unreadCount = room.unread_count || 0;
-
-                        return (
-                          <div
-                            key={room.id}
-                            className={`p-4 border-b border-gray-100 hover:bg-orange-50 cursor-pointer ${
-                              String(selectedRoom?.id) === String(room.id) ? 'bg-orange-100' : ''
-                            }`}
-                            onClick={() => navigate(`/messages/${room.id}`)}
-                          >
-                            <div className="flex items-center space-x-3">
+              <div className="bg-white rounded-xl shadow-lg h-[85vh] flex">
+                  <div className="grid grid-cols-1 md:grid-cols-3 w-full h-full">
+                      <div className="md:col-span-1 border-r border-gray-200 overflow-y-auto bg-white">
+                          <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+                              <h2 className="text-xl font-bold text-gray-800 mb-3">Messages</h2>
                               <div className="relative">
-                                <img
-                                  src={room.is_group ? groupIcon : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png')}
-                                  alt={room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
-                                  className="w-12 h-12 rounded-full object-cover border border-gray-200 shadow-sm"
-                                  onError={(e) => (e.target.src = room.is_group ? groupIcon : '/default-profile.png')}
-                                />
-                                {!room.is_group && (
-                                  <div
-                                    className={`absolute bottom-0 right-0 w-3 h-3 ${
-                                      otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
-                                    } rounded-full border-2 border-white`}
-                                  ></div>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h3 className="text-sm font-semibold text-gray-800 truncate">
-                                  {room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
-                                </h3>
-                                <p className="text-sm text-gray-600 truncate">{lastMessage}</p>
-                                {unreadCount > 0 && (
-                                  <span className="text-xs bg-red-500 text-white rounded-full px-2 py-1">{unreadCount}</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p className="text-center text-gray-600 mt-4">No chats yet</p>
-                    )}
-                  </div>
-                </div>
-                <div className="md:col-span-2 flex flex-col h-full">
-                  {selectedRoom ? (
-                    <>
-                      <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center sticky top-0 z-10 shadow-sm shrink-0">
-                        <div className="flex items-center space-x-3">
-                          <div className="relative">
-                            <img
-                              src={
-                                selectedRoom.is_group
-                                  ? groupIcon
-                                  : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}/${otherUser.profile_picture}` : '/default-profile.png')
-                              }
-                              alt={selectedRoom.is_group ? selectedRoom.group_name : otherUser?.username || 'User'}
-                              className="w-10 h-10 rounded-full object-cover border border-gray-200"
-                              onError={(e) => (e.target.src = selectedRoom.is_group ? groupIcon : '/default-profile.png')}
-                            />
-                            {!selectedRoom.is_group && (
-                              <div
-                                className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${
-                                  otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
-                                } rounded-full border-2 border-white`}
-                              ></div>
-                            )}
-                          </div>
-                          <div>
-                            <Link to={`/user/${otherUser?.username}`}>
-                              <h3 className="font-semibold text-gray-800">
-                                {selectedRoom.is_group ? selectedRoom.group_name : otherUser?.username || 'Unknown User'}
-                              </h3>
-                            </Link>
-                            {!selectedRoom.is_group ? (
-                              <p className={`text-xs ${otherUser?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
-                                {otherUser?.is_online ? 'Online' : `Last seen ${formatLastActive(otherUser?.last_seen)}`}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-gray-500">{selectedRoom.users.length} members</p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          {!selectedRoom.is_group && (
-                            <>
-                              <button
-                                onClick={() => startCallFn('audio')}
-                                className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
-                                title="Audio call"
-                                disabled={callState}
-                              >
-                                <IoCall size={20} />
-                              </button>
-                              <button
-                                onClick={() => startCallFn('video')}
-                                className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
-                                title="Video call"
-                                disabled={callState}
-                              >
-                                <IoVideocam size={20} />
-                              </button>
-                            </>
-                          )}
-                          {selectedRoom.is_group && (
-                            <button
-                              onClick={() => setShowManageGroupModal(true)}
-                              className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
-                              title="Manage group"
-                            >
-                              <IoInformationCircle size={20} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div
-                        ref={messagesContainerRef}
-                        className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-orange-50 to-white"
-                        style={{ maxHeight: 'calc(85vh - 137px)' }}
-                      >
-                        {isLoading ? (
-                          <Loader />
-                        ) : messages.length ? (
-                          messages.map((msg) => (
-                            <div
-                              key={msg.key}
-                              className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
-                            >
-                              {String(msg?.sender?.id) !== String(user?.id) && (
-                                <Link to={`/user/${msg?.sender?.username}`}>
-                                  <img
-                                    src={
-                                      msg?.sender?.profile_picture?.startsWith('http')
-                                        ? `${msg?.sender?.profile_picture}`
-                                        : `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture || 'default-profile.png'}`
-                                    }
-                                    alt={msg?.sender?.username || 'Unknown'}
-                                    className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
-                                    onError={(e) => (e.target.src = '/default-profile.png')}
+                                  <input
+                                      type="text"
+                                      placeholder="Enter username to chat..."
+                                      className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-[#198754]"
+                                      value={searchTerm}
+                                      onChange={(e) => {
+                                          setSearchTerm(e.target.value);
+                                          handleSearchUsers(e.target.value);
+                                      }}
                                   />
-                                </Link>
+                                  <IoSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
+                                  {searchResults.length > 0 && (
+                                      <div className="absolute bg-white shadow-lg rounded-lg mt-2 w-full max-h-40 overflow-y-auto z-20">
+                                          {searchResults.map((u) => (
+                                              <div
+                                                  key={u.id}
+                                                  className="p-2 hover:bg-gray-100 cursor-pointer flex justify-between"
+                                                  onClick={() => {
+                                                      handleStartChat(u.username);
+                                                  }}
+                                              >
+                                                  <img src={`${CLOUDINARY_ENDPOINT}${u?.profile_picture}`} className='w-5 object-contain rounded-full'/>
+                                                  {u.username}
+                                              </div>
+                                          ))}
+                                      </div>
+                                  )}
+                              </div>
+                              <button
+                                  onClick={() => setShowGroupModal(true)}
+                                  className="mt-2 w-full bg-[#198754] text-white py-2 rounded-full hover:bg-[#157a47]"
+                              >
+                                  Create Group
+                              </button>
+                          </div>
+                          <div className="overflow-y-auto h-[calc(85vh-160px)]">
+                              {isLoading ? (
+                                  <Loader />
+                              ) : chatRooms.length ? (
+                                  chatRooms.map((room) => {
+                                      const otherUser = !room.is_group
+                                          ? room.users.find((u) => String(u.id) !== String(user?.id))
+                                          : null;
+                                      const lastMessage = room.last_message?.is_deleted
+                                          ? '[Deleted]'
+                                          : room.last_message?.file_url
+                                          ? '[Media]'
+                                          : room.last_message?.content || 'No messages yet';
+                                      const unreadCount = room.unread_count || 0;
+
+                                      return (
+                                          <div
+                                              key={room.id}
+                                              className={`p-4 border-b border-gray-100 hover:bg-orange-50 cursor-pointer ${
+                                                  String(selectedRoom?.id) === String(room.id) ? 'bg-orange-100' : ''
+                                              }`}
+                                              onClick={() => {
+                                                  setRecipientUser(null);
+                                                  navigate(`/messages/${room.id}`);
+                                              }}
+                                          >
+                                              <div className="flex items-center space-x-3">
+                                                  <div className="relative">
+                                                      <img
+                                                          src={room.is_group ? groupIcon : (otherUser?.profile_picture ? `${CLOUDINARY_ENDPOINT}${otherUser.profile_picture}` : '/default-profile.png')}
+                                                          alt={room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
+                                                          className="w-12 h-12 rounded-full object-cover border border-gray-200 shadow-sm"
+                                                          onError={(e) => (e.target.src = room.is_group ? groupIcon : '/default-profile.png')}
+                                                      />
+                                                      {!room.is_group && (
+                                                          <div
+                                                              className={`absolute bottom-0 right-0 w-3 h-3 ${
+                                                                  otherUser?.is_online ? 'bg-green-500' : 'bg-gray-500'
+                                                              } rounded-full border-2 border-white`}
+                                                          ></div>
+                                                      )}
+                                                  </div>
+                                                  <div className="flex-1 min-w-0">
+                                                      <h3 className="text-sm font-semibold text-gray-800 truncate">
+                                                          {room.is_group ? room.group_name : otherUser?.username || 'Unknown'}
+                                                      </h3>
+                                                      <p className="text-sm text-gray-600 truncate">{lastMessage}</p>
+                                                      {unreadCount > 0 && (
+                                                          <span className="text-xs bg-red-500 text-white rounded-full px-2 py-1">{unreadCount}</span>
+                                                      )}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      );
+                                  })
+                              ) : (
+                                  <p className="text-center text-gray-600 mt-4">No chats yet</p>
                               )}
-                              <div className="max-w-[75%] relative group">
-                                <div
-                                  className={`rounded-2xl p-3 shadow-sm ${
-                                    String(msg?.sender?.id) === String(user?.id)
-                                      ? 'bg-[#198754] text-white rounded-tr-none'
-                                      : 'bg-white text-gray-800 rounded-tl-none'
-                                  } ${msg.file_type === 'audio' || msg.file_url?.match(/\.(mp3|wav|ogg|webm)$/) ? 'min-w-[250px]' : ''}`}
-                                >
-                                  {renderMessageContent(msg)}
-                                  <div
-                                    className={`text-xs mt-1 flex items-center ${
-                                      String(msg?.sender?.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'
-                                    }`}
-                                  >
-                                    {formatMessageTime(msg?.sent_at)}
-                                    {String(msg?.sender?.id) === String(user?.id) && !msg.is_call && (
-                                      <span className="ml-1">
-                                        {msg?.is_read ? '✓✓' : '✓'}
-                                        {msg?.is_read && msg?.read_at && (
-                                          <span className="text-xs text-gray-300 ml-1">
-                                            {formatMessageTime(msg?.read_at)}
-                                          </span>
-                                        )}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && !msg.is_call && msg.id && (
-                                  <button
-                                    onClick={() => handleDeleteMessage(msg.id)}
-                                    className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                    title="Delete message"
-                                  >
-                                    <IoTrash size={16} />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-center text-gray-600 mt-4">No messages yet</p>
-                        )}
-                        <div ref={messagesEndRef} />
-                      </div>
-                      <div className="p-4 border-t border-gray-200 bg-white shrink-0">
-                        {isSending && <div className="text-gray-500 text-sm mb-2">Sending...</div>}
-                        {filePreview && (
-                          <div className="mb-2">
-                            {selectedFile && selectedFile.type.startsWith('audio/') ? (
-                              <div className="flex items-center space-x-2">
-                                <audio controls src={filePreview} className="w-64 h-12" />
-                                <button
-                                  onClick={() => {
-                                    setSelectedFile(null);
-                                    setFilePreview(null);
-                                  }}
-                                  className="text-red-500 text-sm"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center space-x-2">
-                                <img src={filePreview} alt="Selected file" className="max-h-20 w-auto rounded-lg" />
-                                <button
-                                  onClick={() => {
-                                    setSelectedFile(null);
-                                    setFilePreview(null);
-                                  }}
-                                  className="text-red-500 text-sm"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            )}
                           </div>
-                        )}
-                        {showEmojiPicker && (
-                          <div ref={emojiPickerRef} className="absolute bottom-20 right-20 z-10 shadow-xl rounded-lg">
-                            <Suspense fallback={<div>Loading emojis...</div>}>
-                              <EmojiPicker onEmojiClick={handleEmojiClick} />
-                            </Suspense>
-                          </div>
-                        )}
-                        <div className="flex items-center space-x-3">
-                          <button
-                            onClick={() => fileInputRef.current.click()}
-                            className="text-gray-500 hover:text-[#198754] p-2 rounded-full hover:bg-gray-100"
-                            title="Send media"
-                          >
-                            <IoImage size={22} />
-                          </button>
-                          <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            accept="image/*,audio/*,video/*"
-                            onChange={handleFileSelected}
-                          />
-                          <div className="flex items-center space-x-1">
-                            <button
-                              onClick={isRecording ? stopRecording : startRecording}
-                              className={`p-2 rounded-full ${isRecording ? 'text-red-500' : 'text-gray-500 hover:text-[#198754]'} hover:bg-gray-100`}
-                              title={isRecording ? 'Stop recording' : 'Record audio'}
-                            >
-                              {isRecording ? <IoMicOff size={24} /> : <IoMic size={24} />}
-                            </button>
-                            {isRecording && (
-                              <span className="text-red-500 text-sm font-semibold">{formatCallDuration(recordingTime)}</span>
-                            )}
-                          </div>
-                          <textarea
-                            className="flex-1 border border-gray-300 rounded-full px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-[#198754] resize-none"
-                            placeholder="Message..."
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
-                            rows={1}
-                            style={{ maxHeight: '100px' }}
-                          />
-                          <button
-                            onClick={() => setShowEmojiPicker((prev) => !prev)}
-                            className="text-gray-500 hover:text-[#198754] p-2"
-                            title="Emoji"
-                          >
-                            <BsEmojiSmile size={20} />
-                          </button>
-                          <button
-                            onClick={handleSendMessage}
-                            className="p-3 rounded-full bg-[#198754] text-white hover:bg-[#157a47]"
-                            title="Send"
-                          >
-                            <IoSend size={20} />
-                          </button>
-                        </div>
                       </div>
-                    </>
-                  ) : (
-                    <div className="h-full flex justify-center items-center bg-gradient-to-b from-orange-50 to-white">
-                      <div className="text-center p-6 max-w-md">
-                        <h3 className="text-xl font-bold text-gray-800">Start a Chat</h3>
-                        <p className="text-gray-600 mt-2">Enter a username or create a group to begin</p>
-                      </div>
-                    </div>
+                      <div className="md:col-span-2 flex flex-col h-full">
+                      {selectedRoom || recipientUser ? (
+  <>
+    <div className="p-4 border-b border-gray-200 bg-white flex justify-between items-center sticky top-0 z-10 shadow-sm shrink-0">
+      <div className="flex items-center space-x-3">
+        <div className="relative">
+          <img
+            src={
+              selectedRoom?.is_group
+                ? groupIcon
+                : (recipientUser?.profile_picture || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.profile_picture
+                    ? `${CLOUDINARY_ENDPOINT}/${recipientUser?.profile_picture || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.profile_picture}`
+                    : '/default-profile.png')
+            }
+            alt={selectedRoom?.is_group ? selectedRoom.group_name : recipientUser?.username || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username || 'User'}
+            className="w-10 h-10 rounded-full object-cover border border-gray-200"
+            onError={(e) => (e.target.src = selectedRoom?.is_group ? groupIcon : '/default-profile.png')}
+          />
+          {!selectedRoom?.is_group && (
+            <div
+              className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${
+                recipientUser?.is_online || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.is_online ? 'bg-green-500' : 'bg-gray-500'
+              } rounded-full border-2 border-white`}
+            ></div>
+          )}
+        </div>
+        <div>
+          <Link to={`/user/${recipientUser?.username || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username}`}>
+            <h3 className="font-semibold text-gray-800">
+              {selectedRoom?.is_group
+                ? selectedRoom.group_name
+                : recipientUser?.username || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.username || 'Unknown User'}
+            </h3>
+          </Link>
+          {!selectedRoom?.is_group ? (
+            <p className={`text-xs ${recipientUser?.is_online || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.is_online ? 'text-green-500' : 'text-gray-500'}`}>
+              {(recipientUser?.is_online || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.is_online)
+                ? 'Online'
+                : `Last seen ${formatLastActive(recipientUser?.last_seen || selectedRoom?.users.find((u) => String(u.id) !== String(user.id))?.last_seen)}`}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500">{selectedRoom.users.length} members</p>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center space-x-3">
+        {!selectedRoom?.is_group && (
+          <>
+            <button
+              onClick={() => startCallFn('audio')}
+              className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+              title="Audio call"
+              disabled={callState}
+            >
+              <IoCall size={20} />
+            </button>
+            <button
+              onClick={() => startCallFn('video')}
+              className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+              title="Video call"
+              disabled={callState}
+            >
+              <IoVideocam size={20} />
+            </button>
+          </>
+        )}
+        {selectedRoom?.is_group && (
+          <button
+            onClick={() => setShowManageGroupModal(true)}
+            className="text-gray-600 hover:text-gray-800 p-2 rounded-full hover:bg-gray-100"
+            title="Manage group"
+          >
+            <IoInformationCircle size={20} />
+          </button>
+        )}
+      </div>
+    </div>
+    <div
+      ref={messagesContainerRef}
+      className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-orange-50 to-white"
+      style={{ maxHeight: 'calc(85vh - 137px)' }}
+    >
+      {isLoading ? (
+        <Loader />
+      ) : selectedRoom && messages.length ? (
+        messages.map((msg) => (
+          <div
+            key={msg.key}
+            className={`flex ${String(msg?.sender?.id) === String(user?.id) ? 'justify-end' : 'justify-start'} mb-4`}
+          >
+            {String(msg?.sender?.id) !== String(user?.id) && (
+              <Link to={`/user/${msg?.sender?.username}`}>
+                <img
+                  src={
+                    msg?.sender?.profile_picture?.startsWith('http')
+                      ? `${msg?.sender?.profile_picture}`
+                      : `${CLOUDINARY_ENDPOINT}/${msg?.sender?.profile_picture || 'default-profile.png'}`
+                  }
+                  alt={msg?.sender?.username || 'Unknown'}
+                  className="w-8 h-8 rounded-full object-cover border border-gray-200 mr-2"
+                  onError={(e) => (e.target.src = '/default-profile.png')}
+                />
+              </Link>
+            )}
+            <div className="max-w-[75%] relative group">
+              <div
+                className={`rounded-2xl p-3 shadow-sm ${
+                  String(msg?.sender?.id) === String(user?.id)
+                    ? 'bg-[#198754] text-white rounded-tr-none'
+                    : 'bg-white text-gray-800 rounded-tl-none'
+                } ${msg.file_type === 'audio' || msg.file_url?.match(/\.(mp3|wav|ogg|webm)$/) ? 'min-w-[250px]' : ''}`}
+              >
+                {renderMessageContent(msg)}
+                <div
+                  className={`text-xs mt-1 flex items-center ${
+                    String(msg?.sender?.id) === String(user?.id) ? 'text-white justify-end' : 'text-gray-500'
+                  }`}
+                >
+                  {formatMessageTime(msg?.sent_at)}
+                  {String(msg?.sender?.id) === String(user?.id) && !msg.is_call && (
+                    <span className="ml-1">
+                      {msg?.is_read ? '✓✓' : '✓'}
+                      {msg?.is_read && msg?.read_at && (
+                        <span className="text-xs text-gray-300 ml-1">
+                          {formatMessageTime(msg?.read_at)}
+                        </span>
+                      )}
+                    </span>
                   )}
                 </div>
               </div>
+              {String(msg?.sender?.id) === String(user?.id) && !msg?.is_deleted && !msg.is_call && msg.id && (
+                <button
+                  onClick={() => handleDeleteMessage(msg.id)}
+                  className="absolute top-0 right-0 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                  title="Delete message"
+                >
+                  <IoTrash size={16} />
+                </button>
+              )}
             </div>
+          </div>
+        ))
+      ) : (
+        <p className="text-center text-gray-600 mt-4">
+          {recipientUser ? 'Send a message to start the chat' : 'No messages yet'}
+        </p>
+      )}
+      <div ref={messagesEndRef} />
+    </div>
+    <div className="p-4 border-t border-gray-200 bg-white shrink-0">
+      {isSending && <div className="text-gray-500 text-sm mb-2">Sending...</div>}
+      {filePreview && (
+        <div className="mb-2">
+          {selectedFile && selectedFile.type.startsWith('audio/') ? (
+            <div className="flex items-center space-x-2">
+              <audio controls src={filePreview} className="w-64 h-12" />
+              <button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setFilePreview(null);
+                }}
+                className="text-red-500 text-sm"
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-2">
+              <img src={filePreview} alt="Selected file" className="max-h-20 w-auto rounded-lg" />
+              <button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setFilePreview(null);
+                }}
+                className="text-red-500 text-sm"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {showEmojiPicker && (
+        <div ref={emojiPickerRef} className="absolute bottom-20 right-20 z-10 shadow-xl rounded-lg">
+          <Suspense fallback={<div>Loading emojis...</div>}>
+            <EmojiPicker onEmojiClick={handleEmojiClick} />
+          </Suspense>
+        </div>
+      )}
+      <div className="flex items-center space-x-3">
+        <button
+          onClick={() => fileInputRef.current.click()}
+          className="text-gray-500 hover:text-[#198754] p-2 rounded-full hover:bg-gray-100"
+          title="Send media"
+        >
+          <IoImage size={22} />
+        </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          accept="image/*,audio/*,video/*"
+          onChange={handleFileSelected}
+        />
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`p-2 rounded-full ${isRecording ? 'text-red-500' : 'text-gray-500 hover:text-[#198754]'} hover:bg-gray-100`}
+            title={isRecording ? 'Stop recording' : 'Record audio'}
+          >
+            {isRecording ? <IoMicOff size={24} /> : <IoMic size={24} />}
+          </button>
+          {isRecording && (
+            <span className="text-red-500 text-sm font-semibold">{formatCallDuration(recordingTime)}</span>
+          )}
+        </div>
+        <textarea
+          className="flex-1 border border-gray-300 rounded-full px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-[#198754] resize-none"
+          placeholder="Message..."
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
+          rows={1}
+          style={{ maxHeight: '100px' }}
+        />
+        <button
+          onClick={() => setShowEmojiPicker((prev) => !prev)}
+          className="text-gray-500 hover:text-[#198754] p-2"
+          title="Emoji"
+        >
+          <BsEmojiSmile size={20} />
+        </button>
+        <button
+          onClick={handleSendMessage}
+          className="p-3 rounded-full bg-[#198754] text-white hover:bg-[#157a47]"
+          title="Send"
+        >
+          <IoSend size={20} />
+        </button>
+      </div>
+    </div>
+  </>
+) : (
+  <div className="h-full flex justify-center items-center bg-gradient-to-b from-orange-50 to-white">
+    <div className="text-center p-6 max-w-md">
+      <h3 className="text-xl font-bold text-gray-800">Start a Chat</h3>
+      <p className="text-gray-600 mt-2">Enter a username or create a group to begin</p>
+    </div>
+  </div>
+)}
+                      </div>
+                  </div>
+              </div>
           </div>
         </div>
       </div>

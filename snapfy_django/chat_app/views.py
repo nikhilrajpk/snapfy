@@ -78,11 +78,27 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             if other_user == request.user:
                 return Response({"error": "Cannot chat with yourself"}, status=status.HTTP_400_BAD_REQUEST)
             
-            chat_room = ChatRoom.objects.filter(users=request.user).filter(users=other_user).first()
+            # Check if a chat room already exists
+            chat_room = ChatRoom.objects.filter(users=request.user).filter(users=other_user).filter(is_group=False).first()
             if not chat_room:
+                # Create a new chat room
                 chat_room = ChatRoom.objects.create()
                 chat_room.users.add(request.user, other_user)
-            return Response(ChatRoomSerializer(chat_room, context={'request': request}).data, status=status.HTTP_201_CREATED)
+                cache.delete(f"my_chats_{request.user.id}")
+                cache.delete(f"my_chats_{other_user.id}")
+            
+            serializer = ChatRoomSerializer(chat_room, context={'request': request})
+            return Response({
+                "room_id": str(chat_room.id),
+                "room": serializer.data,
+                "user": {
+                    "id": str(other_user.id),
+                    "username": other_user.username,
+                    "profile_picture": other_user.profile_picture.url if other_user.profile_picture else None,
+                    "is_online": other_user.is_online,
+                    "last_seen": other_user.last_seen
+                }
+            }, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -207,19 +223,55 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         cache.set(cache_key, data, timeout=300)  # Cache for 5 minutes
         return Response(data)
 
-    @action(detail=True, methods=['post'], url_path='send-message')
-    def send_message(self, request, pk=None):
-        chat_room = self.get_object()
-        if request.user not in chat_room.users.all():
-            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
-
+    @action(detail=False, methods=['post'], url_path='send-message')
+    def send_message(self, request):
+        logger.info(f"Received request to send-message: {request.data}")
+        recipient_username = request.data.get('recipient_username')
         content = request.data.get('content', '')
         file = request.FILES.get('file')
         temp_id = request.data.get('tempId')
 
+        if not content and not file:
+            logger.warning("No content or file provided in request")
+            return Response({"error": "No content or file provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Handle new chat (when recipient_username is provided)
+        if recipient_username:
+            logger.info(f"Creating new chat with recipient: {recipient_username}")
+            try:
+                other_user = User.objects.get(username=recipient_username)
+                if other_user == request.user:
+                    logger.warning("User attempted to send message to themselves")
+                    return Response({"error": "Cannot send message to yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Check if a chat room already exists
+                chat_room = ChatRoom.objects.filter(users=request.user).filter(users=other_user).filter(is_group=False).first()
+                if not chat_room:
+                    logger.info("No existing chat room found, creating new one")
+                    chat_room = ChatRoom.objects.create()
+                    chat_room.users.add(request.user, other_user)
+                    cache.delete(f"my_chats_{request.user.id}")
+                    cache.delete(f"my_chats_{other_user.id}")
+            except User.DoesNotExist:
+                logger.error(f"Recipient not found: {recipient_username}")
+                return Response({"error": "Recipient not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Handle existing chat
+            logger.info("Processing message for existing chat")
+            try:
+                chat_room = ChatRoom.objects.get(id=request.data.get('room_id'))
+                if request.user not in chat_room.users.all():
+                    logger.warning(f"User {request.user.id} not authorized for room {chat_room.id}")
+                    return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+            except ChatRoom.DoesNotExist:
+                logger.error(f"Chat room not found: {request.data.get('room_id')}")
+                return Response({"error": "Chat room not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        logger.info("Encrypting message content")
         fernet = Fernet(chat_room.encryption_key.encode())
         encrypted_content = fernet.encrypt(content.encode()).decode() if content else ''
 
+        logger.info("Creating new message")
         message = Message.objects.create(
             room=chat_room,
             sender=request.user,
@@ -232,7 +284,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
         message_data['content'] = content
         message_data['encrypted_content'] = encrypted_content
         message_data['id'] = str(message.id)
-        message_data['room'] = str(chat_room.id)
+        message_data['room_id'] = str(chat_room.id)
         message_data['sender'] = {
             'id': str(request.user.id),
             'username': request.user.username,
@@ -242,13 +294,12 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             message_data['tempId'] = temp_id
         if file:
             message_data['file_url'] = message.file.url if message.file else None
-            message_data['file_type'] = 'audio' if file.name.endswith(('.mp3', '.wav', '.ogg', '.webm')) else 'other'
+            message_data['file_type'] = 'audio' if file and file.name.endswith(('.mp3', '.wav', '.ogg', '.webm')) else 'other'
 
         chat_room.last_message_at = message.sent_at
-        chat_room.unread_count = chat_room.messages.filter(is_read=False).exclude(sender=request.user).count()
         chat_room.save()
-        message_data['unread_count'] = chat_room.unread_count
 
+        logger.info(f"Broadcasting message to users in room {chat_room.id}")
         channel_layer = get_channel_layer()
         if channel_layer:
             for user in chat_room.users.all():
@@ -265,7 +316,15 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                         "unread_count": user_specific_unread_count
                     }
                 )
-        return Response(message_data, status=status.HTTP_201_CREATED)
+            for user in chat_room.users.all():
+                cache.delete(f"my_chats_{user.id}")
+                cache.delete(f"messages_{chat_room.id}_{user.id}")
+
+        logger.info(f"Message sent successfully, room_id: {chat_room.id}, message_id: {message.id}")
+        return Response({
+            "message": message_data,
+            "room": ChatRoomSerializer(chat_room, context={'request': request}).data
+        }, status=status.HTTP_201_CREATED)
     
     
     @action(detail=True, methods=['post'], url_path='delete-message')

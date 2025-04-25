@@ -197,23 +197,34 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         temp_id = data.get('tempId')
 
         if not room_id or not content:
+            logger.error(f"Invalid message data: room_id={room_id}, content={content}")
             await self.send(text_data=json.dumps({"error": "Room ID and content required"}))
             return
 
         if not await self.is_user_in_room(room_id):
+            logger.error(f"User {self.user_id} not authorized for room {room_id}")
             await self.send(text_data=json.dumps({"error": "Not authorized for this room"}))
             return
 
         message_data = await self.save_message(room_id, content, temp_id)
+        logger.info(f"Saved message for room {room_id}: {message_data}")
+
         room_users = await self.get_room_users(room_id)
         for user in room_users:
+            user_specific_unread_count = (
+                0 if user == self.user
+                else await database_sync_to_async(
+                    lambda: Message.objects.filter(room_id=room_id, is_read=False).exclude(sender=user).count()
+                )()
+            )
+            logger.info(f"Broadcasting to user {user.id} in room {room_id}, unread_count={user_specific_unread_count}")
             await self.channel_layer.group_send(
                 f"user_{user.id}",
                 {
                     "type": "chat_message",
                     "message": message_data,
                     "room_id": str(room_id),
-                    "unread_count": message_data.get('unread_count', 0)
+                    "unread_count": user_specific_unread_count
                 }
             )
             
@@ -316,13 +327,30 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         }
 
     async def chat_message(self, event):
-        message_data = {
-            "type": "chat_message",
-            "message": event["message"],
+        room_id = event["room_id"]
+        message = event["message"]
+        unread_count = event.get("unread_count", 0)
+
+        if await self.is_user_in_room(room_id):
+            await self.send(text_data=json.dumps({
+                "type": "chat_message",
+                "message": message,
+                "room_id": room_id,
+                "unread_count": unread_count
+            }))
+        else:
+            await self.send(text_data=json.dumps({
+                "type": "chat_list_update",
+                "room_id": room_id,
+                "unread_count": unread_count
+            }))
+            
+    async def chat_list_update(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "chat_list_update",
             "room_id": event["room_id"],
-            "unread_count": event.get("unread_count", 0)  # Default to 0 if missing
-        }
-        await self.send(text_data=json.dumps(message_data))
+            "unread_count": event["unread_count"]
+        }))
 
     async def mark_as_read(self, event):
         await self.send(text_data=json.dumps({
