@@ -1,4 +1,4 @@
-#🌟 Snapfy - A Social Media Platform
+🌟 # Snapfy - A Social Media Platform
 Snapfy is a modern, full-stack social media platform built with Django and React, offering a rich feature set including real-time messaging, content sharing (posts, stories, reels), background task handling, cloud media storage, and advanced admin analytics.
 
 🚀 Features
@@ -190,12 +190,6 @@ Register a new user from the frontend.
 Check backend logs to capture the OTP.
 Complete email verification and explore features like posting, exploring, real-time messaging (private/group chats, read receipts, typing indicators, media attachments), and admin tools.
 
-
-📜 License
-This project is licensed under the MIT License.
-
-🤝 Contributing
-Pull requests are welcome! For major changes, open an issue first to discuss.
 
 ✨ Acknowledgments
 
