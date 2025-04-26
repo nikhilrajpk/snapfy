@@ -1,9 +1,8 @@
-// notifications
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Link, useNavigate } from 'react-router-dom';
 import axiosInstance from '../../axiosInstance';
-import { Bell, User, AtSign, Clock, CheckCheck, Trash2, ArrowLeft } from 'lucide-react';
+import { Bell, User, AtSign, Clock, CheckCheck, Trash2, ArrowLeft, MessageCircle } from 'lucide-react';
 import { showToast } from '../../redux/slices/toastSlice';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import PostPopup from '../../Components/Post/PostPopUp';
@@ -14,7 +13,8 @@ const NotificationType = {
   MENTION: 'mention',
   LIKE: 'like',
   COMMENT: 'comment',
-  CALL: 'call', // Add call type
+  CALL: 'call',
+  NEW_CHAT: 'new_chat',
 };
 
 const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) => {
@@ -34,7 +34,7 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
   };
 
   const data = JSON.parse(notification.message);
-  const { type, from_user, content, post_id, call_status } = data;
+  const { type, from_user, content, post_id, call_status, room_id } = data;
 
   const getIcon = () => {
     switch (type) {
@@ -83,6 +83,8 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
             />
           </svg>
         );
+      case NotificationType.NEW_CHAT:
+        return <MessageCircle className="text-purple-500" size={16} />;
       default:
         return <Bell className="text-gray-500" size={16} />;
     }
@@ -125,6 +127,12 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
             {call_status === 'missed' ? 'missed your call' : 'called you'}
           </>
         );
+      case NotificationType.NEW_CHAT:
+        return (
+          <>
+            <span className="font-semibold text-gray-900">{from_user.username}</span> started a chat with you
+          </>
+        );
       default:
         return <span className="text-gray-700">New notification</span>;
     }
@@ -139,7 +147,8 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
       case NotificationType.COMMENT:
         return null; // Handled by onOpenPost
       case NotificationType.CALL:
-        return `/messages/${data.room_id}`;
+      case NotificationType.NEW_CHAT:
+        return `/messages/${room_id}`;
       default:
         return '#';
     }
@@ -365,16 +374,6 @@ const Notifications = () => {
             </button>
             <h1 className="text-xl font-semibold text-gray-900">Notifications</h1>
           </div>
-          {/* <div className="flex items-center space-x-2">
-            {unreadCount > 0 && (
-              <button
-                onClick={markAllAsRead}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Mark all as read
-              </button>
-            )}
-          </div> */}
         </div>
         <div className="border-b border-gray-200 overflow-x-auto">
           <div className="max-w-4xl mx-auto px-2">
@@ -438,6 +437,16 @@ const Notifications = () => {
                 }`}
               >
                 Calls
+              </button>
+              <button
+                onClick={() => setActiveTab(NotificationType.NEW_CHAT)}
+                className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap ${
+                  activeTab === NotificationType.NEW_CHAT
+                    ? 'border-[#198754] text-[#198754]'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Chats
               </button>
             </div>
           </div>

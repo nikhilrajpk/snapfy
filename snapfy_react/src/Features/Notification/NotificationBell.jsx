@@ -1,4 +1,3 @@
-// notification bell
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -45,27 +44,39 @@ const NotificationBell = () => {
   const getNotificationMessage = (notification) => {
     const data = JSON.parse(notification.message);
     switch (data.type) {
-      case 'follow': return `${data.from_user.username} started following you`;
-      case 'mention': return `${data.from_user.username} mentioned you in a post`;
-      case 'like': return `${data.from_user.username} liked your post`;
-      case 'comment': return `${data.from_user.username} commented: "${data.content.substring(0, 20)}..."`;
-      case 'call': 
-        return data.call_status === 'missed' 
+      case 'follow':
+        return `${data.from_user.username} started following you`;
+      case 'mention':
+        return `${data.from_user.username} mentioned you in a post`;
+      case 'like':
+        return `${data.from_user.username} liked your post`;
+      case 'comment':
+        return `${data.from_user.username} commented: "${data.content.substring(0, 20)}..."`;
+      case 'call':
+        return data.call_status === 'missed'
           ? `Missed call from ${data.from_user.username}`
           : `${data.from_user.username} is calling you`;
-      default: return 'New notification';
+      case 'new_chat':
+        return `${data.from_user.username} started a chat with you`;
+      default:
+        return 'New notification';
     }
   };
 
   const getNotificationLink = (notification) => {
     const data = JSON.parse(notification.message);
     switch (data.type) {
-      case 'follow': return `/user/${data.from_user.username}`;
+      case 'follow':
+        return `/user/${data.from_user.username}`;
       case 'mention':
       case 'like':
-      case 'comment': return `/post/${data.post_id}`;
-      case 'call': return `/messages/${data.room_id}`;
-      default: return '#';
+      case 'comment':
+        return `/post/${data.post_id}`;
+      case 'call':
+      case 'new_chat':
+        return `/messages/${data.room_id}`;
+      default:
+        return '#';
     }
   };
 

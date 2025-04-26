@@ -9,7 +9,7 @@ import binascii
 from .models import ChatRoom, Message, CallLog
 from user_app.models import User
 from .serializers import ChatRoomSerializer, MessageSerializer, UserSerializer, CallLogSerializer
-from notification_app.utils import create_call_notification
+from notification_app.utils import create_call_notification, create_new_chat_notification
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
@@ -236,6 +236,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             return Response({"error": "No content or file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Handle new chat (when recipient_username is provided)
+        new_chat = False
         if recipient_username:
             logger.info(f"Creating new chat with recipient: {recipient_username}")
             try:
@@ -250,6 +251,7 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
                     logger.info("No existing chat room found, creating new one")
                     chat_room = ChatRoom.objects.create()
                     chat_room.users.add(request.user, other_user)
+                    new_chat = True
                     cache.delete(f"my_chats_{request.user.id}")
                     cache.delete(f"my_chats_{other_user.id}")
             except User.DoesNotExist:
@@ -278,6 +280,15 @@ class ChatAPIViewSet(viewsets.ModelViewSet):
             content=encrypted_content,
             file=file if file else None
         )
+
+        # Send notification if this is a new chat
+        if new_chat and recipient_username:
+            logger.info(f"Sending new chat notification to {recipient_username}")
+            create_new_chat_notification(
+                to_user=other_user,
+                from_user=request.user,
+                room_id=str(chat_room.id)
+            )
 
         serializer = MessageSerializer(message, context={'request': request})
         message_data = serializer.data

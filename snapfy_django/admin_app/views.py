@@ -664,7 +664,6 @@ def generate_enhanced_report(request, report_type, period, report_data, start_da
     return buffer
 
 
-# Example of how to update your generate_report view to use this enhanced template
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def generate_report(request):

@@ -148,3 +148,31 @@ def create_call_notification(to_user, from_user, call_id, room_id, call_type, ca
             }
         }
     )
+    
+def create_new_chat_notification(to_user, from_user, room_id):
+    if to_user.id == from_user.id:
+        return
+    
+    profile_picture = str(from_user.profile_picture) if from_user.profile_picture else None
+    message = json.dumps({
+        'type': 'new_chat',
+        'from_user': {
+            'username': from_user.username,
+            'profile_picture': profile_picture,
+        },
+        'room_id': str(room_id)
+    })
+    
+    notification = Notification.objects.create(user=to_user, message=message)
+    async_to_sync(channel_layer.group_send)(
+        f'user_{to_user.username}_notifications',
+        {
+            'type': 'notification_message',
+            'notification': {
+                'id': notification.id,
+                'message': message,
+                'created_at': notification.created_at.isoformat(),
+                'is_read': notification.is_read
+            }
+        }
+    )
