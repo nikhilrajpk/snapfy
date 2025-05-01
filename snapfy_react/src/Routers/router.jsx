@@ -24,6 +24,7 @@ const ExplorePage = React.lazy(()=> import('../Pages/ExplorePage'))
 const Shorts = React.lazy(()=> import('../Features/Shorts/Shorts'))
 const Message = React.lazy(()=> import('../Features/Messages/Message'))
 const Notification = React.lazy(()=> import('../Features/Notification/Notification'))
+const LiveStreamPage = React.lazy(()=> import('../Components/Stories/LiveStreamPage'))
 
 const AdminLayout = React.lazy(() => import('../Components/Admin/AdminLayout'));
 const Dashboard = React.lazy(() => import('../Components/Admin/Dashboard'));
@@ -185,6 +186,15 @@ const router = createBrowserRouter([
                     </ProtectedRoute>
                 )
             },
+            {
+                path: "/live/:liveId",
+                element: (
+                    <ProtectedRoute authentication={true}>
+                        <LiveStreamPage/>
+                    </ProtectedRoute>
+                )
+            },
+
             {
                 path: '/admin',
                 element: (

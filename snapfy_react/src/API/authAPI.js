@@ -182,3 +182,88 @@ export const createStory = async (formData) => {
     const response = await axiosInstance.get(`/stories/${storyId}/viewers/`);
     return response.data;
   };
+
+
+  export const getLiveStreams = async () => {
+    try {
+      console.log('Fetching live streams...');
+      const response = await axiosInstance.get('/live/');
+      console.log('Live streams response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching live streams:', error.response?.data || error.message);
+      throw error;
+    }
+  };
+  
+  export const createLiveStream = async (title, endExisting = false) => {
+    try {
+      console.log('Creating live stream with:', { title, endExisting });
+      const response = await axiosInstance.post('/live/', { title, end_existing: endExisting });
+      console.log('Create live stream response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Create live stream error:', error.response?.data || error.message);
+      throw error;
+    }
+  };
+  
+  export const getLiveStream = async (liveId) => {
+    try {
+      console.log(`Fetching live stream ${liveId}...`);
+      const response = await axiosInstance.get(`/live/${liveId}/`);
+      console.log('Live stream response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching live stream:', error.response?.data || error.message);
+      throw error;
+    }
+  };
+  
+  export const joinLiveStream = async (liveId) => {
+    try {
+      console.log(`Joining live stream ${liveId}...`);
+      const response = await axiosInstance.post(`/live/${liveId}/join/`);
+      console.log('Join live stream response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error joining live stream:', error.response?.data || error.message);
+      throw error;
+    }
+  };
+  
+  export const endLiveStream = async (liveId) => {
+    try {
+      console.log(`Ending live stream ${liveId}...`);
+      const response = await axiosInstance.delete(`/live/${liveId}/`);
+      console.log('End live stream response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error ending live stream:', error.response?.data || error.message);
+      throw error;
+    }
+  };
+  
+  // Keep refreshToken for manual calls if needed, but it’s not used in API retries
+  export const refreshToken = async () => {
+    try {
+      const refreshToken = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('refresh_token='))
+        ?.split('=')[1];
+  
+      if (!refreshToken) {
+        console.error('No refresh token found');
+        return null;
+      }
+  
+      const response = await axiosInstance.post('/token/refresh/', { refresh: refreshToken });
+      const { access } = response.data;
+      document.cookie = `access_token=${access}; path=/; SameSite=Lax`;
+      console.log('Token refreshed successfully');
+      return access;
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      return null;
+    }
+  };

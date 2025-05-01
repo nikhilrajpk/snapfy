@@ -1,6 +1,7 @@
 import tempfile
 import os
 import logging
+import uuid
 from datetime import datetime, timedelta
 from django.utils.timezone import now
 from rest_framework.views import APIView
@@ -8,12 +9,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from .models import Story, MusicTrack
+from .models import Story, MusicTrack, LiveStream
 from moviepy.editor import VideoFileClip
 import cloudinary.uploader
 from user_app.models import User, BlockedUser
-from .serializers import StorySerializer, StoryViewerSerializer, MusicTrackSerializer
+from .serializers import StorySerializer, StoryViewerSerializer, MusicTrackSerializer, LiveStreamSerializer
 from django.db.models import Q
+from notification_app.utils import create_live_notification
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from channels.db import database_sync_to_async
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +187,170 @@ class StoryViewersView(APIView):
             return Response(serializer.data)
         except Story.DoesNotExist:
             return Response({"error": "Story not found or not yours"}, status=status.HTTP_404_NOT_FOUND)
+  
+class LiveStreamView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        live_streams = LiveStream.objects.filter(is_active=True).exclude(
+            host__in=BlockedUser.objects.filter(blocked=request.user).values('blocker')
+        )
+        serializer = LiveStreamSerializer(live_streams, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    def post(self, request):
+        title = request.data.get('title', '')
+        end_existing = request.data.get('endExisting', False)
+
+        if not title:
+            return Response(
+                {"error": "Title is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Initialize channel_layer at the start
+        channel_layer = get_channel_layer()
+
+        # Check for existing stream
+        existing_stream = LiveStream.objects.filter(
+            host=request.user, 
+            is_active=True
+        ).first()
+
+        if existing_stream and not end_existing:
+            return Response(
+                {
+                    "error": "You already have an active live stream",
+                    "live_stream_id": existing_stream.id
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # End existing stream if requested
+        if existing_stream and end_existing:
+            existing_stream.is_active = False
+            existing_stream.ended_at = timezone.now()
+            existing_stream.save()
+            
+            # Notify viewers
+            async_to_sync(channel_layer.group_send)(
+                f'live_{existing_stream.id}',
+                {
+                    'type': 'stream_ended',
+                    'live_id': existing_stream.id
+                }
+            )
+
+        # Create new stream
+        stream_key = str(uuid.uuid4())
+        live_stream = LiveStream.objects.create(
+            host=request.user,
+            title=title,
+            stream_key=stream_key,
+            is_active=True
+        )
+
+        # Notify followers
+        followers = request.user.followers.all()
+        for follower in followers:
+            # Skip if follower has blocked the host
+            if BlockedUser.objects.filter(blocker=follower, blocked=request.user).exists():
+                continue
+            create_live_notification(follower, request.user, live_stream.id)
+
+        # Notify global listeners
+        async_to_sync(channel_layer.group_send)(
+            'live_global',
+            {
+                'type': 'live_stream_update',
+                'live_stream': LiveStreamSerializer(live_stream, context={'request': request}).data
+            }
+        )
+
+        return Response(
+            LiveStreamSerializer(live_stream, context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )
+
+class LiveStreamDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, live_id):
+        try:
+            live_stream = LiveStream.objects.get(id=live_id, is_active=True)
+            serializer = LiveStreamSerializer(live_stream, context={'request': request})
+            return Response(serializer.data)
+        except LiveStream.DoesNotExist:
+            logger.warning(f"Live stream {live_id} not found or inactive")
+            return Response({"error": "Live stream not found or inactive"}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, live_id):
+        try:
+            live_stream = LiveStream.objects.get(id=live_id, host=request.user, is_active=True)
+            live_stream.is_active = False
+            live_stream.ended_at = timezone.now()
+            live_stream.save()
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'live_{live_id}',
+                {
+                    'type': 'stream_ended',
+                    'live_id': live_id
+                }
+            )
+            async_to_sync(channel_layer.group_send)(
+                'live_global',
+                {
+                    'type': 'live_stream_update',
+                    'live_stream': LiveStreamSerializer(live_stream, context={'request': request}).data
+                }
+            )
+            return Response({"message": "Live stream ended"}, status=status.HTTP_200_OK)
+        except LiveStream.DoesNotExist:
+            return Response({"error": "Live stream not found or not yours"}, status=status.HTTP_404_NOT_FOUND)
+
+class LiveStreamJoinView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, live_id):
+        try:
+            live_stream = LiveStream.objects.get(id=live_id, is_active=True)
+            if BlockedUser.objects.filter(blocker=live_stream.host, blocked=request.user).exists():
+                return Response({"error": "You are blocked from joining this stream"}, status=status.HTTP_403_FORBIDDEN)
+            live_stream.viewers.add(request.user)
+            serializer = LiveStreamSerializer(live_stream, context={'request': request})
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'live_{live_id}',
+                {
+                    'type': 'viewer_update',
+                    'viewer_count': live_stream.viewer_count,
+                    'viewer_id': str(request.user.id),
+                    'viewer_username': request.user.username
+                }
+            )
+            return Response(serializer.data)
+        except LiveStream.DoesNotExist:
+            return Response({"error": "Live stream not found or inactive"}, status=status.HTTP_404_NOT_FOUND)
+
+class LiveStreamLeaveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, live_id):
+        try:
+            live_stream = LiveStream.objects.get(id=live_id, is_active=True)
+            live_stream.viewers.remove(request.user)
+            serializer = LiveStreamSerializer(live_stream, context={'request': request})
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'live_{live_id}',
+                {
+                    'type': 'viewer_update',
+                    'viewer_count': live_stream.viewer_count,
+                    'viewer_id': str(request.user.id),
+                    'viewer_username': request.user.username
+                }
+            )
+            return Response(serializer.data)
+        except LiveStream.DoesNotExist:
+            return Response({"error": "Live stream not found or inactive"}, status=status.HTTP_404_NOT_FOUND)

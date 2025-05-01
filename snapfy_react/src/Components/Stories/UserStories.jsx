@@ -3,44 +3,55 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
-  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors,
+  X, Camera, ChevronRight, ChevronLeft, Heart, Eye, Trash2, Plus, Clock, Film, Image as ImageIcon, Scissors, Video,
   Music, Play, Pause, Search
 } from 'lucide-react';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { showToast } from '../../redux/slices/toastSlice';
 import { 
-  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks
+  createStory, getStories, getStory, deleteStory, toggleStoryLike, getStoryViewers, getMusicTracks, getLiveStreams, createLiveStream,
+  getLiveStream
 } from '../../API/authAPI';
 import { useNavigate } from 'react-router-dom';
 import { useStoriesQuery } from '../../API/useStoriesQuery';
 
+import React from 'react';
+
 const StoryCircle = ({ user, onClick, hasNewStory }) => {
-  const userImage = user?.userImage?.includes("http://res.cloudinary.com/dk5georkh/image/upload/") 
-    ? user?.userImage?.replace("http://res.cloudinary.com/dk5georkh/image/upload/", '') 
-    : user?.userImage;
+  const userImage = user?.userImage?.includes(CLOUDINARY_ENDPOINT)
+      ? user?.userImage.replace(CLOUDINARY_ENDPOINT, '')
+      : user?.userImage;
 
   return (
-    <div className="flex flex-col items-center space-y-1" onClick={onClick}>
-      <div className={`relative w-20 h-20 rounded-full p-[2px] cursor-pointer ${
-        hasNewStory ? 'bg-gradient-to-br from-[#198754] to-[#FF6C37] animate-pulse' : 
-        user?.allStoriesSeen ? 'bg-gray-300' : 'bg-gradient-to-br from-[#198754] to-[#FF6C37]'
-      }`}>
-        <img 
-          src={`${CLOUDINARY_ENDPOINT}${userImage}`}
-          alt={user?.username} 
-          className="w-full h-full object-cover rounded-full border-2 border-white" 
-          onError={(e) => (e.target.src = '/default-profile.png')}
-        />
-        {user?.isCurrentUser && (
-          <div className="absolute bottom-0 right-0 w-6 h-6 bg-[#198754] rounded-full flex items-center justify-center border-2 border-white">
-            <Plus size={14} className="text-white" />
+      <div className="flex flex-col items-center space-y-1" onClick={onClick}>
+          <div
+              className={`relative w-20 h-20 rounded-full p-[2px] cursor-pointer ${
+                  user.isLive
+                      ? 'bg-gradient-to-br from-red-500 to-pink-500 animate-pulse'
+                      : hasNewStory
+                      ? 'bg-gradient-to-br from-[#198754] to-[#FF6C37] animate-pulse'
+                      : user?.allStoriesSeen
+                      ? 'bg-gray-300'
+                      : 'bg-gradient-to-br from-[#198754] to-[#FF6C37]'
+              }`}
+          >
+              <img
+                  src={`${CLOUDINARY_ENDPOINT}${userImage}`}
+                  alt={user?.username}
+                  className="w-full h-full object-cover rounded-full border-2 border-white"
+                  onError={(e) => (e.target.src = '/default-profile.png')}
+              />
+              {user?.isCurrentUser && !user.isLive && (
+                  <div className="absolute bottom-0 right-0 w-6 h-6 bg-[#198754] rounded-full flex items-center justify-center border-2 border-white">
+                      <Plus size={14} className="text-white" />
+                  </div>
+              )}
           </div>
-        )}
+          <span className="text-xs text-gray-600 truncate max-w-[80px] text-center">{user?.username}</span>
       </div>
-      <span className="text-xs text-gray-600 truncate max-w-[80px] text-center">{user?.username}</span>
-    </div>
   );
 };
+
 
 const StoryViewerModal = ({ 
   currentStory, 
@@ -978,27 +989,281 @@ const CreateStoryModal = ({ onClose, onSuccess }) => {
   );
 };
 
+
+import LiveStreamModal from './LiveStreamModal';
+import { refreshToken } from '../../API/authAPI';
+
+
 const UserStories = () => {
   const [viewingUserIndex, setViewingUserIndex] = useState(null);
   const [viewingStoryIndex, setViewingStoryIndex] = useState(0);
   const [creatingStory, setCreatingStory] = useState(false);
+  const [liveStream, setLiveStream] = useState(null);
   const [usersWithStories, setUsersWithStories] = useState([]);
+  const [liveStreams, setLiveStreams] = useState([]);
   const [page, setPage] = useState(1);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
+  const [connectionState, setConnectionState] = useState('disconnected');
   const scrollRef = useRef(null);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.user);
   const queryClient = useQueryClient();
-  
-  const { 
-    stories, 
-    totalCount, 
-    next, 
-    previous, 
-    isLoading, 
-    error, 
-    invalidateStories 
+  const MAX_RECONNECT_ATTEMPTS = 50; // Allow more retries for persistent issues
+  const BASE_RECONNECT_DELAY = 1000;
+  const MAX_RECONNECT_DELAY = 10000; // Cap delay at 10 seconds
+
+  const {
+    stories,
+    totalCount,
+    next,
+    previous,
+    isLoading,
+    error,
+    invalidateStories,
   } = useStoriesQuery({ page, pageSize: 10 });
+
+  useEffect(() => {
+    if (!user?.id) {
+      console.log('No user, skipping WebSocket connection');
+      return;
+    }
+
+    const getAccessToken = () => {
+      return document.cookie
+        .split('; ')
+        .find(row => row.startsWith('access_token='))
+        ?.split('=')[1];
+    };
+
+    const connectWebSocket = () => {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        console.warn('No access token found');
+        setConnectionError('Please log in to view live streams');
+        dispatch(showToast({ message: 'Please log in to view live streams', type: 'error' }));
+        navigate('/');
+        return;
+      }
+
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        console.log('Closing existing WebSocket connection');
+        wsRef.current.close(1000, 'Reconnecting');
+      }
+
+      // Fix URL construction
+      let wsUrl;
+      if (process.env.NODE_ENV === 'development') {
+        wsUrl = `ws://${window.location.hostname}:8000/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
+      }
+      
+      console.log('Connecting to WebSocket:', wsUrl);
+      const websocket = new WebSocket(wsUrl);
+      wsRef.current = websocket;
+
+      websocket.onopen = () => {
+        console.log('Global live stream WebSocket connected');
+        setIsConnected(true);
+        setConnectionState('connected');
+        setConnectionAttempts(0);
+        setConnectionError(null);
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      };
+
+      websocket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket message:', data);
+          if (data.type === 'live_stream_update') {
+            const streamData = data.live_stream;
+            if (!streamData?.host?.id) {
+              console.warn('Invalid live_stream_update:', streamData);
+              return;
+            }
+            setLiveStreams((prev) => {
+              if (!streamData.is_active) {
+                return prev.filter((stream) => stream.id !== streamData.id);
+              }
+              const updated = prev.filter((stream) => stream.id !== streamData.id);
+              return [...updated, streamData];
+            });
+            setUsersWithStories((prev) =>
+              prev.map((u) => ({
+                ...u,
+                isLive: u.userId === streamData.host.id && streamData.is_active,
+              }))
+            );
+            if (!streamData.is_active && liveStream?.id === streamData.id) {
+              setLiveStream(null);
+            }
+          } else if (data.type === 'active_streams') {
+            setLiveStreams(data.streams.filter((stream) => stream.is_active));
+            setUsersWithStories((prev) =>
+              prev.map((u) => ({
+                ...u,
+                isLive: data.streams.some((live) => live.host.id === u.userId && live.is_active),
+              }))
+            );
+          } else if (data.type === 'pong') {
+            console.log('Received pong from server');
+          } else if (data.error) {
+            console.error('WebSocket server error:', data.error);
+            setConnectionError(data.error);
+          }
+        } catch (error) {
+          console.error('Error processing WebSocket message:', error);
+        }
+      };
+
+      websocket.onerror = (event) => {
+        console.error('WebSocket error:', event);
+        setIsConnected(false);
+        
+        // More specific error handling
+        if (!navigator.onLine) {
+          setConnectionError('Network connection lost');
+        } else {
+          setConnectionError('WebSocket connection error');
+        }
+        
+        // Immediate reconnect for certain errors
+        if (!reconnectTimeoutRef.current && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(1000, MAX_RECONNECT_DELAY); // Shorter delay for immediate retry
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+        }
+      };
+      
+      websocket.onclose = (event) => {
+        console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
+        setIsConnected(false);
+        wsRef.current = null;
+      
+        // Handle specific closure codes
+        if (event.code === 4001) {
+          setConnectionError('Session expired, please log in again');
+          dispatch(showToast({ message: 'Session expired, please log in again', type: 'error' }));
+          navigate('/');
+          return;
+        }
+      
+        if (event.code === 1006) {
+          console.warn('Abnormal closure detected, attempting reconnect');
+        }
+      
+        if (connectionAttempts < MAX_RECONNECT_ATTEMPTS && event.code !== 1000) {
+          const newAttempts = connectionAttempts + 1;
+          setConnectionAttempts(newAttempts);
+          const delay = Math.min(
+            BASE_RECONNECT_DELAY * Math.pow(2, Math.min(newAttempts, 5)), // Cap exponential growth
+            MAX_RECONNECT_DELAY
+          );
+          console.log(`Reconnecting in ${delay}ms (Attempt ${newAttempts})`);
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+        } else if (event.code !== 1000) {
+          console.error('Max reconnect attempts reached');
+          setConnectionError('Unable to connect to live streams. Please refresh the page.');
+          dispatch(showToast({ 
+            message: 'Unable to connect to live streams. Please refresh the page.', 
+            type: 'error' 
+          }));
+        }
+      };
+    };
+
+    connectWebSocket();
+
+    // In your useEffect
+    const heartbeatInterval = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          console.log('Sending ping to server');
+          wsRef.current.send(JSON.stringify({ type: 'ping' }));
+          
+          // Add timeout for pong response
+          const pongTimeout = setTimeout(() => {
+            if (wsRef.current && isConnected) {
+              console.warn('Pong timeout, closing connection');
+              wsRef.current.close(1006, 'Pong timeout');
+            }
+          }, 3000); // 3 second timeout
+          
+          // Cleanup timeout on pong
+          const pongHandler = () => {
+            clearTimeout(pongTimeout);
+            wsRef.current?.removeEventListener('message', pongHandler);
+          };
+          
+          wsRef.current.addEventListener('message', pongHandler);
+          
+        } catch (error) {
+          console.error('Failed to send heartbeat:', error);
+          setConnectionError('Connection lost');
+          if (wsRef.current) {
+            wsRef.current.close(1006, 'Heartbeat failed');
+          }
+        }
+      } else if (isConnected && connectionAttempts < MAX_RECONNECT_ATTEMPTS && !reconnectTimeoutRef.current) {
+        console.log('Connection appears dead, reconnecting...');
+        connectWebSocket();
+      }
+    }, 15000); // 15 seconds between pings
+
+    return () => {
+      console.log('Cleaning up WebSocket connection');
+      clearInterval(heartbeatInterval);
+      if (wsRef.current) {
+        // Remove all event listeners first
+        wsRef.current.onopen = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onclose = null;
+        
+        // Then close
+        if (wsRef.current.readyState !== WebSocket.CLOSED) {
+          wsRef.current.close(1000, 'Component unmounting');
+        }
+        wsRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+  }, [dispatch, user?.id, navigate, connectionAttempts, isConnected]);
+
+  const handleReconnect = () => {
+    setConnectionAttempts(0);
+    setConnectionError(null);
+    connectWebSocket();
+  };
+
+  useEffect(() => {
+    const fetchLiveStreams = async () => {
+      try {
+        const data = await getLiveStreams();
+        setLiveStreams(data.filter((stream) => stream.is_active));
+      } catch (error) {
+        if (error.response?.status === 404) {
+          console.warn('Some live streams not found, filtering available streams');
+          setLiveStreams([]);
+        } else {
+          console.error('Error fetching live streams:', error);
+          dispatch(showToast({ message: 'Failed to load live streams', type: 'error' }));
+        }
+      }
+    };
+    fetchLiveStreams();
+  }, [dispatch]);
 
   const virtualizer = useVirtualizer({
     count: usersWithStories.length,
@@ -1012,7 +1277,7 @@ const UserStories = () => {
     if (isLoading || error) return;
 
     const groupedStories = {};
-    stories.forEach(story => {
+    stories.forEach((story) => {
       const userId = story?.user?.id;
       if (!groupedStories[userId]) {
         groupedStories[userId] = {
@@ -1022,7 +1287,8 @@ const UserStories = () => {
           isCurrentUser: story?.user?.id === user?.id,
           stories: [],
           allStoriesSeen: true,
-          hasNewStory: false
+          hasNewStory: false,
+          isLive: liveStreams.some((live) => live.host.id === userId && live.is_active),
         };
       }
       groupedStories[userId].stories.push(story);
@@ -1032,13 +1298,13 @@ const UserStories = () => {
       }
     });
 
-    Object.values(groupedStories).forEach(user => {
+    Object.values(groupedStories).forEach((user) => {
       user.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     });
 
     let usersArray = Object.values(groupedStories);
-    const currentUserExists = usersArray.some(u => u.isCurrentUser);
-    
+    const currentUserExists = usersArray.some((u) => u.isCurrentUser);
+
     if (!currentUserExists) {
       usersArray.unshift({
         userId: user?.id,
@@ -1047,67 +1313,81 @@ const UserStories = () => {
         isCurrentUser: true,
         stories: [],
         allStoriesSeen: true,
-        hasNewStory: false
+        hasNewStory: false,
+        isLive: liveStreams.some((live) => live.host.id === user?.id && live.is_active),
       });
     } else {
-      const currentUserIndex = usersArray.findIndex(u => u.isCurrentUser);
+      const currentUserIndex = usersArray.findIndex((u) => u.isCurrentUser);
       const [currentUser] = usersArray.splice(currentUserIndex, 1);
       usersArray.unshift(currentUser);
     }
 
-    setUsersWithStories(prev => {
+    setUsersWithStories((prev) => {
       if (JSON.stringify(prev) !== JSON.stringify(usersArray)) {
         return usersArray;
       }
       return prev;
     });
-  }, [stories, user?.id, user?.username, user?.profile_picture, isLoading, error]);
+  }, [stories, user?.id, user?.username, user?.profile_picture, isLoading, error, liveStreams]);
 
-  
-useEffect(() => {
-  if (error) {
-    if (error.response?.status === 401) {
-      const handleLogout = async () => {
-        try {
-          // await userLogout();
-          // dispatch(logout());
-          // navigate('/');
-          dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
-        } catch (logoutError) {
-          console.error('Logout error:', logoutError);
-          navigate('/');
-        }
-      };
-      handleLogout();
-    } else {
-      dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
+  useEffect(() => {
+    if (error) {
+      if (error.response?.status === 401) {
+        dispatch(showToast({ message: 'Session expired. Please log in again.', type: 'error' }));
+        navigate('/');
+      } else {
+        dispatch(showToast({ message: 'Failed to load stories', type: 'error' }));
+      }
     }
-  }
-}, [error, dispatch, navigate]);
+  }, [error, dispatch, navigate]);
 
   const handleScroll = (direction) => {
     if (scrollRef.current) {
       const scrollAmount = 300;
       scrollRef.current.scrollLeft += direction === 'right' ? scrollAmount : -scrollAmount;
-      if (direction === 'right' && 
-          scrollRef.current.scrollLeft + scrollRef.current.clientWidth >= scrollRef.current.scrollWidth - 100 && 
-          next) {
-        setPage(prev => prev + 1);
+      if (
+        direction === 'right' &&
+        scrollRef.current.scrollLeft + scrollRef.current.clientWidth >= scrollRef.current.scrollWidth - 100 &&
+        next
+      ) {
+        setPage((prev) => prev + 1);
       }
     }
   };
 
   const handleUserStoryClick = async (userIndex) => {
     const userStories = usersWithStories[userIndex];
-    
+  
+    if (userStories.isLive) {
+      const live = liveStreams.find((l) => l.host.id === userStories.userId && l.is_active);
+      if (live) {
+        try {
+          const streamData = await getLiveStream(live.id);
+          if (streamData.is_active) {
+            setLiveStream(streamData);
+            navigate(`/live/${live.id}`);
+          } else {
+            dispatch(showToast({ message: 'Live stream has ended', type: 'info' }));
+          }
+        } catch (error) {
+          console.error('Error fetching live stream:', error);
+          dispatch(showToast({ message: 'Live stream not available', type: 'error' }));
+        }
+        return;
+      } else {
+        dispatch(showToast({ message: 'Live stream has ended', type: 'info' }));
+        return;
+      }
+    }
+  
     if (userStories.isCurrentUser && userStories.stories.length === 0) {
       setCreatingStory(true);
       return;
     }
-    
+  
     const updatedUsers = [...usersWithStories];
     const updatedUser = { ...userStories };
-    
+  
     for (const story of updatedUser.stories) {
       if (!story.is_seen && !updatedUser.isCurrentUser) {
         try {
@@ -1119,15 +1399,70 @@ useEffect(() => {
         }
       }
     }
-    
-    updatedUser.allStoriesSeen = updatedUser.stories.every(story => story.is_seen);
+  
+    updatedUser.allStoriesSeen = updatedUser.stories.every((story) => story.is_seen);
     updatedUser.hasNewStory = !updatedUser.allStoriesSeen;
     updatedUsers[userIndex] = updatedUser;
     setUsersWithStories(updatedUsers);
     invalidateStories();
-    
+  
     setViewingUserIndex(userIndex);
     setViewingStoryIndex(0);
+  };
+
+  const handleGoLive = async () => {
+    try {
+      const title = prompt('Enter a title for your live stream:');
+      if (title === null || title.trim() === '') {
+        dispatch(showToast({ message: 'Live stream title cannot be empty', type: 'error' }));
+        return;
+      }
+
+      // Create the live stream with proper parameters
+      const newLiveStream = await createLiveStream({ 
+        title: title, 
+        endExisting: false 
+      });
+      
+      // Verify the stream exists before navigating
+      const verifiedStream = await getLiveStream(newLiveStream.id);
+      
+      if (!verifiedStream || !verifiedStream.is_active) {
+        throw new Error('Failed to start live stream');
+      }
+
+      setLiveStream(verifiedStream);
+      setLiveStreams(prev => [...prev, verifiedStream]);
+      dispatch(showToast({ message: 'Live stream started!', type: 'success' }));
+      navigate(`/live/${verifiedStream.id}`);
+    } catch (error) {
+      const errorData = error.response?.data;
+      if (errorData?.error === 'You already have an active live stream' && errorData.live_stream_id) {
+        const userConfirmed = window.confirm(
+          'You already have an active live stream. Would you like to end it and start a new one?'
+        );
+        if (userConfirmed) {
+          try {
+            const newLiveStream = await createLiveStream({ title, endExisting: true });
+            setLiveStream(newLiveStream);
+            setLiveStreams(prev => [...prev, newLiveStream]);
+            dispatch(showToast({ message: 'New live stream started!', type: 'success' }));
+            navigate(`/live/${newLiveStream.id}`);
+          } catch (newError) {
+            dispatch(showToast({ message: 'Failed to start new live stream', type: 'error' }));
+          }
+        } else {
+          dispatch(showToast({ message: 'Redirecting to existing live stream', type: 'info' }));
+          navigate(`/live/${errorData.live_stream_id}`);
+        }
+      } else {
+        console.error('Error starting live stream:', error);
+        dispatch(showToast({ 
+          message: error.response?.data?.error || 'Failed to start live stream', 
+          type: 'error' 
+        }));
+      }
+    }
   };
 
   const handleNextStory = () => {
@@ -1147,8 +1482,8 @@ useEffect(() => {
 
     const updatedUsers = [...usersWithStories];
     const currentUser = updatedUsers[viewingUserIndex];
-    
-    currentUser.allStoriesSeen = currentUser.stories.every(story => story.is_seen);
+
+    currentUser.allStoriesSeen = currentUser.stories.every((story) => story.is_seen);
     currentUser.hasNewStory = !currentUser.allStoriesSeen;
     updatedUsers[viewingUserIndex] = currentUser;
     setUsersWithStories(updatedUsers);
@@ -1173,15 +1508,15 @@ useEffect(() => {
       await deleteStory(storyId);
       const updatedUsers = [...usersWithStories];
       const currentUser = updatedUsers[viewingUserIndex];
-      currentUser.stories = currentUser.stories.filter(story => story.id !== storyId);
-      
+      currentUser.stories = currentUser.stories.filter((story) => story.id !== storyId);
+
       if (currentUser.stories.length === 0) {
         setViewingUserIndex(null);
         currentUser.hasNewStory = false;
       } else if (viewingStoryIndex >= currentUser.stories.length) {
         setViewingStoryIndex(currentUser.stories.length - 1);
       }
-      
+
       setUsersWithStories(updatedUsers);
       invalidateStories();
       dispatch(showToast({ message: 'Story deleted successfully', type: 'success' }));
@@ -1192,8 +1527,8 @@ useEffect(() => {
 
   const handleStoryCreated = (newStory) => {
     const updatedUsers = [...usersWithStories];
-    const currentUserIndex = updatedUsers.findIndex(u => u.isCurrentUser);
-    
+    const currentUserIndex = updatedUsers.findIndex((u) => u.isCurrentUser);
+
     if (currentUserIndex !== -1) {
       updatedUsers[currentUserIndex].stories.push(newStory);
       updatedUsers[currentUserIndex].hasNewStory = true;
@@ -1205,7 +1540,8 @@ useEffect(() => {
         isCurrentUser: true,
         stories: [newStory],
         allStoriesSeen: false,
-        hasNewStory: true
+        hasNewStory: true,
+        isLive: false,
       });
     }
     setUsersWithStories(updatedUsers);
@@ -1222,17 +1558,34 @@ useEffect(() => {
 
   return (
     <div className="my-4">
+      {connectionError && (
+        <div className="text-center text-red-500 p-4">
+          {connectionError}
+          <button
+            onClick={handleReconnect}
+            className="ml-2 px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+      {connectionState === 'connecting' && (
+        <div className="text-center text-blue-500 p-2">
+          Connecting to live updates...
+        </div>
+      )}
+
       <div className="relative flex items-center">
         {usersWithStories.length > 4 && (
-          <button 
-            className="absolute left-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center"
+          <button
+            className="absolute left-0 z-10 w-8 h-8 bgundant-to-br from-[#198754] to-[#FF6C37] shadow-md rounded-full flex items-center justify-center"
             onClick={() => handleScroll('left')}
           >
             <ChevronLeft size={18} />
           </button>
         )}
-        
-        <div 
+
+        <div
           ref={scrollRef}
           className="flex overflow-x-auto scrollbar-hide py-2 px-2 w-full scroll-smooth"
           style={{ height: '120px' }}
@@ -1242,13 +1595,11 @@ useEffect(() => {
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#198754]"></div>
             </div>
           ) : error ? (
-            <div className="text-center text-red-500 p-4 w-full">
-              Failed to load stories
-            </div>
+            <div className="text-center text-red-500 p-4 w-full">Failed to load stories</div>
           ) : usersWithStories.length > 0 ? (
             <div style={{ width: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
               {virtualizer.getVirtualItems().map((virtualItem) => {
-                const user = usersWithStories[virtualItem.index];
+                const userData = usersWithStories[virtualItem.index];
                 return (
                   <div
                     key={virtualItem.key}
@@ -1259,24 +1610,29 @@ useEffect(() => {
                       height: '100%',
                     }}
                   >
-                    <StoryCircle 
-                      user={user}
-                      onClick={() => handleUserStoryClick(virtualItem.index)}
-                      hasNewStory={user.hasNewStory}
-                    />
+                    <div className="relative">
+                      <StoryCircle
+                        user={userData}
+                        onClick={() => handleUserStoryClick(virtualItem.index)}
+                        hasNewStory={userData.hasNewStory}
+                      />
+                      {userData.isLive && (
+                        <span className="absolute bottom-5 left-1/2 transform -translate-x-1/2 text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full font-medium">
+                          LIVE
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="text-center text-gray-500 p-4 w-full">
-              No stories available
-            </div>
+            <div className="text-center text-gray-500 p-4 w-full">No stories available</div>
           )}
         </div>
-        
+
         {usersWithStories.length > 4 && (
-          <button 
+          <button
             className="absolute right-0 z-10 w-8 h-8 bg-gray-100 shadow-md rounded-full flex items-center justify-center"
             onClick={() => handleScroll('right')}
           >
@@ -1284,9 +1640,18 @@ useEffect(() => {
           </button>
         )}
       </div>
-      
-      {viewingUserIndex !== null && 
-       usersWithStories[viewingUserIndex]?.stories?.[viewingStoryIndex] && (
+
+      <div className="flex justify-center mt-2">
+        <button
+          onClick={handleGoLive}
+          className="flex items-center space-x-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+        >
+          <Video size={18} />
+          <span>Go Live</span>
+        </button>
+      </div>
+
+      {viewingUserIndex !== null && usersWithStories[viewingUserIndex]?.stories?.[viewingStoryIndex] && (
         <StoryViewerModal
           currentStory={usersWithStories[viewingUserIndex].stories[viewingStoryIndex]}
           userStories={usersWithStories[viewingUserIndex].stories}
@@ -1302,11 +1667,22 @@ useEffect(() => {
           onAddNewStory={handleAddNewStory}
         />
       )}
-      
+
       {creatingStory && (
         <CreateStoryModal
           onClose={() => setCreatingStory(false)}
           onSuccess={handleStoryCreated}
+        />
+      )}
+
+      {liveStream && (
+        <LiveStreamModal
+          liveStream={liveStream}
+          onClose={() => {
+            setLiveStream(null);
+            setLiveStreams((prev) => prev.filter((stream) => stream.id !== liveStream.id));
+          }}
+          isHost={liveStream.host.id === user.id}
         />
       )}
     </div>

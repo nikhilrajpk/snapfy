@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Link, useNavigate } from 'react-router-dom';
 import axiosInstance from '../../axiosInstance';
-import { Bell, User, AtSign, Clock, CheckCheck, Trash2, ArrowLeft, MessageCircle } from 'lucide-react';
+import { Bell, User, AtSign, Clock, CheckCheck, Trash2, ArrowLeft, MessageCircle, Video } from 'lucide-react';
 import { showToast } from '../../redux/slices/toastSlice';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import PostPopup from '../../Components/Post/PostPopUp';
@@ -15,6 +15,7 @@ const NotificationType = {
   COMMENT: 'comment',
   CALL: 'call',
   NEW_CHAT: 'new_chat',
+  LIVE: 'live',
 };
 
 const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) => {
@@ -34,7 +35,7 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
   };
 
   const data = JSON.parse(notification.message);
-  const { type, from_user, content, post_id, call_status, room_id } = data;
+  const { type, from_user, content, post_id, call_status, room_id, live_id } = data;
 
   const getIcon = () => {
     switch (type) {
@@ -85,6 +86,8 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
         );
       case NotificationType.NEW_CHAT:
         return <MessageCircle className="text-purple-500" size={16} />;
+      case NotificationType.LIVE:
+        return <Video className="text-red-500" size={16} />;
       default:
         return <Bell className="text-gray-500" size={16} />;
     }
@@ -115,8 +118,8 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
           <>
             <span className="font-semibold text-gray-900">{from_user.username}</span> commented:{' '}
             <span className="text-gray-700 italic">
-              "{content.substring(0, 30)}
-              {content.length > 30 ? '...' : ''}"
+              &quot;{content.substring(0, 30)}
+              {content.length > 30 ? '...' : ''}&quot;
             </span>
           </>
         );
@@ -133,6 +136,12 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
             <span className="font-semibold text-gray-900">{from_user.username}</span> started a chat with you
           </>
         );
+      case NotificationType.LIVE:
+        return (
+          <>
+            <span className="font-semibold text-gray-900">{from_user.username}</span> is live now
+          </>
+        );
       default:
         return <span className="text-gray-700">New notification</span>;
     }
@@ -145,10 +154,12 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete, onOpenPost }) 
       case NotificationType.MENTION:
       case NotificationType.LIKE:
       case NotificationType.COMMENT:
-        return null; // Handled by onOpenPost
+        return null;
       case NotificationType.CALL:
       case NotificationType.NEW_CHAT:
         return `/messages/${room_id}`;
+      case NotificationType.LIVE:
+        return `/live/${live_id}`;
       default:
         return '#';
     }
@@ -447,6 +458,16 @@ const Notifications = () => {
                 }`}
               >
                 Chats
+              </button>
+              <button
+                onClick={() => setActiveTab(NotificationType.LIVE)}
+                className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap ${
+                  activeTab === NotificationType.LIVE
+                    ? 'border-[#198754] text-[#198754]'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Live
               </button>
             </div>
           </div>

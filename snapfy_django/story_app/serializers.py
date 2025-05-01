@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Story, MusicTrack
+from .models import Story, MusicTrack, LiveStream
 from user_app.models import User
 import cloudinary
 import logging
@@ -90,3 +90,29 @@ class StoryViewerSerializer(serializers.ModelSerializer):
             'profile_picture': cloudinary.utils.cloudinary_url(str(viewer.profile_picture))[0] if viewer.profile_picture else None,
             'has_liked': obj.likes.filter(id=viewer.id).exists()
         } for viewer in viewers]
+        
+
+class LiveStreamSerializer(serializers.ModelSerializer):
+    host = UserSerializer(read_only=True)
+    viewer_count = serializers.SerializerMethodField()
+    is_host = serializers.SerializerMethodField()
+    stream_key = serializers.CharField(read_only=True)
+    recording_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LiveStream
+        fields = ['id', 'host', 'title', 'created_at', 'is_active', 'viewer_count', 'is_host', 'ended_at', 'stream_key', 'recording_url']
+
+    def get_viewer_count(self, obj):
+        return obj.viewers.count()
+
+    def get_is_host(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.host == request.user
+        return False
+
+    def get_recording_url(self, obj):
+        if obj.recording_url:
+            return cloudinary.utils.cloudinary_url(str(obj.recording_url))[0]
+        return None

@@ -5,3 +5,4 @@ from .models import *
 
 admin.site.register(Story)
 admin.site.register(MusicTrack)
+admin.site.register(LiveStream)
