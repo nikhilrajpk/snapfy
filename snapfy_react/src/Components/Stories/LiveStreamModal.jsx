@@ -5,6 +5,7 @@ import { X, Video, MessageCircle, Users, Send } from 'lucide-react';
 import { showToast } from '../../redux/slices/toastSlice';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import axiosInstance from '../../axiosInstance';
+import { v4 as uuidv4 } from 'uuid';
 
 const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
   const [localStream, setLocalStream] = useState(null);
@@ -17,6 +18,7 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [streamReady, setStreamReady] = useState(false);
+  const processedMessageIds = useRef(new Set());
   const reconnectTimeoutRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const wsRef = useRef(null);
@@ -76,7 +78,7 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
       }
     } catch (error) {
       console.error('Error initiating WebRTC:', error);
-      dispatch(showToast({ message: 'Failed to establish video connection', type: 'error' }));
+      // dispatch(showToast({ message: 'Failed to establish video connection', type: 'error' }));
     }
   };
 
@@ -151,9 +153,20 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
           dispatch(showToast({ message: 'Live stream has ended', type: 'info' }));
           onClose();
         } else if (data.type === 'chat_message') {
+          // Skip if message is already processed or from the current user
+          if (processedMessageIds.current.has(data.message_id) || data.sender_id === user.id) {
+            return;
+          }
+          processedMessageIds.current.add(data.message_id);
           setChatMessages((prev) => [
             ...prev,
-            { sender_id: data.sender_id, sender_username: data.sender_username, message: data.message, timestamp: new Date().toISOString() },
+            {
+              sender_id: data.sender_id,
+              sender_username: data.sender_username,
+              message: data.message,
+              timestamp: new Date().toISOString(),
+              message_id: data.message_id,
+            },
           ]);
         } else if (data.type === 'webrtc_offer' && isHost) {
           if (!streamRef.current) {
@@ -298,13 +311,27 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
   const handleSendMessage = () => {
     if (!chatInput.trim() || !wsRef.current) return;
     if (wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('Sending chat message:', chatInput);
+      const messageId = uuidv4();
+      console.log('Sending chat message:', chatInput, 'with ID:', messageId);
       wsRef.current.send(JSON.stringify({
         type: 'chat_message',
         message: chatInput,
         sender_id: user.id,
         sender_username: user.username,
+        message_id: messageId,
       }));
+      // Add message locally for sender to see immediately
+      processedMessageIds.current.add(messageId);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender_id: user.id,
+          sender_username: user.username,
+          message: chatInput,
+          timestamp: new Date().toISOString(),
+          message_id: messageId,
+        },
+      ]);
       setChatInput('');
     } else {
       dispatch(showToast({ message: 'Cannot send message: not connected', type: 'error' }));
@@ -482,7 +509,7 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
             </div>
             <div className="flex-1 overflow-y-auto space-y-3">
               {chatMessages.map((msg, index) => (
-                <div key={index} className="text-white text-sm">
+                <div key={msg.message_id} className="text-white text-sm">
                   <span className="font-semibold">{msg.sender_username}: </span>
                   {msg.message}
                 </div>
