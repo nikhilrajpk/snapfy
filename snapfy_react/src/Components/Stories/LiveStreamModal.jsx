@@ -16,13 +16,15 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
   const [showChat, setShowChat] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
+  const [streamReady, setStreamReady] = useState(false);
   const reconnectTimeoutRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const wsRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef({});
   const peerConnections = useRef({});
-  const isMounted = useRef(true); // Prevent state updates after unmount
+  const streamRef = useRef(null); // Ref to track stream immediately
+  const isMounted = useRef(true);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.user);
@@ -34,10 +36,33 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (isHost) {
+      startHostStream().then(() => {
+        setStreamReady(true);
+      });
+    }
+    connectWebSocket();
+  }, [isHost, liveStream?.id, user?.id]);
+
   const initiateWebRTC = async () => {
+    const hostId = liveStream.host.id;
+    console.log('Initiating WebRTC for host:', hostId);
+
+    if (peerConnections.current[hostId]) {
+      console.log('Closing existing peer connection for host:', hostId);
+      peerConnections.current[hostId].close();
+      delete peerConnections.current[hostId];
+    }
+
     try {
-      const pc = createPeerConnection(liveStream.host.id);
+      console.log('Creating new peer connection');
+      const pc = createPeerConnection(hostId);
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+      console.log('Creating offer');
       const offer = await pc.createOffer();
+      console.log('Setting local description');
       await pc.setLocalDescription(offer);
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         console.log('Sending WebRTC offer');
@@ -46,6 +71,8 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
           offer: offer,
           sender_id: user.id,
         }));
+      } else {
+        throw new Error('WebSocket not open');
       }
     } catch (error) {
       console.error('Error initiating WebRTC:', error);
@@ -53,164 +80,140 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
     }
   };
 
-  useEffect(() => {
+  const connectWebSocket = () => {
     if (!user?.id || !liveStream?.id) return;
 
     const getAccessToken = () => {
       return document.cookie
         .split('; ')
-        .find(row => row.startsWith('access_token='))
+        .find((row) => row.startsWith('access_token='))
         ?.split('=')[1];
     };
 
-    const connectWebSocket = () => {
-      const accessToken = getAccessToken();
-      if (!accessToken) {
-        dispatch(showToast({ message: 'Please log in to view live streams', type: 'error' }));
-        return;
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      dispatch(showToast({ message: 'Please log in to view live streams', type: 'error' }));
+      return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const backendHost = process.env.NODE_ENV === 'development' ? 'localhost:8000' : window.location.host;
+    const wsUrl = `${protocol}//${backendHost}/ws/live/${liveStream.id}/?token=${encodeURIComponent(accessToken)}`;
+    console.log('Attempting WebSocket connection to:', wsUrl);
+
+    const websocket = new WebSocket(wsUrl);
+    wsRef.current = websocket;
+
+    connectionTimeoutRef.current = setTimeout(() => {
+      if (websocket.readyState !== WebSocket.OPEN) {
+        console.error('WebSocket connection timed out after 15 seconds');
+        websocket.close(1000, 'Connection timeout');
+        setConnectionError('Failed to connect to the server. Please try again.');
       }
+    }, 15000);
 
-      // Dynamic WebSocket URL based on environment
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const backendHost = process.env.NODE_ENV === 'development' ? 'localhost:8000' : window.location.host;
-      const wsUrl = `${protocol}//${backendHost}/ws/live/${liveStream.id}/?token=${encodeURIComponent(accessToken)}`;
-      console.log('Attempting WebSocket connection to:', wsUrl);
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    const initialReconnectDelay = 1000;
 
-      const websocket = new WebSocket(wsUrl);
-      wsRef.current = websocket;
+    websocket.onopen = () => {
+      console.log('WebSocket connected successfully');
+      clearTimeout(connectionTimeoutRef.current);
+      setIsConnected(true);
+      setConnectionError(null);
+      reconnectAttempts = 0;
 
-      connectionTimeoutRef.current = setTimeout(() => {
-        console.log('Timeout check: WebSocket state is', websocket.readyState);
-        if (websocket.readyState !== WebSocket.OPEN) {
-          console.error('WebSocket connection timed out after 15 seconds');
-          websocket.close(1000, 'Connection timeout');
-          setConnectionError('Failed to connect to the server. Please try again.');
-        } else {
-          console.log('WebSocket is already open, ignoring timeout');
-        }
-      }, 15000);
+      if (!isHost) {
+        websocket.send(JSON.stringify({
+          type: 'join_stream',
+          sender_id: user.id,
+          sender_username: user.username,
+        }));
+        setTimeout(() => initiateWebRTC(), 100);
+      }
+    };
 
-      let reconnectAttempts = 0;
-      const maxReconnectAttempts = 5;
-      const initialReconnectDelay = 1000; // 1 second
-
-      websocket.onopen = () => {
-        console.log('WebSocket connected successfully');
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-        setIsConnected(true);
-        setConnectionError(null);
-        reconnectAttempts = 0;
-    
-        if (!isHost && websocket.readyState === WebSocket.OPEN) {
-          websocket.send(JSON.stringify({
-            type: 'join_stream',
-            sender_id: user.id,
-            sender_username: user.username,
-          }));
-          initiateWebRTC();
-        }
-      };
-
-      websocket.onmessage = (event) => {
-        if (!isMounted.current) return;
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Received WebSocket message:', data);
-      
-          if (data.type === 'viewer_update') {
-            setViewerCount(data.viewer_count);
-            setViewers(prev => {
-              const updated = prev.filter(v => v.id !== data.viewer_id);
-              if (data.viewer_username) {
-                updated.push({ id: data.viewer_id, username: data.viewer_username });
-              }
-              return updated;
+    websocket.onmessage = async (event) => {
+      if (!isMounted.current) return;
+      try {
+        const data = JSON.parse(event.data);
+        console.log('Received WebSocket message:', JSON.stringify(data, null, 2));
+        if (data.type === 'viewer_update') {
+          setViewerCount(data.viewer_count);
+          setViewers((prev) => {
+            const updated = prev.filter((v) => v.id !== data.viewer_id);
+            if (data.viewer_username) {
+              updated.push({ id: data.viewer_id, username: data.viewer_username });
+            }
+            return updated;
+          });
+        } else if (data.type === 'stream_ended') {
+          dispatch(showToast({ message: 'Live stream has ended', type: 'info' }));
+          onClose();
+        } else if (data.type === 'chat_message') {
+          setChatMessages((prev) => [
+            ...prev,
+            { sender_id: data.sender_id, sender_username: data.sender_username, message: data.message, timestamp: new Date().toISOString() },
+          ]);
+        } else if (data.type === 'webrtc_offer' && isHost) {
+          if (!streamRef.current) {
+            console.log('Local stream not available, waiting to process offer from:', data.sender_id);
+            await new Promise((resolve) => {
+              const checkStream = setInterval(() => {
+                if (streamRef.current) {
+                  clearInterval(checkStream);
+                  resolve();
+                }
+              }, 100);
             });
-          } else if (data.type === 'stream_ended') {
-            dispatch(showToast({ message: 'Live stream has ended', type: 'info' }));
-            onClose();
-          } else if (data.type === 'chat_message') {
-            setChatMessages(prev => [
-              ...prev,
-              { sender_id: data.sender_id, sender_username: data.sender_username, message: data.message, timestamp: new Date().toISOString() },
-            ]);
-          } else if (data.type === 'webrtc_offer') {
-            handleOffer(data.offer, data.sender_id);
-          } else if (data.type === 'webrtc_answer') {
-            handleAnswer(data.answer, data.sender_id);
-          } else if (data.type === 'webrtc_ice_candidate') {
+          }
+          console.log('Processing offer from:', data.sender_id);
+          handleOffer(data.offer, data.sender_id);
+        } else if (data.type === 'webrtc_answer' && !isHost && data.sender_id === liveStream.host.id.toString()) {
+          handleAnswer(data.answer, data.sender_id);
+        } else if (data.type === 'webrtc_ice_candidate') {
+          if (isHost && peerConnections.current[data.sender_id]) {
+            handleIceCandidate(data.candidate, data.sender_id);
+          } else if (!isHost && data.sender_id === liveStream.host.id.toString()) {
             handleIceCandidate(data.candidate, data.sender_id);
           }
-        } catch (error) {
-          console.error('Error processing WebSocket message:', error);
         }
-      };
-
-      websocket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-        setIsConnected(false);
-        setConnectionError('WebSocket connection error');
-      };
-    
-      websocket.onclose = (event) => {
-        console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-        setIsConnected(false);
-    
-        if (event.code !== 1000 && isMounted.current && reconnectAttempts < maxReconnectAttempts) {
-          const delay = initialReconnectDelay * Math.pow(2, reconnectAttempts);
-          console.log(`Reconnecting in ${delay}ms (Attempt ${reconnectAttempts + 1})`);
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectAttempts++;
-            connectWebSocket();
-          }, delay);
-        } else if (event.code !== 1000) {
-          setConnectionError('Unable to connect after multiple attempts. Please refresh the page.');
-        }
-      };
-    };
-
-    connectWebSocket();
-
-    return () => {
-      console.log('Cleaning up WebSocket connection');
-      if (wsRef.current) {
-        if (wsRef.current.readyState !== WebSocket.CLOSED) {
-          wsRef.current.close(1000, 'Component unmounting');
-        }
-        wsRef.current.onopen = null;
-        wsRef.current.onmessage = null;
-        wsRef.current.onerror = null;
-        wsRef.current.onclose = null;
-        wsRef.current = null;
-      }
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
+      } catch (error) {
+        console.error('Error processing WebSocket message:', error);
       }
     };
-  }, [liveStream?.id, user?.id, dispatch, navigate, isHost]);
 
-  useEffect(() => {
-    if (isHost) {
-      startHostStream();
-    } else {
-      joinStream();
-    }
-  }, [isHost]);
+    websocket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      clearTimeout(connectionTimeoutRef.current);
+      setIsConnected(false);
+      setConnectionError('WebSocket connection error');
+    };
+
+    websocket.onclose = (event) => {
+      console.log(`WebSocket closed with code: ${event.code}, reason: ${event.reason}`);
+      clearTimeout(connectionTimeoutRef.current);
+      setIsConnected(false);
+
+      if (event.code !== 1000 && isMounted.current && reconnectAttempts < maxReconnectAttempts) {
+        const delay = initialReconnectDelay * Math.pow(2, reconnectAttempts);
+        console.log(`Reconnecting in ${delay}ms (Attempt ${reconnectAttempts + 1})`);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttempts++;
+          connectWebSocket();
+        }, delay);
+      } else if (event.code !== 1000) {
+        setConnectionError('Unable to connect after multiple attempts. Please refresh the page.');
+      }
+    };
+  };
 
   const startHostStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setLocalStream(stream);
+      console.log('Host captured stream with tracks:', stream.getTracks());
+      streamRef.current = stream; // Set ref immediately
+      setLocalStream(stream);     // Set state (async update)
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
@@ -225,7 +228,7 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
     try {
       await new Promise((resolve, reject) => {
         let attempts = 0;
-        const maxAttempts = 50; // 5 seconds with 100ms intervals
+        const maxAttempts = 50;
         const checkConnection = () => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             resolve();
@@ -240,7 +243,7 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
         };
         checkConnection();
       });
-  
+
       const response = await axiosInstance.post(`/live/${liveStream.id}/join/`);
       setViewerCount(response.data.viewer_count);
     } catch (error) {
@@ -252,23 +255,42 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
 
   const createPeerConnection = (viewerId) => {
     const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log('Sending ICE candidate:', event.candidate.candidate);
         wsRef.current.send(JSON.stringify({
           type: 'webrtc_ice_candidate',
           candidate: event.candidate,
           sender_id: user.id,
         }));
+      } else if (!event.candidate) {
+        console.log('ICE candidate gathering completed for:', viewerId);
       }
     };
+
     pc.ontrack = (event) => {
       if (!isHost && isMounted.current) {
+        console.log('Received remote track from host:', viewerId, event.streams[0].getTracks());
         setRemoteStreams((prev) => ({ ...prev, [viewerId]: event.streams[0] }));
       }
     };
-    if (isHost && localStream) {
-      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+    pc.onconnectionstatechange = () => {
+      console.log('Peer connection state:', pc.connectionState);
+      if (pc.connectionState === 'failed') {
+        console.error('Peer connection failed for:', viewerId);
+      }
+    };
+
+    if (isHost && streamRef.current) {
+      console.log('Host adding tracks to peer connection for:', viewerId);
+      streamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, streamRef.current);
+        console.log('Added track:', track.kind);
+      });
     }
+
     peerConnections.current[viewerId] = pc;
     return pc;
   };
@@ -290,27 +312,46 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
   };
 
   const handleOffer = async (offer, senderId) => {
-    const pc = createPeerConnection(senderId);
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    wsRef.current.send(JSON.stringify({
-      type: 'webrtc_answer',
-      answer: answer,
-      sender_id: user.id,
-    }));
+    console.log('Host received offer from:', senderId);
+    try {
+      const pc = createPeerConnection(senderId);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log('Host sending answer to:', senderId);
+        wsRef.current.send(JSON.stringify({
+          type: 'webrtc_answer',
+          answer: answer,
+          sender_id: user.id,
+        }));
+      } else {
+        console.error('WebSocket not open to send answer');
+      }
+    } catch (error) {
+      console.error('Error handling offer:', error);
+    }
   };
 
   const handleAnswer = async (answer, senderId) => {
     const pc = peerConnections.current[senderId];
     if (pc) {
-      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log('Current signaling state:', pc.signalingState);
+      if (pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log('Remote description set successfully for:', senderId);
+      } else {
+        console.error('Invalid signaling state for setting remote answer:', pc.signalingState);
+      }
+    } else {
+      console.error('No peer connection found for sender:', senderId);
     }
   };
 
   const handleIceCandidate = async (candidate, senderId) => {
     const pc = peerConnections.current[senderId];
     if (pc) {
+      console.log('Adding ICE candidate:', candidate);
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     }
   };
@@ -341,12 +382,18 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
     setRemoteStreams({});
   };
 
-
   useEffect(() => {
     if (!isHost) {
       Object.entries(remoteStreams).forEach(([viewerId, stream]) => {
-        if (remoteVideoRef.current[viewerId]) {
-          remoteVideoRef.current[viewerId].srcObject = stream;
+        const videoEl = remoteVideoRef.current[viewerId];
+        if (videoEl) {
+          if (videoEl.srcObject !== stream) {
+            console.log('Binding stream to video element for:', viewerId);
+            videoEl.srcObject = stream;
+            videoEl.play().catch((e) => console.error('Error playing video:', e));
+          }
+        } else {
+          console.warn('Video element not found for:', viewerId);
         }
       });
     }
@@ -369,16 +416,16 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
             >
               {liveStream.host.username}
             </p>
-            <p className="text-white/60 text-xs">{
-              (() => {
+            <p className="text-white/60 text-xs">
+              {(() => {
                 try {
                   const parsed = JSON.parse(liveStream?.title.replace(/'/g, '"'));
                   return parsed.title || 'Live Stream';
                 } catch (e) {
                   return 'Live Stream';
                 }
-              })()
-            }</p>
+              })()}
+            </p>
             {console.log(liveStream)}
           </div>
         </div>

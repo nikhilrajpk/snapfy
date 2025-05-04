@@ -99,6 +99,7 @@ class LiveStreamConsumer(AsyncWebsocketConsumer):
                 logger.error(f"Error removing viewer: {str(e)}")
 
     async def receive(self, text_data):
+        logger.info(f"Received message from {self.user.id}: {text_data}")
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
@@ -109,6 +110,7 @@ class LiveStreamConsumer(AsyncWebsocketConsumer):
                 await self.send_viewer_update()
 
             elif message_type == 'webrtc_offer':
+                logger.info(f"Broadcasting webrtc_offer from {self.user.id} to group {self.group_name}")
                 await self.channel_layer.group_send(
                     self.group_name,
                     {
@@ -151,6 +153,7 @@ class LiveStreamConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({'error': 'Invalid JSON'}))
 
     async def webrtc_offer(self, event):
+        logger.info(f"Sending webrtc_offer to {self.user.id}: {event['sender_id']}")
         await self.send(text_data=json.dumps({
             'type': 'webrtc_offer',
             'offer': event['offer'],
