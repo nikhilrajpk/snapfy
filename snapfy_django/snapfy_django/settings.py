@@ -29,10 +29,17 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = env('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+        '.asia-south1.run.app',  # Allows any subdomain of asia-south1.run.app
+        'localhost',
+        '127.0.0.1',
+    ]
 
+import logging
+logger = logging.getLogger(__name__)
+logger.info("Settings loaded: DEBUG=%s, ALLOWED_HOSTS=%s", DEBUG, ALLOWED_HOSTS)
 
 # Application definition
 
@@ -75,6 +82,8 @@ MIDDLEWARE = [
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
 
 CORS_ALLOWED_ORIGINS = [
+    "https://nikhilrajpk.in",
+    "https://www.nikhilrajpk.in",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
@@ -227,10 +236,13 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 
 
+REDIS_HOST = env('REDIS_HOST', default='localhost')
+REDIS_PORT = env.int('REDIS_PORT', default=6379)
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
+        "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/1",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
@@ -238,11 +250,13 @@ CACHES = {
 }
 
 
-
-# Tell celery about Redis - same URL as CACHES setting
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/1"
-
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/1"
+# Celery configuration
+CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/1"
+CELERY_RESULT_BACKEND = f"redis://{REDIS_HOST}:{REDIS_PORT}/1"
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
 
 
 # Django email settings for sending email
@@ -281,23 +295,45 @@ GOOGLE_CLIENT_ID = env('GOOGLE_CLIENT_ID')
 
 
 
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'level': 'INFO',
-            'class': 'logging.StreamHandler',
+# Production logging
+if not DEBUG:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+                'style': '{',
+            },
         },
-    },
-    'loggers': {
-        '': {
+        'handlers': {
+            'console': {
+                'level': 'INFO',
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            },
+        },
+        'root': {
             'handlers': ['console'],
             'level': 'INFO',
-            'propagate': True,
         },
-    },
-}
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': 'INFO',
+                'propagate': False,
+            },
+        },
+    }
+
+# Security settings for production
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 
 
@@ -307,7 +343,7 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
             "symmetric_encryption_keys": [SECRET_KEY],
             'capacity': 1000,  # Increase from default 100
             'expiry': 60,

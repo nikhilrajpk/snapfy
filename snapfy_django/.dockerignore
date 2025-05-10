@@ -1,0 +1,13 @@
+.git
+*.pyc
+__pycache__
+venv/
+env/
+snapfy_react/
+.dockerignore
+Dockerfile
+docker-compose.yml
+media/
+staticfiles/
+.vscode
+README.md

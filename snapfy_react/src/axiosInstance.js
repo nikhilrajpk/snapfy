@@ -4,7 +4,7 @@ import { logout } from './redux/slices/userSlice';
 import { showToast } from './redux/slices/toastSlice';
 
 const axiosInstance = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/',
+  baseURL: 'https://snapfyimg-676661542025.asia-south1.run.app/api/',
   withCredentials: true,
 });
 
@@ -51,7 +51,7 @@ axiosInstance.interceptors.response.use(
         
         // Refresh the token
         const response = await axios.post(
-          'http://127.0.0.1:8000/api/token/refresh/',
+          'https://snapfyimg-676661542025.asia-south1.run.app/api/token/refresh/',
           { refresh: refreshToken },
           { withCredentials: true }
         );

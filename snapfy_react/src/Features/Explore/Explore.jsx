@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { usePostsQuery } from '../../API/usePostsQuery';
 import SideBar from '../../Components/Navbar/SideBar';
-import PostPopup from '../../Components/Post/PostPopup';
+import PostPopUp from '../../Components/Post/PostPopUp';
 import { useSelector } from 'react-redux';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useDispatch } from 'react-redux';
@@ -156,7 +156,7 @@ const ExplorePage = () => {
       </div>
 
       {isPopupOpen && selectedPost && (
-        <PostPopup
+        <PostPopUp
           post={selectedPost}
           userData={{
             username: selectedPost.user.username,
@@ -166,7 +166,7 @@ const ExplorePage = () => {
           }}
           isOpen={isPopupOpen}
           onClose={closePostPopup}
-          onLike={handleLike} // Pass handleLike to PostPopup
+          onLike={handleLike}
         />
       )}
     </div>
