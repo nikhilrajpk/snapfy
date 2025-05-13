@@ -151,7 +151,7 @@ class PostAPIView(ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @action(detail=True, methods=['post'], url_path='comment/(?P<comment_id>\d+)/reply')
+    @action(detail=True, methods=['post'], url_path=r'comment/(?P<comment_id>\d+)/reply')
     def reply(self, request, pk=None, comment_id=None):
         post = self.get_object()
         try:
@@ -175,7 +175,7 @@ class PostAPIView(ModelViewSet):
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)
     
-    @action(detail=True, methods=['get'], url_path='comment/(?P<comment_id>\d+)/replies')
+    @action(detail=True, methods=['get'], url_path=r'comment/(?P<comment_id>\d+)/replies')
     def get_replies(self, request, pk=None, comment_id=None):
         post = self.get_object()
         try:

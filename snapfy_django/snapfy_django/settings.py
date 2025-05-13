@@ -230,7 +230,7 @@ CSRF_COOKIE_HTTPONLY = False
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
+        "LOCATION": "redis://redis:6379/1", # when locally running make this as redis://127.0.0.1:6379/1
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
@@ -240,9 +240,9 @@ CACHES = {
 
 
 # Tell celery about Redis - same URL as CACHES setting
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/1"
+CELERY_BROKER_URL = "redis://redis:6379/1"
 
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/1"
+CELERY_RESULT_BACKEND = "redis://redis:6379/1"
 
 
 # Django email settings for sending email
@@ -307,7 +307,7 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+            "hosts": [('redis', 6379)],
             "symmetric_encryption_keys": [SECRET_KEY],
             'capacity': 1000,  # Increase from default 100
             'expiry': 60,

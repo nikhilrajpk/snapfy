@@ -26,7 +26,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         self.user = None
         self.connection_id = str(uuid.uuid4())
         self.session_id = None
-        self.redis_client = redis.from_url("redis://localhost:6379/0")
+        self.redis_client = redis.from_url("redis://redis:6379/0")
 
         query_string = self.scope.get('query_string', b'').decode()
         if 'session_id=' in query_string:
@@ -133,7 +133,7 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error removing connection from Redis: {e}")
 
     async def get_user_connections(self):
-        redis_client = redis.from_url("redis://localhost:6379/0")
+        redis_client = redis.from_url("redis://redis:6379/0")
         try:
             connections = await redis_client.smembers(f"user_connections:{self.user_id}")
             result = []

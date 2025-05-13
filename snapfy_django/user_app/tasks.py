@@ -19,7 +19,11 @@ def send_otp_email(user_email):
     otp = generate_otp()
     logger.info(f"OTP :: {otp}")
     user = get_object_or_404(User, email=user_email)
-    user.set_otp(otp)
+    try:
+        user.set_otp(otp)
+    except Exception as e:
+        logger.error(f"Failed to store OTP in Redis for {user_email}: {str(e)}")
+    
     try:
         send_mail(
             subject="Verify Your Snapfy Account",  # More descriptive subject
@@ -37,7 +41,7 @@ def send_otp_email(user_email):
                 f"<h2>Welcome to Snapfy!</h2>"
                 f"<p>Hi there,</p>"
                 f"<p>Thanks for signing up! Your One-Time Password (OTP) is: <strong>{otp}</strong></p>"
-                f"<p>Please enter this code to verify your email. It’s valid for 10 minutes.</p>"
+                f"<p>Please enter this code to verify your email. It’s valid for 5 minutes.</p>"
                 f"<p>If you didn’t request this, feel free to ignore this email.</p>"
                 f"<p>Best,<br>The Snapfy Team</p>"
             ),
