@@ -203,9 +203,18 @@ class RegisterUserView(APIView):
         serializer = UserCreateSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Always send a new OTP when user tries to register again
-            send_otp_email.delay(user.email)
-            return Response({"message": "OTP sent to email."}, status=status.HTTP_201_CREATED)
+            try:
+                # Call the synchronous send_otp_email function
+                send_otp_email(user.email)
+                return Response({"message": "OTP sent to email."}, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                logger.error(f"Failed to send OTP email to {user.email}: {str(e)}")
+                # delete the user if email sending fails to avoid unverified accounts
+                user.delete()
+                return Response(
+                    {"message": "Failed to send OTP email. Please try again."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class VerifyOTPView(APIView):
@@ -234,8 +243,16 @@ class ResendOTPView(APIView):
         serializer = ResendOTPSerializer(data=request.data)
         if serializer.is_valid():
             email = serializer.validated_data['email']
-            send_otp_email(email)
-            return Response({"message": "OTP has been send to your email."}, status= status.HTTP_200_OK)
+            try:
+                # Call the synchronous send_otp_email function
+                send_otp_email(email)
+                return Response({"message": "OTP has been sent to your email."}, status=status.HTTP_200_OK)
+            except Exception as e:
+                logger.error(f"Failed to send OTP email to {email}: {str(e)}")
+                return Response(
+                    {"message": "Failed to send OTP email. Please try again."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

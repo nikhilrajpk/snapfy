@@ -1,4 +1,4 @@
-# version: '3.9'
+
 
 services:
   web:
@@ -27,8 +27,6 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
     depends_on:
       - db
       - redis
@@ -38,9 +36,10 @@ services:
   db:
     image: postgres:14
     environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=snapfy
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=nikhil@2002
+      - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -50,37 +49,6 @@ services:
     image: redis:7
     ports:
       - "6379:6379"
-    networks:
-      - snapfy-network
-
-  celery:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A snapfy_django worker --loglevel=info
-    volumes:
-      - .:/app
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DEBUG=True
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - EMAIL_HOST_USER=${EMAIL_HOST_USER}
-      - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
-      - CLOUD_NAME=${CLOUD_NAME}
-      - API_KEY=${API_KEY}
-      - API_SECRET=${API_SECRET}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-    depends_on:
-      - db
-      - redis
     networks:
       - snapfy-network
 

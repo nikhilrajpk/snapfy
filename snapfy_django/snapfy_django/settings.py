@@ -57,7 +57,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'rest_framework_simplejwt',
     'django_redis',
-    'celery',
     'corsheaders',
 ]
 
@@ -227,22 +226,33 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 
 
+REDIS_HOST = env('REDIS_HOST', default='redis')
+REDIS_PORT = env('REDIS_PORT', default='6379')
+REDIS_PASSWORD = env('REDIS_PASSWORD', default='')
+REDIS_URL = f"redis://{REDIS_PASSWORD + '@' if REDIS_PASSWORD else ''}{REDIS_HOST}:{REDIS_PORT}/1"
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/1", # when locally running make this as redis://127.0.0.1:6379/1
+        "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
     }
 }
 
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(REDIS_HOST, int(REDIS_PORT))],
+            "symmetric_encryption_keys": [SECRET_KEY],
+            'capacity': 1000,
+            'expiry': 60,
+        },
+    },
+}
 
-
-# Tell celery about Redis - same URL as CACHES setting
-CELERY_BROKER_URL = "redis://redis:6379/1"
-
-CELERY_RESULT_BACKEND = "redis://redis:6379/1"
 
 
 # Django email settings for sending email
@@ -302,15 +312,3 @@ LOGGING = {
 
 
 ASGI_APPLICATION = 'snapfy_django.asgi.application'
-
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('redis', 6379)],
-            "symmetric_encryption_keys": [SECRET_KEY],
-            'capacity': 1000,  # Increase from default 100
-            'expiry': 60,
-        },
-    },
-}
