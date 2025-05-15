@@ -1,5 +1,4 @@
 # Dockerfile
-# Use the official Python image (not Alpine)
 FROM python:3.12
 
 # Set environment variables
@@ -22,8 +21,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
-# Expose port for Daphne
-EXPOSE 8000
+# Expose port for Cloud Run
+EXPOSE 8080
+
+# Health check for Cloud Run
+RUN pip install httpie
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD http --quiet http://localhost:8080/health || exit 1
 
 # Command to run Daphne
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "snapfy_django.asgi:application"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8080", "snapfy_django.asgi:application"]

@@ -11,7 +11,7 @@ import logging
 import redis.asyncio as redis
 import uuid
 import asyncio
-import datetime
+import datetime, os
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -26,7 +26,12 @@ class UserChatConsumer(AsyncWebsocketConsumer):
         self.user = None
         self.connection_id = str(uuid.uuid4())
         self.session_id = None
-        self.redis_client = redis.from_url("redis://redis:6379/0")
+        
+        redis_password = os.environ.get('REDIS_PASSWORD', '')
+        redis_host = os.environ.get('REDIS_HOST', 'localhost')
+        redis_port = os.environ.get('REDIS_PORT', '6379')
+        redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/0" if redis_password else f"redis://{redis_host}:{redis_port}/0"
+        self.redis_client = redis.from_url(redis_url)
 
         query_string = self.scope.get('query_string', b'').decode()
         if 'session_id=' in query_string:
@@ -133,7 +138,11 @@ class UserChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error removing connection from Redis: {e}")
 
     async def get_user_connections(self):
-        redis_client = redis.from_url("redis://redis:6379/0")
+        redis_password = os.environ.get('REDIS_PASSWORD', '')
+        redis_host = os.environ.get('REDIS_HOST', 'localhost')
+        redis_port = os.environ.get('REDIS_PORT', '6379')
+        redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/0" if redis_password else f"redis://{redis_host}:{redis_port}/0"
+        redis_client = redis.from_url(redis_url)
         try:
             connections = await redis_client.smembers(f"user_connections:{self.user_id}")
             result = []

@@ -231,7 +231,7 @@ CSRF_COOKIE_HTTPONLY = False
 REDIS_HOST = env('REDIS_HOST', default='redis')
 REDIS_PORT = env('REDIS_PORT', default='6379')
 REDIS_PASSWORD = env('REDIS_PASSWORD', default='')
-REDIS_URL = f"redis://{REDIS_PASSWORD + '@' if REDIS_PASSWORD else ''}{REDIS_HOST}:{REDIS_PORT}/1"
+REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0" if REDIS_PASSWORD else f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 
 CACHES = {
     "default": {
@@ -247,7 +247,7 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [(REDIS_HOST, int(REDIS_PORT))],
+            "hosts": [f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0" if REDIS_PASSWORD else f"redis://{REDIS_HOST}:{REDIS_PORT}/0"],
             "symmetric_encryption_keys": [SECRET_KEY],
             'capacity': 1000,
             'expiry': 60,
