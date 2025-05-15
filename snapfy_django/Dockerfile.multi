@@ -1,0 +1,53 @@
+# Dockerfile.multi
+# Use a base image with Python
+FROM python:3.12
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies, including PostgreSQL 14 server
+RUN apt-get update && apt-get install -y \
+    gnupg \
+    curl \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && curl -sL https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
+    && apt-get update \
+    && apt-get install -y \
+        gcc \
+        libpq-dev \
+        postgresql-14 \
+        redis-server \
+        supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create PostgreSQL data directory and initialize database
+RUN mkdir -p /var/lib/postgresql/data
+RUN chown postgres:postgres /var/lib/postgresql/data
+RUN chmod 700 /var/lib/postgresql/data
+RUN su - postgres -c "/usr/lib/postgresql/14/bin/initdb -D /var/lib/postgresql/data"
+
+
+# Install Python dependencies
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project files
+COPY . .
+RUN chmod +x init-db.sh
+
+# Create supervisord configuration
+RUN mkdir -p /etc/supervisor/conf.d
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+# Expose port for Cloud Run (8080)
+EXPOSE 8080
+
+# Health check for Cloud Run
+RUN pip install httpie
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD http --quiet http://localhost:8080/health || exit 1
+
+# Run supervisord
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

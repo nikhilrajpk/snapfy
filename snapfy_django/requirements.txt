@@ -74,3 +74,4 @@ watchfiles==1.0.4
 wcwidth==0.2.13
 websockets==15.0.1
 zope.interface==7.2
+httpie>=3.2.2

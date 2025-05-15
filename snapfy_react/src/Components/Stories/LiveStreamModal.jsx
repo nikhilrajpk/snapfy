@@ -98,11 +98,14 @@ const LiveStreamModal = ({ liveStream, onClose, isHost }) => {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const backendHost = process.env.NODE_ENV === 'development' ? 'localhost:8000' : window.location.host;
-    const wsUrl = `${protocol}//${backendHost}/ws/live/${liveStream.id}/?token=${encodeURIComponent(accessToken)}`;
+    let wsUrl;
+    if (process.env.NODE_ENV === 'development') {
+      wsUrl = `ws://localhost:8000/ws/live/${liveStream.id}/?token=${encodeURIComponent(accessToken)}`;
+    } else {
+      wsUrl = `wss://snapfy-backend-682457091521.us-central1.run.app/ws/live/${liveStream.id}/?token=${encodeURIComponent(accessToken)}`;
+    }
+    
     console.log('Attempting WebSocket connection to:', wsUrl);
-
     const websocket = new WebSocket(wsUrl);
     wsRef.current = websocket;
 

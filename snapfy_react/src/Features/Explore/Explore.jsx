@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { usePostsQuery } from '../../API/usePostsQuery';
 import SideBar from '../../Components/Navbar/SideBar';
-import PostPopup from '../../Components/Post/PostPopup';
+import PostPopup from '../../Components/Post/PostPopUp';
 import { useSelector } from 'react-redux';
 import { CLOUDINARY_ENDPOINT } from '../../APIEndPoints';
 import { useDispatch } from 'react-redux';

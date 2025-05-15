@@ -1055,15 +1055,13 @@ const UserStories = () => {
         wsRef.current.close(1000, 'Reconnecting');
       }
 
-      // Fix URL construction
+      // URL construction
       let wsUrl;
       if (process.env.NODE_ENV === 'development') {
-        wsUrl = `ws://${window.location.hostname}:8000/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
+        wsUrl = `ws://localhost:8000/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
       } else {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
+        wsUrl = `wss://snapfy-backend-682457091521.us-central1.run.app/ws/live/global/?token=${encodeURIComponent(accessToken)}`;
       }
-      
       console.log('Connecting to WebSocket:', wsUrl);
       const websocket = new WebSocket(wsUrl);
       wsRef.current = websocket;
