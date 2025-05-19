@@ -154,7 +154,7 @@ const Login = () => {
           <h2 className="text-2xl font-semibold text-white mb-8 text-center">Login to Your Account</h2>
           
           {/* Google Sign In Button */}
-          <div className="mb-6 hover:scale-105 duration-300">
+          <div className="mb-6 mx-auto hover:scale-105 duration-300">
             <GoogleLogin
               onSuccess={handleGoogleSuccess}
               onError={handleGoogleError}

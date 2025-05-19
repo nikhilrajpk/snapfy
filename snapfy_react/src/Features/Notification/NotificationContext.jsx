@@ -52,9 +52,26 @@ export const NotificationProvider = ({ children }) => {
   const connectWebSocket = () => {
     if (!user?.username) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = 'localhost:8000';
-    socketRef.current = new WebSocket(`${protocol}://${host}/ws/notifications/${user.username}/`);
+    // Retrieve access token from cookies
+    const accessToken = document.cookie
+    .split('; ')
+    .find((row) => row.startsWith('access_token='))
+    ?.split('=')[1];
+
+    if (!accessToken) {
+      console.log('No access token found for WebSocket connection');
+      return;
+    }
+
+    // Set WebSocket URL based on environment
+    let wsUrl;
+    if (process.env.NODE_ENV === 'development') {
+      wsUrl = `ws://localhost:8000/ws/notifications/${user.username}/?token=${encodeURIComponent(accessToken)}`;
+    } else {
+      wsUrl = `wss://snapfy-backend-682457091521.us-central1.run.app/ws/notifications/${user.username}/?token=${encodeURIComponent(accessToken)}`;
+    }
+
+    socketRef.current = new WebSocket(wsUrl);
 
     socketRef.current.onopen = () => {
       console.log('WebSocket connection established (context)');

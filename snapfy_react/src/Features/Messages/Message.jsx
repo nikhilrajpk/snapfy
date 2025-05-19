@@ -106,6 +106,11 @@ function Message() {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      {
+        urls: 'turn:turn.cloudflare.com:3478',
+        username: 'misty-frog-9296',
+        credential: '8d8c10ed5a20bcb56287b4ac29aef1f2',
+      },
     ],
   };
 
@@ -303,6 +308,10 @@ function Message() {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
         localStorage.setItem('session_id', sessionId);
+
+        if (callState !== 'active' && callState !== 'incoming' && callState !== 'outgoing') {
+          setPendingSignals([]); // Clear pending signals if no active call
+        }
 
         if (pendingSignals.length > 0) {
           pendingSignals.forEach(signal => {
@@ -646,44 +655,16 @@ function Message() {
 
   const playVideo = async (videoRef, stream, label) => {
     if (!videoRef.current || !stream || !stream.active) {
-      console.warn(`Cannot play ${label} video: ref or stream missing or inactive`);
+      console.warn(`Cannot play ${label} video: ref or stream missing or inactive`, { stream });
       return false;
     }
   
-    // Set srcObject only if different
-    if (videoRef.current.srcObject !== stream) {
-      videoRef.current.srcObject = stream;
-      console.log(`Set srcObject for ${label} video`);
-    }
+    videoRef.current.srcObject = stream;
+    console.log(`Set srcObject for ${label} video`, { streamId: stream.id });
   
-    // Log initial state
-    console.log(`${label} video readyState:`, videoRef.current.readyState);
-    console.log(`${label} video networkState:`, videoRef.current.networkState);
+    videoRef.current.onerror = (e) => console.error(`${label} video error:`, e);
+    videoRef.current.onplaying = () => console.log(`${label} video playing`);
   
-    // Add error handler
-    videoRef.current.onerror = (e) => {
-      console.error(`${label} video error:`, e);
-    };
-  
-    // Wait for video to be ready
-    if (videoRef.current.readyState < 3) {
-      console.log(`Waiting for ${label} video to be ready...`);
-      await new Promise((resolve) => {
-        videoRef.current.oncanplay = () => {
-          console.log(`${label} video oncanplay fired`);
-          resolve();
-        };
-        // Timeout if oncanplay doesn't fire
-        setTimeout(() => {
-          if (videoRef.current.readyState < 3) {
-            console.warn(`${label} video oncanplay timeout`);
-            resolve();
-          }
-        }, 5000);
-      });
-    }
-  
-    // Attempt to play
     try {
       await videoRef.current.play();
       console.log(`Successfully played ${label} video`);
@@ -691,22 +672,16 @@ function Message() {
       return true;
     } catch (error) {
       console.error(`Error playing ${label} video:`, error);
-      if (label === "remote" && error.name === "NotAllowedError") {
-        dispatch(showToast({
-          message: "Click to start video playback",
-          type: "info",
-        }));
+      if (error.name === "NotAllowedError") {
+        dispatch(showToast({ message: "Click to start video playback", type: "info" }));
         videoRef.current.onclick = async () => {
           try {
             await videoRef.current.play();
-            console.log("Remote video played manually");
+            console.log(`${label} video played manually`);
             isPlayingRemote.current = true;
-            dispatch(showToast({
-              message: "Remote video started",
-              type: "success",
-            }));
+            dispatch(showToast({ message: "Video started", type: "success" }));
           } catch (e) {
-            console.error("Manual play failed:", e);
+            console.error(`${label} video manual play failed:`, e);
           }
         };
       }
@@ -719,29 +694,32 @@ function Message() {
       dispatch(showToast({ message: 'Another call is in progress', type: 'warning' }));
       return;
     }
-
+  
     if (!selectedRoom || !conversationId) {
       dispatch(showToast({ message: 'No chat selected', type: 'error' }));
       return;
     }
-
+  
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
       dispatch(showToast({ message: 'Chat server not connected. Please try again.', type: 'error' }));
       return;
     }
-
+  
+    // Clean up any existing resources
+    cleanupCall();
+  
     let isCallOfferSent = false;
     let callId = null;
-
+  
     try {
       const otherUser = selectedRoom.users.find((u) => String(u.id) !== String(user.id));
       if (!otherUser?.id) throw new Error('No user to call');
-
+  
       const constraints = {
         audio: true,
         video: callType === 'video' ? { width: 1280, height: 720 } : false,
       };
-
+  
       const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
         console.error('Error getting media:', err);
         if (callType === 'video') {
@@ -750,9 +728,10 @@ function Message() {
         }
         throw err;
       });
-
+  
       localStreamRef.current = stream;
       console.log('Local stream tracks:', stream.getTracks());
+  
       if (callType === 'video' && localVideoRef.current) {
         localVideoRef.current.muted = true;
         const success = await playVideo(localVideoRef, stream, 'local');
@@ -760,12 +739,24 @@ function Message() {
           throw new Error('Failed to play local video stream');
         }
       }
-
+  
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
-      stream.getTracks().forEach((track) => {
-        peerConnectionRef.current.addTrack(track, stream);
-        console.log(`Added ${track.kind} track to peer connection`, track);
+  
+      // Use transceivers to avoid track conflicts
+      const audioTransceiver = peerConnectionRef.current.addTransceiver('audio');
+      const videoTransceiver = callType === 'video' ? peerConnectionRef.current.addTransceiver('video') : null;
+  
+      stream.getAudioTracks().forEach(track => {
+        audioTransceiver.sender.replaceTrack(track);
+        console.log(`Set audio track: ${track.id}`);
       });
+      if (videoTransceiver) {
+        stream.getVideoTracks().forEach(track => {
+          videoTransceiver.sender.replaceTrack(track);
+          console.log(`Set video track: ${track.id}`);
+        });
+      }
+      
 
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && callId) {
@@ -850,7 +841,7 @@ function Message() {
       peerConnectionRef.current.onnegotiationneeded = async () => {
         negotiationQueue.push(true);
         if (isNegotiating) return;
-
+      
         isNegotiating = true;
         while (negotiationQueue.length > 0) {
           negotiationQueue.shift();
@@ -858,7 +849,7 @@ function Message() {
             console.log('Cannot negotiate: signalingState is', peerConnectionRef.current.signalingState);
             continue;
           }
-
+      
           try {
             const offer = await peerConnectionRef.current.createOffer({
               offerToReceiveAudio: 1,
@@ -866,10 +857,10 @@ function Message() {
             });
             await peerConnectionRef.current.setLocalDescription(offer);
             const signal = JSON.stringify({
-              type: callType === 'video' ? 'call_offer' : 'call_answer',
+              type: 'call_offer', // Always send as call_offer for renegotiation
               call_id: callId,
               room_id: conversationId || roomId,
-              target_user_id: otherUser.id || caller.id,
+              target_user_id: otherUser?.id || caller.id,
               sdp: offer,
               call_type: callType,
               caller: { id: user.id, username: user.username, profile_picture: user.profile_picture || null },
@@ -970,13 +961,16 @@ function Message() {
       dispatch(resetCall());
       return;
     }
-
+  
+    // Clean up any existing resources
+    cleanupCall();
+  
     try {
       const constraints = {
         audio: true,
         video: callType === 'video' ? { width: 1280, height: 720 } : false,
       };
-
+  
       const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
         console.error('Error getting media:', err);
         if (callType === 'video') {
@@ -985,9 +979,10 @@ function Message() {
         }
         throw err;
       });
-
+  
       localStreamRef.current = stream;
       console.log('Local stream tracks:', stream.getTracks());
+  
       if (callType === 'video' && localVideoRef.current) {
         localVideoRef.current.muted = true;
         const success = await playVideo(localVideoRef, stream, 'local');
@@ -995,12 +990,24 @@ function Message() {
           throw new Error('Failed to play local video stream');
         }
       }
-
+  
       peerConnectionRef.current = new RTCPeerConnection(RTC_CONFIG);
-      stream.getTracks().forEach((track) => {
-        peerConnectionRef.current.addTrack(track, stream);
-        console.log(`Added ${track.kind} track to peer connection`, track);
+  
+      // Use transceivers to avoid track conflicts
+      const audioTransceiver = peerConnectionRef.current.addTransceiver('audio');
+      const videoTransceiver = callType === 'video' ? peerConnectionRef.current.addTransceiver('video') : null;
+  
+      stream.getAudioTracks().forEach(track => {
+        audioTransceiver.sender.replaceTrack(track);
+        console.log(`Set audio track: ${track.id}`);
       });
+      if (videoTransceiver) {
+        stream.getVideoTracks().forEach(track => {
+          videoTransceiver.sender.replaceTrack(track);
+          console.log(`Set video track: ${track.id}`);
+        });
+      }
+      
 
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && callId) {
@@ -1084,7 +1091,7 @@ function Message() {
       peerConnectionRef.current.onnegotiationneeded = async () => {
         negotiationQueue.push(true);
         if (isNegotiating) return;
-
+      
         isNegotiating = true;
         while (negotiationQueue.length > 0) {
           negotiationQueue.shift();
@@ -1092,7 +1099,7 @@ function Message() {
             console.log('Cannot negotiate: signalingState is', peerConnectionRef.current.signalingState);
             continue;
           }
-
+      
           try {
             const offer = await peerConnectionRef.current.createOffer({
               offerToReceiveAudio: 1,
@@ -1100,10 +1107,10 @@ function Message() {
             });
             await peerConnectionRef.current.setLocalDescription(offer);
             const signal = JSON.stringify({
-              type: callType === 'video' ? 'call_offer' : 'call_answer',
+              type: 'call_offer', // Always send as call_offer for renegotiation
               call_id: callId,
               room_id: conversationId || roomId,
-              target_user_id: otherUser.id || caller.id,
+              target_user_id: otherUser?.id || caller.id,
               sdp: offer,
               call_type: callType,
               caller: { id: user.id, username: user.username, profile_picture: user.profile_picture || null },
@@ -1219,41 +1226,67 @@ function Message() {
   };
 
   const cleanupCall = () => {
+    // Clear video elements
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
       remoteVideoRef.current.pause();
+      remoteVideoRef.current.onerror = null;
+      remoteVideoRef.current.oncanplay = null;
+      console.log('Cleared remote video ref');
     }
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
       localVideoRef.current.pause();
+      localVideoRef.current.onerror = null;
+      localVideoRef.current.oncanplay = null;
+      console.log('Cleared local video ref');
     }
+  
+    // Stop local stream tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         track.stop();
-        console.log(`Stopped local ${track.kind} track:`, track.id);
+        track.onended = null;
+        track.onmute = null;
+        track.onunmute = null;
+        console.log(`Stopped local ${track.kind} track: ${track.id}`);
       });
       localStreamRef.current = null;
     }
+  
+    // Clean up remote stream
     if (remoteStreamRef.current) {
       remoteStreamRef.current.getTracks().forEach((track) => {
         track.onended = null;
         track.onmute = null;
         track.onunmute = null;
-        console.log(`Cleaned up remote ${track.kind} track:`, track.id);
+        console.log(`Cleaned up remote ${track.kind} track: ${track.id}`);
       });
       remoteStreamRef.current = null;
     }
+  
+    // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.onconnectionstatechange = null;
+      peerConnectionRef.current.oniceconnectionstatechange = null;
+      peerConnectionRef.current.onnegotiationneeded = null;
       peerConnectionRef.current = null;
-      console.log('Closed peer connection');
+      console.log('Closed and cleared peer connection');
     }
+  
+    // Clear call timer
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
+  
+    // Reset state
     isPlayingRemote.current = false;
     processedStreamIds.current.clear();
+    console.log('Reset call state');
   };
 
   const updateCallHistory = (callId, status, duration) => {
